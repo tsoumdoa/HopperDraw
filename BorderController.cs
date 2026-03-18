@@ -34,7 +34,7 @@ namespace hopperborder
 
         private float _lineThickness = 8f;
         private Color _borderColor = Color.Black;
-        private const double RectangleThreshold = 10.0;
+
 
         public BorderController()
             : base("Border Controller", "Border", "Draw and manage canvas borders", "Draw", "Primitive")
@@ -269,18 +269,11 @@ namespace hopperborder
 
                 if (dx > 5 || dy > 5)
                 {
-                    Point3d start = _drawStart;
-                    Point3d end = _drawEnd;
+                    Point3d constrainedEnd = dx >= dy
+                        ? new Point3d(_drawEnd.X, _drawStart.Y, 0)
+                        : new Point3d(_drawStart.X, _drawEnd.Y, 0);
 
-                    bool isRect = (dx > RectangleThreshold && dy > 1) || (dy > RectangleThreshold && dx > 1);
-
-                    if (_shiftPressed && isRect)
-                    {
-                        double size = Math.Max(dx, dy);
-                        end = new Point3d(start.X + Math.Sign(end.X - start.X) * size, start.Y + Math.Sign(end.Y - start.Y) * size, 0);
-                    }
-
-                    _annotation.Borders.Add(new BorderLine(start, end));
+                    _annotation.Borders.Add(new BorderLine(_drawStart, constrainedEnd));
                     _annotation.ExpireDisplay();
                 }
             }
@@ -402,6 +395,5 @@ namespace hopperborder
         public Point3d DrawEnd => _drawEnd;
         public bool IsDrawing => _isDrawing;
         public bool ShiftPressed => _shiftPressed;
-        public double RectThreshold => RectangleThreshold;
     }
 }

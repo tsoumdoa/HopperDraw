@@ -37,38 +37,13 @@ namespace hopperborder
                     {
                         double dx = Math.Abs(owner.DrawEnd.X - owner.DrawStart.X);
                         double dy = Math.Abs(owner.DrawEnd.Y - owner.DrawStart.Y);
+                        Point3d constrainedEnd = dx >= dy
+                            ? new Point3d(owner.DrawEnd.X, owner.DrawStart.Y, 0)
+                            : new Point3d(owner.DrawStart.X, owner.DrawEnd.Y, 0);
 
-                        bool isRect = (dx > owner.RectThreshold && dy > 1) || (dy > owner.RectThreshold && dx > 1);
-                        Point3d end = owner.DrawEnd;
-
-                        if (owner.ShiftPressed && isRect)
-                        {
-                            double size = Math.Max(dx, dy);
-                            end = new Point3d(
-                                owner.DrawStart.X + Math.Sign(owner.DrawEnd.X - owner.DrawStart.X) * size,
-                                owner.DrawStart.Y + Math.Sign(owner.DrawEnd.Y - owner.DrawStart.Y) * size,
-                                0);
-                            dx = Math.Abs(end.X - owner.DrawStart.X);
-                            dy = Math.Abs(end.Y - owner.DrawStart.Y);
-                        }
-
-                        if (isRect && !owner.ShiftPressed)
-                        {
-                            graphics.DrawRectangle(pen,
-                                (float)Math.Min(owner.DrawStart.X, end.X),
-                                (float)Math.Min(owner.DrawStart.Y, end.Y),
-                                (float)dx, (float)dy);
-                        }
-                        else if (owner.ShiftPressed || (!isRect))
-                        {
-                            Point3d constrainedEnd = dx >= dy
-                                ? new Point3d(end.X, owner.DrawStart.Y, 0)
-                                : new Point3d(owner.DrawStart.X, end.Y, 0);
-
-                            graphics.DrawLine(pen,
-                                (float)owner.DrawStart.X, (float)owner.DrawStart.Y,
-                                (float)constrainedEnd.X, (float)constrainedEnd.Y);
-                        }
+                        graphics.DrawLine(pen,
+                            (float)owner.DrawStart.X, (float)owner.DrawStart.Y,
+                            (float)constrainedEnd.X, (float)constrainedEnd.Y);
                     }
                 }
             }

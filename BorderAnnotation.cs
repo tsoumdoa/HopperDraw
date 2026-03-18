@@ -30,27 +30,6 @@ namespace hopperborder
             End = end;
         }
 
-        public Point3d ConstrainedEnd
-        {
-            get
-            {
-                double dx = Math.Abs(End.X - Start.X);
-                double dy = Math.Abs(End.Y - Start.Y);
-                return dx >= dy
-                    ? new Point3d(End.X, Start.Y, 0)
-                    : new Point3d(Start.X, End.Y, 0);
-            }
-        }
-
-        public bool IsRectangular
-        {
-            get
-            {
-                var constrained = ConstrainedEnd;
-                return Math.Abs(constrained.X - Start.X) > 1 && 
-                       Math.Abs(constrained.Y - Start.Y) > 1;
-            }
-        }
     }
 
     internal class BorderAnnotation : GH_Component
@@ -93,11 +72,10 @@ namespace hopperborder
 
             foreach (var border in Borders)
             {
-                var constrained = border.ConstrainedEnd;
-                minX = Math.Min(minX, Math.Min(border.Start.X, constrained.X));
-                minY = Math.Min(minY, Math.Min(border.Start.Y, constrained.Y));
-                maxX = Math.Max(maxX, Math.Max(border.Start.X, constrained.X));
-                maxY = Math.Max(maxY, Math.Max(border.Start.Y, constrained.Y));
+                minX = Math.Min(minX, Math.Min(border.Start.X, border.End.X));
+                minY = Math.Min(minY, Math.Min(border.Start.Y, border.End.Y));
+                maxX = Math.Max(maxX, Math.Max(border.Start.X, border.End.X));
+                maxY = Math.Max(maxY, Math.Max(border.Start.Y, border.End.Y));
             }
 
             return new RectangleF(
@@ -147,22 +125,7 @@ namespace hopperborder
 
         private bool HitTestLine(PointF point, BorderLine border)
         {
-            var constrained = border.ConstrainedEnd;
-
-            if (border.IsRectangular)
-            {
-                var rect = GetBoundingRect(border);
-                float tol = LineThickness / 2 + 3;
-                return rect.Contains(point) ||
-                       DistanceToSegment(point, new PointF((float)border.Start.X, (float)border.Start.Y), new PointF((float)border.Start.X, (float)constrained.Y)) <= tol ||
-                       DistanceToSegment(point, new PointF((float)border.Start.X, (float)constrained.Y), new PointF((float)constrained.X, (float)constrained.Y)) <= tol ||
-                       DistanceToSegment(point, new PointF((float)constrained.X, (float)constrained.Y), new PointF((float)constrained.X, (float)border.Start.Y)) <= tol ||
-                       DistanceToSegment(point, new PointF((float)constrained.X, (float)border.Start.Y), new PointF((float)border.Start.X, (float)border.Start.Y)) <= tol;
-            }
-            else
-            {
-                return DistanceToSegment(point, new PointF((float)border.Start.X, (float)border.Start.Y), new PointF((float)constrained.X, (float)constrained.Y)) <= LineThickness / 2 + 3;
-            }
+            return DistanceToSegment(point, new PointF((float)border.Start.X, (float)border.Start.Y), new PointF((float)border.End.X, (float)border.End.Y)) <= LineThickness / 2 + 3;
         }
 
         private float Distance(PointF a, PointF b)
@@ -188,29 +151,19 @@ namespace hopperborder
 
         private List<PointF> GetHandlePoints(BorderLine border)
         {
-            var constrained = border.ConstrainedEnd;
-            var handles = new List<PointF>
+            return new List<PointF>
             {
                 new PointF((float)border.Start.X, (float)border.Start.Y),
-                new PointF((float)constrained.X, (float)constrained.Y)
+                new PointF((float)border.End.X, (float)border.End.Y)
             };
-
-            if (border.IsRectangular)
-            {
-                handles.Add(new PointF((float)border.Start.X, (float)constrained.Y));
-                handles.Add(new PointF((float)constrained.X, (float)border.Start.Y));
-            }
-
-            return handles;
         }
 
         private RectangleF GetBoundingRect(BorderLine border)
         {
-            var constrained = border.ConstrainedEnd;
-            float x = (float)Math.Min(border.Start.X, constrained.X);
-            float y = (float)Math.Min(border.Start.Y, constrained.Y);
-            float w = (float)Math.Abs(constrained.X - border.Start.X);
-            float h = (float)Math.Abs(constrained.Y - border.Start.Y);
+            float x = (float)Math.Min(border.Start.X, border.End.X);
+            float y = (float)Math.Min(border.Start.Y, border.End.Y);
+            float w = (float)Math.Abs(border.End.X - border.Start.X);
+            float h = (float)Math.Abs(border.End.Y - border.Start.Y);
             return new RectangleF(x, y, w, h);
         }
 
@@ -325,31 +278,13 @@ namespace hopperborder
             if (!border.Start.IsValid || !border.End.IsValid)
                 return;
 
-            var constrained = border.ConstrainedEnd;
-
-            if (border.IsRectangular)
-            {
-                PointF pt1 = new PointF((float)border.Start.X, (float)border.Start.Y);
-                PointF pt2 = new PointF((float)constrained.X, (float)constrained.Y);
-                PointF pt3 = new PointF((float)constrained.X, (float)constrained.Y);
-                PointF pt4 = new PointF((float)border.Start.X, (float)constrained.Y);
-
-                g.DrawLine(pen, pt1.X, pt1.Y, pt4.X, pt4.Y);
-                g.DrawLine(pen, pt4.X, pt4.Y, pt2.X, pt2.Y);
-                g.DrawLine(pen, pt2.X, pt2.Y, pt3.X, pt3.Y);
-                g.DrawLine(pen, pt3.X, pt3.Y, pt1.X, pt1.Y);
-            }
-            else
-            {
-                g.DrawLine(pen,
-                    (float)border.Start.X, (float)border.Start.Y,
-                    (float)constrained.X, (float)constrained.Y);
-            }
+            g.DrawLine(pen,
+                (float)border.Start.X, (float)border.Start.Y,
+                (float)border.End.X, (float)border.End.Y);
         }
 
         private void RenderSelectionHandles(Graphics g, BorderLine border)
         {
-            var constrained = border.ConstrainedEnd;
             var handles = GetHandlePoints(border);
 
             using (var handleBrush = new SolidBrush(Color.White))
@@ -365,15 +300,7 @@ namespace hopperborder
             using (var selPen = new Pen(Color.FromArgb(200, 0, 120, 215), 1))
             {
                 selPen.DashStyle = System.Drawing.Drawing2D.DashStyle.Dash;
-                if (border.IsRectangular)
-                {
-                    var rect = GetBoundingRect(border);
-                    g.DrawRectangle(selPen, rect.X - 4, rect.Y - 4, rect.Width + 8, rect.Height + 8);
-                }
-                else
-                {
-                    g.DrawLine(selPen, (float)border.Start.X, (float)border.Start.Y, (float)constrained.X, (float)constrained.Y);
-                }
+                g.DrawLine(selPen, (float)border.Start.X, (float)border.Start.Y, (float)border.End.X, (float)border.End.Y);
             }
         }
 
@@ -392,29 +319,19 @@ namespace hopperborder
 
         private List<PointF> GetHandlePoints(BorderLine border)
         {
-            var constrained = border.ConstrainedEnd;
-            var handles = new List<PointF>
+            return new List<PointF>
             {
                 new PointF((float)border.Start.X, (float)border.Start.Y),
-                new PointF((float)constrained.X, (float)constrained.Y)
+                new PointF((float)border.End.X, (float)border.End.Y)
             };
-
-            if (border.IsRectangular)
-            {
-                handles.Add(new PointF((float)border.Start.X, (float)constrained.Y));
-                handles.Add(new PointF((float)constrained.X, (float)border.Start.Y));
-            }
-
-            return handles;
         }
 
         private RectangleF GetBoundingRect(BorderLine border)
         {
-            var constrained = border.ConstrainedEnd;
-            float x = (float)Math.Min(border.Start.X, constrained.X);
-            float y = (float)Math.Min(border.Start.Y, constrained.Y);
-            float w = (float)Math.Abs(constrained.X - border.Start.X);
-            float h = (float)Math.Abs(constrained.Y - border.Start.Y);
+            float x = (float)Math.Min(border.Start.X, border.End.X);
+            float y = (float)Math.Min(border.Start.Y, border.End.Y);
+            float w = (float)Math.Abs(border.End.X - border.Start.X);
+            float h = (float)Math.Abs(border.End.Y - border.Start.Y);
             return new RectangleF(x, y, w, h);
         }
     }
