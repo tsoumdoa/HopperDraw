@@ -254,18 +254,22 @@ namespace hopperborder
 
             if (_isDrawing)
             {
-                double dx = Math.Abs(_drawEnd.X - _drawStart.X);
-                double dy = Math.Abs(_drawEnd.Y - _drawStart.Y);
+                double dx = _drawEnd.X - _drawStart.X;
+                double dy = _drawEnd.Y - _drawStart.Y;
+                double length = Math.Sqrt(dx * dx + dy * dy);
 
-                if (dx > 5 || dy > 5)
+                if (length > 5)
                 {
                     Point3d end = _drawEnd;
                     
                     if (_shiftPressed)
                     {
-                        end = dx >= dy
-                            ? new Point3d(_drawEnd.X, _drawStart.Y, 0)
-                            : new Point3d(_drawStart.X, _drawEnd.Y, 0);
+                        double angle = Math.Atan2(dy, dx);
+                        double snapAngle = Math.Round(angle / (Math.PI / 4.0)) * (Math.PI / 4.0);
+                        end = new Point3d(
+                            _drawStart.X + length * Math.Cos(snapAngle),
+                            _drawStart.Y + length * Math.Sin(snapAngle),
+                            0);
                     }
 
                     _annotation.Borders.Add(new BorderLine(_drawStart, end));

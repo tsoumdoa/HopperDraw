@@ -39,11 +39,18 @@ namespace hopperborder
                         
                         if (owner.ShiftPressed)
                         {
-                            double dx = Math.Abs(owner.DrawEnd.X - owner.DrawStart.X);
-                            double dy = Math.Abs(owner.DrawEnd.Y - owner.DrawStart.Y);
-                            end = dx >= dy
-                                ? new Point3d(owner.DrawEnd.X, owner.DrawStart.Y, 0)
-                                : new Point3d(owner.DrawStart.X, owner.DrawEnd.Y, 0);
+                            double dx = owner.DrawEnd.X - owner.DrawStart.X;
+                            double dy = owner.DrawEnd.Y - owner.DrawStart.Y;
+                            double length = Math.Sqrt(dx * dx + dy * dy);
+                            if (length > 0)
+                            {
+                                double angle = Math.Atan2(dy, dx);
+                                double snapAngle = Math.Round(angle / (Math.PI / 4.0)) * (Math.PI / 4.0);
+                                end = new Point3d(
+                                    owner.DrawStart.X + length * Math.Cos(snapAngle),
+                                    owner.DrawStart.Y + length * Math.Sin(snapAngle),
+                                    0);
+                            }
                         }
 
                         graphics.DrawLine(pen,
