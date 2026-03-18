@@ -17,6 +17,7 @@ namespace hopperborder
     {
         private bool _isActivated;
         private bool _shiftPressed;
+        private bool _ctrlPressed;
 
         private Point3d _drawStart;
         private Point3d _drawEnd;
@@ -182,9 +183,12 @@ namespace hopperborder
             else
             {
                 _annotation.ClearSelection();
-                _drawStart = pt;
-                _drawEnd = pt;
-                _isDrawing = true;
+                if (_ctrlPressed)
+                {
+                    _drawStart = pt;
+                    _drawEnd = pt;
+                    _isDrawing = true;
+                }
             }
 
             _annotation.ExpireDisplay();
@@ -255,11 +259,16 @@ namespace hopperborder
 
                 if (dx > 5 || dy > 5)
                 {
-                    Point3d constrainedEnd = dx >= dy
-                        ? new Point3d(_drawEnd.X, _drawStart.Y, 0)
-                        : new Point3d(_drawStart.X, _drawEnd.Y, 0);
+                    Point3d end = _drawEnd;
+                    
+                    if (_shiftPressed)
+                    {
+                        end = dx >= dy
+                            ? new Point3d(_drawEnd.X, _drawStart.Y, 0)
+                            : new Point3d(_drawStart.X, _drawEnd.Y, 0);
+                    }
 
-                    _annotation.Borders.Add(new BorderLine(_drawStart, constrainedEnd));
+                    _annotation.Borders.Add(new BorderLine(_drawStart, end));
                     _annotation.ExpireDisplay();
                 }
             }
@@ -285,6 +294,12 @@ namespace hopperborder
                 _canvas?.Invalidate();
             }
 
+            if (e.KeyCode == Keys.ControlKey || e.KeyCode == Keys.LControlKey || e.KeyCode == Keys.RControlKey)
+            {
+                _ctrlPressed = true;
+                _canvas?.Invalidate();
+            }
+
             if (!_isActivated || _annotation == null)
                 return;
 
@@ -303,6 +318,12 @@ namespace hopperborder
             if (e.KeyCode == Keys.ShiftKey || e.KeyCode == Keys.LShiftKey || e.KeyCode == Keys.RShiftKey)
             {
                 _shiftPressed = false;
+                _canvas?.Invalidate();
+            }
+
+            if (e.KeyCode == Keys.ControlKey || e.KeyCode == Keys.LControlKey || e.KeyCode == Keys.RControlKey)
+            {
+                _ctrlPressed = false;
                 _canvas?.Invalidate();
             }
         }
@@ -388,5 +409,6 @@ namespace hopperborder
         public Point3d DrawEnd => _drawEnd;
         public bool IsDrawing => _isDrawing;
         public bool ShiftPressed => _shiftPressed;
+        public bool CtrlPressed => _ctrlPressed;
     }
 }

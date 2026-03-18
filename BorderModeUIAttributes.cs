@@ -35,15 +35,20 @@ namespace hopperborder
                 {
                     using (var pen = new Pen(annotation.BorderColor, annotation.LineThickness))
                     {
-                        double dx = Math.Abs(owner.DrawEnd.X - owner.DrawStart.X);
-                        double dy = Math.Abs(owner.DrawEnd.Y - owner.DrawStart.Y);
-                        Point3d constrainedEnd = dx >= dy
-                            ? new Point3d(owner.DrawEnd.X, owner.DrawStart.Y, 0)
-                            : new Point3d(owner.DrawStart.X, owner.DrawEnd.Y, 0);
+                        Point3d end = owner.DrawEnd;
+                        
+                        if (owner.ShiftPressed)
+                        {
+                            double dx = Math.Abs(owner.DrawEnd.X - owner.DrawStart.X);
+                            double dy = Math.Abs(owner.DrawEnd.Y - owner.DrawStart.Y);
+                            end = dx >= dy
+                                ? new Point3d(owner.DrawEnd.X, owner.DrawStart.Y, 0)
+                                : new Point3d(owner.DrawStart.X, owner.DrawEnd.Y, 0);
+                        }
 
                         graphics.DrawLine(pen,
                             (float)owner.DrawStart.X, (float)owner.DrawStart.Y,
-                            (float)constrainedEnd.X, (float)constrainedEnd.Y);
+                            (float)end.X, (float)end.Y);
                     }
                 }
             }
