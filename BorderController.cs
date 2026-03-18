@@ -30,7 +30,6 @@ namespace hopperborder
         private bool _eventsRegistered;
 
         private BorderAnnotation _annotation;
-        private bool _annotationCreated;
 
         private float _lineThickness = 8f;
         private Color _borderColor = Color.Black;
@@ -96,27 +95,14 @@ namespace hopperborder
             var doc = OnPingDocument();
             if (doc == null) return;
 
-            if (_annotation != null && _annotationCreated)
+            if (_annotation != null)
                 return;
-
-            var borderGuid = new Guid("B1C2D3E4-F5A6-7890-1234-567890ABCDEF");
-
-            foreach (var obj in doc.Objects)
-            {
-                if (obj is BorderAnnotation existing)
-                {
-                    _annotation = existing;
-                    _annotationCreated = true;
-                    return;
-                }
-            }
 
             _annotation = new BorderAnnotation();
             _annotation.BorderColor = _borderColor;
             _annotation.LineThickness = _lineThickness;
 
             doc.AddObject(_annotation, false, -1);
-            _annotationCreated = true;
 
             _annotation.Attributes.Pivot = new PointF(-10000, -10000);
         }
@@ -381,6 +367,13 @@ namespace hopperborder
         public override void RemovedFromDocument(GH_Document document)
         {
             UnregisterCanvasEvents();
+            
+            if (_annotation != null && document != null && _annotation is IGH_DocumentObject docObj)
+            {
+                document.RemoveObject(docObj, false);
+                _annotation = null;
+            }
+            
             base.RemovedFromDocument(document);
         }
 
