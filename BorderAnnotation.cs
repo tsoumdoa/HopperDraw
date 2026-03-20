@@ -9,6 +9,7 @@ using Rhino.Geometry;
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.Linq;
 using GH_IO.Serialization;
 
 namespace hopperborder
@@ -32,9 +33,67 @@ namespace hopperborder
 
     }
 
+    internal class FrameData
+    {
+        public int Id { get; set; }
+        public Point3d TopLeft { get; set; }
+        public Point3d TopRight { get; set; }
+        public Point3d BottomRight { get; set; }
+        public Point3d BottomLeft { get; set; }
+
+        public FrameData() { }
+
+        public FrameData(int id, Point3d topLeft, Point3d topRight, Point3d bottomRight, Point3d bottomLeft)
+        {
+            Id = id;
+            TopLeft = topLeft;
+            TopRight = topRight;
+            BottomRight = bottomRight;
+            BottomLeft = bottomLeft;
+        }
+
+        public Point3d GetCorner(int index)
+        {
+            switch (index)
+            {
+                case 0: return TopLeft;
+                case 1: return TopRight;
+                case 2: return BottomRight;
+                case 3: return BottomLeft;
+                default: return Point3d.Unset;
+            }
+        }
+
+        public void SetCorner(int index, Point3d value)
+        {
+            switch (index)
+            {
+                case 0: TopLeft = value; break;
+                case 1: TopRight = value; break;
+                case 2: BottomRight = value; break;
+                case 3: BottomLeft = value; break;
+            }
+        }
+
+        public Point3d GetOppositeCorner(int index)
+        {
+            switch (index)
+            {
+                case 0: return BottomRight;
+                case 1: return BottomLeft;
+                case 2: return TopLeft;
+                case 3: return TopRight;
+                default: return Point3d.Unset;
+            }
+        }
+    }
+
     internal class BorderAnnotation : GH_Component
     {
+        private static int _frameIdCounter = 1;
+
         public List<BorderLine> Borders { get; set; } = new List<BorderLine>();
+        public List<FrameData> Frames { get; set; } = new List<FrameData>();
         public Color BorderColor { get; set; } = Color.Black;
         public float LineThickness { get; set; } = 8f;
         public bool Visible { get; set; } = true;
@@ -43,6 +102,10 @@ namespace hopperborder
         public int SelectedBorderIndex { get; set; } = -1;
         public int HoveredBorderIndex { get; set; } = -1;
         public int HoveredHandleIndex { get; set; } = -1;
+        public int SelectedFrameIndex { get; set; } = -1;
+        public int SelectedFrameCorner { get; set; } = -1;
+
+        public static int GetNextFrameId() => _frameIdCounter++;
 
         private const float HandleSize = 8f;
         private const float HitTolerance = 15f;
@@ -118,9 +181,46 @@ namespace hopperborder
             return -1;
         }
 
+        public (int frameIndex, int cornerIndex) HitTestFrame(PointF point)
+        {
+            for (int i = 0; i < Frames.Count; i++)
+            {
+                var frame = Frames[i];
+
+                var corners = new PointF[]
+                {
+                    new PointF((float)frame.TopLeft.X, (float)frame.TopLeft.Y),
+                    new PointF((float)frame.TopRight.X, (float)frame.TopRight.Y),
+                    new PointF((float)frame.BottomRight.X, (float)frame.BottomRight.Y),
+                    new PointF((float)frame.BottomLeft.X, (float)frame.BottomLeft.Y)
+                };
+
+                for (int j = 0; j < 4; j++)
+                {
+                    if (Distance(point, corners[j]) <= HitTolerance)
+                        return (i, j);
+                }
+
+                if (HitTestLine(point, corners[0], corners[1]) ||
+                    HitTestLine(point, corners[1], corners[2]) ||
+                    HitTestLine(point, corners[2], corners[3]) ||
+                    HitTestLine(point, corners[3], corners[0]))
+                {
+                    return (i, -1);
+                }
+            }
+
+            return (-1, -1);
+        }
+
         private bool HitTestLine(PointF point, BorderLine border)
         {
             return DistanceToSegment(point, new PointF((float)border.Start.X, (float)border.Start.Y), new PointF((float)border.End.X, (float)border.End.Y)) <= LineThickness / 2 + 3;
+        }
+
+        private bool HitTestLine(PointF point, PointF a, PointF b)
+        {
+            return DistanceToSegment(point, a, b) <= LineThickness / 2 + 3;
         }
 
         private float Distance(PointF a, PointF b)
@@ -167,6 +267,8 @@ namespace hopperborder
             SelectedBorderIndex = -1;
             HoveredBorderIndex = -1;
             HoveredHandleIndex = -1;
+            SelectedFrameIndex = -1;
+            SelectedFrameCorner = -1;
         }
 
         public void SelectBorder(int index)
@@ -181,6 +283,20 @@ namespace hopperborder
             {
                 doc.ScheduleSolution(5, d => this.ExpirePreview(false));
             }
+        }
+
+        public Point3d GetFrameCorner(int frameIndex, int cornerIndex)
+        {
+            if (frameIndex < 0 || frameIndex >= Frames.Count)
+                return Point3d.Unset;
+            return Frames[frameIndex].GetCorner(cornerIndex);
+        }
+
+        public Point3d GetFrameOppositeCorner(int frameIndex, int cornerIndex)
+        {
+            if (frameIndex < 0 || frameIndex >= Frames.Count)
+                return Point3d.Unset;
+            return Frames[frameIndex].GetOppositeCorner(cornerIndex);
         }
 
         protected override void RegisterInputParams(GH_Component.GH_InputParamManager pManager)
@@ -255,13 +371,31 @@ namespace hopperborder
 
             using (var pen = new Pen(annotation.BorderColor, annotation.LineThickness))
             {
+                foreach (var frame in annotation.Frames)
+                {
+                    var points = new PointF[]
+                    {
+                        new PointF((float)frame.TopLeft.X, (float)frame.TopLeft.Y),
+                        new PointF((float)frame.TopRight.X, (float)frame.TopRight.Y),
+                        new PointF((float)frame.BottomRight.X, (float)frame.BottomRight.Y),
+                        new PointF((float)frame.BottomLeft.X, (float)frame.BottomLeft.Y),
+                        new PointF((float)frame.TopLeft.X, (float)frame.TopLeft.Y)
+                    };
+                    graphics.DrawPolygon(pen, points);
+                }
+
                 foreach (var border in annotation.Borders)
                 {
                     RenderBorder(graphics, pen, border);
                 }
             }
 
-            if (annotation.SelectedBorderIndex >= 0 && annotation.SelectedBorderIndex < annotation.Borders.Count)
+            if (annotation.SelectedFrameIndex >= 0 && annotation.SelectedFrameIndex < annotation.Frames.Count)
+            {
+                var frame = annotation.Frames[annotation.SelectedFrameIndex];
+                RenderFrameSelectionHandles(graphics, frame);
+            }
+            else if (annotation.SelectedBorderIndex >= 0 && annotation.SelectedBorderIndex < annotation.Borders.Count)
             {
                 RenderSelectionHandles(graphics, annotation.Borders[annotation.SelectedBorderIndex]);
             }
@@ -313,6 +447,34 @@ namespace hopperborder
                 {
                     g.FillRectangle(hoverBrush, pt.X - 4, pt.Y - 4, 8, 8);
                 }
+            }
+        }
+
+        private void RenderFrameSelectionHandles(Graphics g, FrameData frame)
+        {
+            var handles = new PointF[]
+            {
+                new PointF((float)frame.TopLeft.X, (float)frame.TopLeft.Y),
+                new PointF((float)frame.TopRight.X, (float)frame.TopRight.Y),
+                new PointF((float)frame.BottomRight.X, (float)frame.BottomRight.Y),
+                new PointF((float)frame.BottomLeft.X, (float)frame.BottomLeft.Y)
+            };
+
+            using (var handleBrush = new SolidBrush(Color.White))
+            using (var handlePen = new Pen(Color.FromArgb(200, 0, 120, 215), 2))
+            {
+                foreach (var pt in handles)
+                {
+                    g.FillRectangle(handleBrush, pt.X - 4, pt.Y - 4, 8, 8);
+                    g.DrawRectangle(handlePen, (int)pt.X - 4, (int)pt.Y - 4, 8, 8);
+                }
+            }
+
+            using (var selPen = new Pen(Color.FromArgb(200, 0, 120, 215), 1))
+            {
+                selPen.DashStyle = System.Drawing.Drawing2D.DashStyle.Dash;
+                var points = new PointF[] { handles[0], handles[1], handles[2], handles[3], handles[0] };
+                g.DrawLines(selPen, points);
             }
         }
 

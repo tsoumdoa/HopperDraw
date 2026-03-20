@@ -53,9 +53,30 @@ namespace hopperborder
                             }
                         }
 
-                        graphics.DrawLine(pen,
-                            (float)owner.DrawStart.X, (float)owner.DrawStart.Y,
-                            (float)end.X, (float)end.Y);
+                        if (owner.DrawFrame)
+                        {
+                            Point3d topRight = new Point3d(end.X, owner.DrawStart.Y, 0);
+                            Point3d bottomLeft = new Point3d(owner.DrawStart.X, end.Y, 0);
+
+                            graphics.DrawLine(pen,
+                                (float)owner.DrawStart.X, (float)owner.DrawStart.Y,
+                                (float)topRight.X, (float)topRight.Y);
+                            graphics.DrawLine(pen,
+                                (float)topRight.X, (float)topRight.Y,
+                                (float)end.X, (float)end.Y);
+                            graphics.DrawLine(pen,
+                                (float)end.X, (float)end.Y,
+                                (float)bottomLeft.X, (float)bottomLeft.Y);
+                            graphics.DrawLine(pen,
+                                (float)bottomLeft.X, (float)bottomLeft.Y,
+                                (float)owner.DrawStart.X, (float)owner.DrawStart.Y);
+                        }
+                        else
+                        {
+                            graphics.DrawLine(pen,
+                                (float)owner.DrawStart.X, (float)owner.DrawStart.Y,
+                                (float)end.X, (float)end.Y);
+                        }
                     }
                 }
             }

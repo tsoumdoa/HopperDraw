@@ -26,6 +26,9 @@ namespace hopperborder
         private int _dragBorderIndex = -1;
         private int _dragHandleIndex = -1;
         private Point3d _dragOffset;
+        private int _dragFrameIndex = -1;
+        private int _dragCornerIndex = -1;
+        private Point3d _dragFrameOffset;
 
         private GH_Canvas _canvas;
         private bool _eventsRegistered;
@@ -34,6 +37,7 @@ namespace hopperborder
 
         private float _lineThickness = 8f;
         private Color _borderColor = Color.Black;
+        private bool _drawFrame = false;
 
 
         public BorderController()
@@ -48,6 +52,7 @@ namespace hopperborder
         {
             pManager.AddBooleanParameter("Active", "A", "Enable border drawing", GH_ParamAccess.item, true);
             pManager.AddBooleanParameter("Show", "S", "Display borders on canvas", GH_ParamAccess.item, true);
+            pManager.AddBooleanParameter("DrawFrame", "F", "Draw rectangle frame instead of line", GH_ParamAccess.item, false);
             pManager.AddColourParameter("Color", "C", "Border color", GH_ParamAccess.item, Color.Black);
             pManager.AddNumberParameter("Thickness", "T", "Line thickness", GH_ParamAccess.item, 8.0);
         }
@@ -64,14 +69,18 @@ namespace hopperborder
             bool show = true;
             DA.GetData(1, ref show);
 
+            bool drawFrame = false;
+            DA.GetData(2, ref drawFrame);
+
             Color color = Color.Black;
-            DA.GetData(2, ref color);
+            DA.GetData(3, ref color);
 
             double thickness = 8.0;
-            DA.GetData(3, ref thickness);
+            DA.GetData(4, ref thickness);
 
             _borderColor = color;
             _lineThickness = (float)thickness;
+            _drawFrame = drawFrame;
 
             bool wasActivated = _isActivated;
             _isActivated = active;
@@ -165,35 +174,42 @@ namespace hopperborder
 
             var pt = ScreenToCanvas(e.Location);
 
-            var (borderIdx, handleIdx) = _annotation.HitTest(new PointF((float)pt.X, (float)pt.Y));
+            var (frameIdx, cornerIdx) = _annotation.HitTestFrame(new PointF((float)pt.X, (float)pt.Y));
 
-            if (borderIdx >= 0)
+            if (frameIdx >= 0)
             {
-                _annotation.SelectedBorderIndex = borderIdx;
-                _dragBorderIndex = borderIdx;
-                _dragHandleIndex = handleIdx;
-
-                if (handleIdx >= 0)
-                {
-                    var border = _annotation.Borders[borderIdx];
-                    _dragOffset = pt;
-                }
-                else
-                {
-                    var border = _annotation.Borders[borderIdx];
-                    _dragOffset = pt;
-                }
-
+                _annotation.SelectedFrameIndex = frameIdx;
+                _annotation.SelectedFrameCorner = cornerIdx;
+                _annotation.SelectedBorderIndex = -1;
+                _dragFrameIndex = frameIdx;
+                _dragCornerIndex = cornerIdx;
+                _dragFrameOffset = pt;
                 _isDragging = true;
             }
             else
             {
-                _annotation.ClearSelection();
-                if (_ctrlPressed)
+                var (borderIdx, handleIdx) = _annotation.HitTest(new PointF((float)pt.X, (float)pt.Y));
+
+                if (borderIdx >= 0)
                 {
-                    _drawStart = pt;
-                    _drawEnd = pt;
-                    _isDrawing = true;
+                    _annotation.SelectedBorderIndex = borderIdx;
+                    _annotation.SelectedFrameIndex = -1;
+                    _dragBorderIndex = borderIdx;
+                    _dragHandleIndex = handleIdx;
+                    _dragOffset = pt;
+                    _dragFrameIndex = -1;
+                    _dragCornerIndex = -1;
+                    _isDragging = true;
+                }
+                else
+                {
+                    _annotation.ClearSelection();
+                    if (_ctrlPressed)
+                    {
+                        _drawStart = pt;
+                        _drawEnd = pt;
+                        _isDrawing = true;
+                    }
                 }
             }
 
@@ -215,7 +231,92 @@ namespace hopperborder
             }
             else if (_isDragging)
             {
-                if (_dragBorderIndex >= 0 && _dragBorderIndex < _annotation.Borders.Count)
+                if (_dragFrameIndex >= 0 && _dragFrameIndex < _annotation.Frames.Count)
+                {
+                    var frame = _annotation.Frames[_dragFrameIndex];
+
+                    if (_dragCornerIndex >= 0)
+                    {
+                        Point3d newPos = pt;
+                        var fixedCorner = _annotation.GetFrameOppositeCorner(_dragFrameIndex, _dragCornerIndex);
+
+                        double origWidth = Math.Abs(fixedCorner.X - newPos.X);
+                        double origHeight = Math.Abs(fixedCorner.Y - newPos.Y);
+
+                        if (_shiftPressed)
+                        {
+                            double dx = pt.X - fixedCorner.X;
+                            double dy = pt.Y - fixedCorner.Y;
+                            double length = Math.Sqrt(dx * dx + dy * dy);
+                            double fixedDiag = Math.Sqrt(origWidth * origWidth + origHeight * origHeight);
+                            if (length > 0)
+                            {
+                                double scale = fixedDiag / length;
+                                newPos = new Point3d(fixedCorner.X + dx * scale, fixedCorner.Y + dy * scale, 0);
+                            }
+                        }
+
+                        double w = newPos.X - fixedCorner.X;
+                        double h = newPos.Y - fixedCorner.Y;
+
+                        switch (_dragCornerIndex)
+                        {
+                            case 0:
+                                frame.TopLeft = newPos;
+                                frame.TopRight = new Point3d(fixedCorner.X + w, newPos.Y, 0);
+                                frame.BottomLeft = new Point3d(newPos.X, fixedCorner.Y + h, 0);
+                                frame.BottomRight = fixedCorner;
+                                break;
+                            case 1:
+                                frame.TopRight = newPos;
+                                frame.TopLeft = new Point3d(newPos.X - w, fixedCorner.Y + h, 0);
+                                frame.BottomRight = new Point3d(newPos.X, fixedCorner.Y, 0);
+                                frame.BottomLeft = fixedCorner;
+                                break;
+                            case 2:
+                                frame.BottomRight = newPos;
+                                frame.BottomLeft = new Point3d(fixedCorner.X, newPos.Y, 0);
+                                frame.TopRight = new Point3d(newPos.X, fixedCorner.Y + h, 0);
+                                frame.TopLeft = fixedCorner;
+                                break;
+                            case 3:
+                                frame.BottomLeft = newPos;
+                                frame.BottomRight = new Point3d(fixedCorner.X + w, newPos.Y, 0);
+                                frame.TopLeft = new Point3d(newPos.X, fixedCorner.Y + h, 0);
+                                frame.TopRight = fixedCorner;
+                                break;
+                        }
+                    }
+                    else
+                    {
+                        var deltaX = pt.X - _dragFrameOffset.X;
+                        var deltaY = pt.Y - _dragFrameOffset.Y;
+
+                        if (_shiftPressed)
+                        {
+                            var origCorner = _annotation.GetFrameCorner(_dragFrameIndex, 0);
+                            var origNext = _annotation.GetFrameCorner(_dragFrameIndex, 1);
+                            double origWidth = Math.Abs(origNext.X - origCorner.X);
+                            double origHeight = Math.Abs(origNext.Y - origCorner.Y);
+                            double aspectRatio = origWidth / origHeight;
+
+                            if (Math.Abs(deltaX) > Math.Abs(deltaY))
+                                deltaY = deltaX / aspectRatio;
+                            else
+                                deltaX = deltaY * aspectRatio;
+                        }
+
+                        frame.TopLeft = new Point3d(frame.TopLeft.X + deltaX, frame.TopLeft.Y + deltaY, 0);
+                        frame.TopRight = new Point3d(frame.TopRight.X + deltaX, frame.TopRight.Y + deltaY, 0);
+                        frame.BottomRight = new Point3d(frame.BottomRight.X + deltaX, frame.BottomRight.Y + deltaY, 0);
+                        frame.BottomLeft = new Point3d(frame.BottomLeft.X + deltaX, frame.BottomLeft.Y + deltaY, 0);
+
+                        _dragFrameOffset = new Point3d(pt.X, pt.Y, 0);
+                    }
+
+                    _annotation.ExpireDisplay();
+                }
+                else if (_dragBorderIndex >= 0 && _dragBorderIndex < _annotation.Borders.Count)
                 {
                     var border = _annotation.Borders[_dragBorderIndex];
 
@@ -278,7 +379,20 @@ namespace hopperborder
                             0);
                     }
 
-                    _annotation.Borders.Add(new BorderLine(_drawStart, end));
+                    if (_drawFrame)
+                    {
+                        Point3d topLeft = _drawStart;
+                        Point3d bottomRight = end;
+                        Point3d topRight = new Point3d(bottomRight.X, topLeft.Y, 0);
+                        Point3d bottomLeft = new Point3d(topLeft.X, bottomRight.Y, 0);
+
+                        int frameId = BorderAnnotation.GetNextFrameId();
+                        _annotation.Frames.Add(new FrameData(frameId, topLeft, topRight, bottomRight, bottomLeft));
+                    }
+                    else
+                    {
+                        _annotation.Borders.Add(new BorderLine(_drawStart, end));
+                    }
                     _annotation.ExpireDisplay();
                 }
             }
@@ -292,6 +406,8 @@ namespace hopperborder
             _isDragging = false;
             _dragBorderIndex = -1;
             _dragHandleIndex = -1;
+            _dragFrameIndex = -1;
+            _dragCornerIndex = -1;
 
             _canvas?.Invalidate();
         }
@@ -340,11 +456,16 @@ namespace hopperborder
 
         private void DeleteSelectedBorder()
         {
-            if (_annotation.SelectedBorderIndex < 0)
-                return;
-
-            _annotation.Borders.RemoveAt(_annotation.SelectedBorderIndex);
-            _annotation.SelectedBorderIndex = -1;
+            if (_annotation.SelectedFrameIndex >= 0)
+            {
+                _annotation.Frames.RemoveAt(_annotation.SelectedFrameIndex);
+                _annotation.SelectedFrameIndex = -1;
+            }
+            else if (_annotation.SelectedBorderIndex >= 0)
+            {
+                _annotation.Borders.RemoveAt(_annotation.SelectedBorderIndex);
+                _annotation.SelectedBorderIndex = -1;
+            }
             _annotation.ExpireDisplay();
             _canvas?.Invalidate();
         }
@@ -354,6 +475,7 @@ namespace hopperborder
             if (_annotation == null) return;
 
             _annotation.Borders.Clear();
+            _annotation.Frames.Clear();
             _annotation.ExpireDisplay();
             _canvas?.Invalidate();
         }
@@ -390,5 +512,6 @@ namespace hopperborder
         public bool IsDrawing => _isDrawing;
         public bool ShiftPressed => _shiftPressed;
         public bool CtrlPressed => _ctrlPressed;
+        public bool DrawFrame => _drawFrame;
     }
 }
