@@ -46,7 +46,8 @@ namespace hopperborder
 
         protected override void RegisterInputParams(GH_Component.GH_InputParamManager pManager)
         {
-            pManager.AddBooleanParameter("Enable", "E", "Enable border drawing", GH_ParamAccess.item, false);
+            pManager.AddBooleanParameter("Active", "A", "Enable border drawing", GH_ParamAccess.item, true);
+            pManager.AddBooleanParameter("Show", "S", "Display borders on canvas", GH_ParamAccess.item, true);
             pManager.AddColourParameter("Color", "C", "Border color", GH_ParamAccess.item, Color.Black);
             pManager.AddNumberParameter("Thickness", "T", "Line thickness", GH_ParamAccess.item, 8.0);
         }
@@ -57,20 +58,23 @@ namespace hopperborder
 
         protected override void SolveInstance(IGH_DataAccess DA)
         {
-            bool enable = false;
-            if (!DA.GetData(0, ref enable)) return;
+            bool active = true;
+            if (!DA.GetData(0, ref active)) return;
+
+            bool show = true;
+            DA.GetData(1, ref show);
 
             Color color = Color.Black;
-            DA.GetData(1, ref color);
+            DA.GetData(2, ref color);
 
-            double thickness = 3.0;
-            DA.GetData(2, ref thickness);
+            double thickness = 8.0;
+            DA.GetData(3, ref thickness);
 
             _borderColor = color;
             _lineThickness = (float)thickness;
 
             bool wasActivated = _isActivated;
-            _isActivated = enable;
+            _isActivated = active;
 
             if (_isActivated && !wasActivated)
             {
@@ -84,6 +88,7 @@ namespace hopperborder
 
             if (_annotation != null)
             {
+                _annotation.Visible = show && !this.Locked;
                 _annotation.BorderColor = _borderColor;
                 _annotation.LineThickness = _lineThickness;
             }
@@ -151,7 +156,7 @@ namespace hopperborder
 
         private void Canvas_MouseDown(object sender, MouseEventArgs e)
         {
-            if (!_isActivated || _annotation == null || _annotation.IsLocked)
+            if (!_isActivated || _annotation == null)
                 return;
 
             if (e.Button != MouseButtons.Left)
@@ -352,39 +357,9 @@ namespace hopperborder
             _canvas?.Invalidate();
         }
 
-        public void ToggleLock()
-        {
-            if (_annotation == null) return;
-
-            _annotation.IsLocked = !_annotation.IsLocked;
-            _annotation.ExpireDisplay();
-            _canvas?.Invalidate();
-        }
-
-        public void ShowColorPicker()
-        {
-            using (var dialog = new ColorDialog())
-            {
-                dialog.Color = _annotation?.BorderColor ?? Color.Black;
-                if (dialog.ShowDialog() == DialogResult.OK)
-                {
-                    _borderColor = dialog.Color;
-                    if (_annotation != null)
-                    {
-                        _annotation.BorderColor = _borderColor;
-                        _annotation.ExpireDisplay();
-                    }
-                    ExpireSolution(true);
-                }
-            }
-        }
-
         public override bool AppendMenuItems(ToolStripDropDown menu)
         {
             Menu_AppendItem(menu, "Clear All", (s, e) => ClearAll());
-            Menu_AppendItem(menu, "Lock/Unlock", (s, e) => ToggleLock());
-            Menu_AppendSeparator(menu);
-            Menu_AppendItem(menu, "Color...", (s, e) => ShowColorPicker());
 
             return base.AppendMenuItems(menu);
         }

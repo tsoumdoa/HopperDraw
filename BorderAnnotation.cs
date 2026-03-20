@@ -37,7 +37,7 @@ namespace hopperborder
         public List<BorderLine> Borders { get; set; } = new List<BorderLine>();
         public Color BorderColor { get; set; } = Color.Black;
         public float LineThickness { get; set; } = 8f;
-        public bool IsLocked { get; set; } = false;
+        public bool Visible { get; set; } = true;
 
         public int SelectedBorderIndex { get; set; } = -1;
         public int HoveredBorderIndex { get; set; } = -1;
@@ -88,9 +88,6 @@ namespace hopperborder
 
         public (int borderIndex, int handleIndex) HitTest(PointF point)
         {
-            if (IsLocked)
-                return (-1, -1);
-
             for (int i = 0; i < Borders.Count; i++)
             {
                 var border = Borders[i];
@@ -111,9 +108,6 @@ namespace hopperborder
 
         public int HitTestBorder(PointF point)
         {
-            if (IsLocked)
-                return -1;
-
             for (int i = 0; i < Borders.Count; i++)
             {
                 if (HitTestLine(point, Borders[i]))
@@ -212,7 +206,6 @@ namespace hopperborder
             }
             writer.SetInt32("Color", BorderColor.ToArgb());
             writer.SetDouble("Thickness", LineThickness);
-            writer.SetBoolean("Locked", IsLocked);
             return base.Write(writer);
         }
 
@@ -233,7 +226,6 @@ namespace hopperborder
             LineThickness = (float)reader.GetDouble("Thickness");
             if (LineThickness <= 0)
                 LineThickness = 8f;
-            IsLocked = reader.GetBoolean("Locked");
             return base.Read(reader);
         }
     }
@@ -253,6 +245,12 @@ namespace hopperborder
             }
 
             var annotation = (BorderAnnotation)Owner;
+
+            if (!annotation.Visible)
+            {
+                base.Render(canvas, graphics, channel);
+                return;
+            }
 
             using (var pen = new Pen(annotation.BorderColor, annotation.LineThickness))
             {
