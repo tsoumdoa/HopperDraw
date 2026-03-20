@@ -28,7 +28,7 @@ namespace hopperborder
 
             var owner = (BorderController)Owner;
 
-            if (owner.IsActivated && owner.Annotation != null && owner.Annotation.Visible)
+            if (!owner.Locked && owner.IsActivated && owner.Annotation != null && owner.Annotation.Visible)
             {
                 var annotation = owner.Annotation;
                 if (owner.IsDrawing && owner.DrawStart.IsValid && owner.DrawEnd.IsValid)

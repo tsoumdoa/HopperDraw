@@ -105,6 +105,7 @@ namespace hopperborder
                 return;
 
             _annotation = new BorderAnnotation();
+            _annotation.Controller = this;
             _annotation.BorderColor = _borderColor;
             _annotation.LineThickness = _lineThickness;
 

@@ -38,6 +38,7 @@ namespace hopperborder
         public Color BorderColor { get; set; } = Color.Black;
         public float LineThickness { get; set; } = 8f;
         public bool Visible { get; set; } = true;
+        public BorderController Controller { get; set; }
 
         public int SelectedBorderIndex { get; set; } = -1;
         public int HoveredBorderIndex { get; set; } = -1;
@@ -246,7 +247,7 @@ namespace hopperborder
 
             var annotation = (BorderAnnotation)Owner;
 
-            if (!annotation.Visible)
+            if (!annotation.Visible || (annotation.Controller != null && annotation.Controller.Locked))
             {
                 base.Render(canvas, graphics, channel);
                 return;
