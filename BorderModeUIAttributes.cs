@@ -39,7 +39,7 @@ namespace hopperborder
                 return;
 
             var owner = (BorderController)Owner;
-            var modeNames = new[] { "Line", "Polyline", "Frame" };
+            var modeNames = new[] { "Line", "Polyline", "Frame", "Curve" };
             var modeText = owner.DrawMode >= 0 && owner.DrawMode < modeNames.Length ? modeNames[owner.DrawMode] : "Unknown";
 
             var footer = new RectangleF(Bounds.X + 4, Bounds.Bottom - 22, Bounds.Width - 8, 18);
@@ -107,6 +107,50 @@ namespace hopperborder
                         {
                             var points = pts.Select(p => new PointF((float)p.X, (float)p.Y)).ToArray();
                             graphics.DrawLines(pen, points);
+                        }
+
+                        if (_previewPoint.IsValid && pts.Count > 0)
+                        {
+                            var lastPt = pts[pts.Count - 1];
+                            Point3d endPt = _previewPoint;
+
+                            bool shiftPressed = (Control.ModifierKeys & Keys.Shift) == Keys.Shift;
+                            if (shiftPressed)
+                            {
+                                double dx = endPt.X - lastPt.X;
+                                double dy = endPt.Y - lastPt.Y;
+                                double length = Math.Sqrt(dx * dx + dy * dy);
+
+                                if (length > 0)
+                                {
+                                    double angle = Math.Atan2(dy, dx);
+                                    double snapAngle = Math.Round(angle / (Math.PI / 4.0)) * (Math.PI / 4.0);
+                                    endPt = new Point3d(
+                                        lastPt.X + length * Math.Cos(snapAngle),
+                                        lastPt.Y + length * Math.Sin(snapAngle),
+                                        0);
+                                }
+                            }
+
+                            graphics.DrawLine(pen,
+                                (float)lastPt.X, (float)lastPt.Y,
+                                (float)endPt.X, (float)endPt.Y);
+                        }
+
+                        foreach (var p in pts)
+                        {
+                            graphics.FillRectangle(new SolidBrush(Color.White), (float)p.X - 4, (float)p.Y - 4, 8, 8);
+                            graphics.DrawRectangle(new Pen(Color.FromArgb(200, 0, 120, 215), 2), (int)p.X - 4, (int)p.Y - 4, 8, 8);
+                        }
+                    }
+                    else if (owner.DrawMode == 3 && owner.IsDrawing && owner.CurrentPoints.Count > 0)
+                    {
+                        var pts = owner.CurrentPoints;
+
+                        if (pts.Count >= 2)
+                        {
+                            var points = pts.Select(p => new PointF((float)p.X, (float)p.Y)).ToArray();
+                            graphics.DrawCurve(pen, points, 0.5f);
                         }
 
                         if (_previewPoint.IsValid && pts.Count > 0)

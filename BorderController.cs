@@ -70,6 +70,7 @@ namespace hopperborder
                 drawModeParam.AddNamedValue("Line", 0);
                 drawModeParam.AddNamedValue("Polyline", 1);
                 drawModeParam.AddNamedValue("Frame", 2);
+                drawModeParam.AddNamedValue("Curve", 3);
             }
         }
 
@@ -237,6 +238,33 @@ namespace hopperborder
                     return;
                 }
             }
+            else if (_drawMode == 3)
+            {
+                if (!_isDrawing || _currentPoints.Count == 0)
+                {
+                    if (ctrlPressed)
+                    {
+                        _currentPoints.Add(pt);
+                        _isDrawing = true;
+                        _lastClickTime = DateTime.Now;
+                        _lastClickPosition = pt;
+                        _annotation.ExpireDisplay();
+                        _canvas?.Invalidate();
+                        return;
+                    }
+                }
+                else if (_isDrawing && _currentPoints.Count >= 2 && isDoubleClick)
+                {
+                    _annotation.Shapes.Add(new CurveShape(new List<Point3d>(_currentPoints), true));
+                    _currentPoints.Clear();
+                    _isDrawing = false;
+                    _lastClickTime = DateTime.Now;
+                    _lastClickPosition = pt;
+                    _annotation.ExpireDisplay();
+                    _canvas?.Invalidate();
+                    return;
+                }
+            }
             else if (_drawMode == 2 && ctrlPressed)
             {
                 if (_frameCornerCount == 0)
@@ -263,7 +291,7 @@ namespace hopperborder
                 }
             }
 
-            if (_drawMode == 1 && _isDrawing)
+            if ((_drawMode == 1 || _drawMode == 3) && _isDrawing)
             {
                 _lastClickTime = DateTime.Now;
                 _lastClickPosition = pt;
@@ -437,7 +465,7 @@ namespace hopperborder
                 }
                 _isDrawing = false;
             }
-            else if (_isDrawing && _drawMode == 1)
+            else if (_isDrawing && (_drawMode == 1 || _drawMode == 3))
             {
                 var pt = ScreenToCanvas(e.Location);
                 Point3d endPt = pt;
@@ -501,6 +529,10 @@ namespace hopperborder
                     {
                         _annotation.Shapes.Add(new PolylineShape(new List<Point3d>(_currentPoints), false));
                     }
+                    else if (_drawMode == 3)
+                    {
+                        _annotation.Shapes.Add(new CurveShape(new List<Point3d>(_currentPoints), false));
+                    }
                     _currentPoints.Clear();
                     _isDrawing = false;
                     _annotation.ExpireDisplay();
@@ -512,6 +544,10 @@ namespace hopperborder
                 if (_drawMode == 1 && _currentPoints.Count >= 2)
                 {
                     _annotation.Shapes.Add(new PolylineShape(new List<Point3d>(_currentPoints), false));
+                }
+                else if (_drawMode == 3 && _currentPoints.Count >= 2)
+                {
+                    _annotation.Shapes.Add(new CurveShape(new List<Point3d>(_currentPoints), false));
                     _currentPoints.Clear();
                     _isDrawing = false;
                     _annotation.ExpireDisplay();
@@ -567,6 +603,7 @@ namespace hopperborder
             modeMenu.DropDownItems.Add(new ToolStripMenuItem("Line", null, (s, e) => { _drawMode = 0; _canvas?.Invalidate(); }));
             modeMenu.DropDownItems.Add(new ToolStripMenuItem("Polyline", null, (s, e) => { _drawMode = 1; _canvas?.Invalidate(); }));
             modeMenu.DropDownItems.Add(new ToolStripMenuItem("Frame", null, (s, e) => { _drawMode = 2; _canvas?.Invalidate(); }));
+            modeMenu.DropDownItems.Add(new ToolStripMenuItem("Curve", null, (s, e) => { _drawMode = 3; _canvas?.Invalidate(); }));
             menu.Items.Insert(0, modeMenu);
 
             return base.AppendMenuItems(menu);
