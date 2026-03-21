@@ -21,7 +21,17 @@ namespace hopperborder
         {
         }
 
-        protected override void Render(GH_Canvas canvas, Graphics graphics, GH_CanvasChannel channel)
+        protected override void Layout()
+        {
+            base.Layout();
+            Bounds = new RectangleF(Bounds.X, Bounds.Y, Bounds.Width + 10, Bounds.Height + 24);
+        }
+
+        protected override void Render(
+            GH_Canvas canvas,
+            Graphics graphics,
+            GH_CanvasChannel channel
+        )
         {
             base.Render(canvas, graphics, channel);
 
@@ -29,6 +39,22 @@ namespace hopperborder
                 return;
 
             var owner = (BorderController)Owner;
+            var modeNames = new[] { "Line", "Polyline", "Frame" };
+            var modeText = owner.DrawMode >= 0 && owner.DrawMode < modeNames.Length ? modeNames[owner.DrawMode] : "Unknown";
+
+            var footer = new RectangleF(Bounds.X + 4, Bounds.Bottom - 22, Bounds.Width - 8, 18);
+
+            using (var capsule = GH_Capsule.CreateTextCapsule(
+                footer,
+                footer,
+                GH_Palette.Black,
+                modeText,
+                2,
+                0
+            ))
+            {
+                capsule.Render(graphics, Selected, Owner.Locked, false);
+            }
 
             _previewPoint = Point3d.Unset;
             if (canvas != null)
