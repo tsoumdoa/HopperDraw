@@ -14,98 +14,225 @@ using GH_IO.Serialization;
 
 namespace hopperborder
 {
-    internal class BorderLine
+    internal enum DrawMode { Line = 0, Polyline = 1, Frame = 2 }
+
+    internal abstract class DrawShape
+    {
+        public int Id { get; set; }
+        public abstract void Render(Graphics g, Pen pen, float thickness);
+        public abstract (bool hit, int pointIndex) HitTest(PointF pt, float tolerance, float thickness);
+        public abstract PointF[] GetPoints();
+        public abstract void Move(double dx, double dy);
+        public abstract void MovePoint(int pointIndex, Point3d newPos);
+    }
+
+    internal class LineShape : DrawShape
     {
         public Point3d Start { get; set; }
         public Point3d End { get; set; }
 
-        public BorderLine()
+        public LineShape() { Start = Point3d.Unset; End = Point3d.Unset; }
+        public LineShape(Point3d start, Point3d end) { Start = start; End = end; }
+
+        public override void Render(Graphics g, Pen pen, float thickness)
         {
-            Start = Point3d.Unset;
-            End = Point3d.Unset;
+            if (!Start.IsValid || !End.IsValid) return;
+            g.DrawLine(pen, (float)Start.X, (float)Start.Y, (float)End.X, (float)End.Y);
         }
 
-        public BorderLine(Point3d start, Point3d end)
+        public override (bool hit, int pointIndex) HitTest(PointF pt, float tolerance, float thickness)
         {
-            Start = start;
-            End = end;
+            if (DistanceToSegment(pt, new PointF((float)Start.X, (float)Start.Y), new PointF((float)End.X, (float)End.Y)) <= thickness / 2 + tolerance)
+                return (true, -1);
+            return (false, -1);
         }
 
+        public override PointF[] GetPoints() => new PointF[] { new PointF((float)Start.X, (float)Start.Y), new PointF((float)End.X, (float)End.Y) };
+
+        public override void Move(double dx, double dy)
+        {
+            Start = new Point3d(Start.X + dx, Start.Y + dy, 0);
+            End = new Point3d(End.X + dx, End.Y + dy, 0);
+        }
+
+        public override void MovePoint(int pointIndex, Point3d newPos)
+        {
+            if (pointIndex == 0) Start = newPos;
+            else if (pointIndex == 1) End = newPos;
+        }
+
+        private float DistanceToSegment(PointF pt, PointF a, PointF b)
+        {
+            float dx = b.X - a.X;
+            float dy = b.Y - a.Y;
+            float lengthSq = dx * dx + dy * dy;
+            if (lengthSq < 0.0001f) return Distance(pt, a);
+            float t = Math.Max(0, Math.Min(1, ((pt.X - a.X) * dx + (pt.Y - a.Y) * dy) / lengthSq));
+            return Distance(pt, new PointF(a.X + t * dx, a.Y + t * dy));
+        }
+
+        private float Distance(PointF a, PointF b) => (float)Math.Sqrt((a.X - b.X) * (a.X - b.X) + (a.Y - b.Y) * (a.Y - b.Y));
     }
 
-    internal class FrameData
+    internal class PolylineShape : DrawShape
     {
-        public int Id { get; set; }
+        public List<Point3d> Points { get; set; } = new List<Point3d>();
+        public bool Closed { get; set; } = false;
+
+        public PolylineShape() { }
+        public PolylineShape(List<Point3d> points, bool closed = false) { Points = points; Closed = closed; }
+
+        public override void Render(Graphics g, Pen pen, float thickness)
+        {
+            if (Points.Count < 2) return;
+            var pts = Points.Select(p => new PointF((float)p.X, (float)p.Y)).ToArray();
+            if (Closed && pts.Length > 2)
+            {
+                g.DrawPolygon(pen, pts);
+            }
+            else
+            {
+                g.DrawLines(pen, pts);
+            }
+        }
+
+        public override (bool hit, int pointIndex) HitTest(PointF pt, float tolerance, float thickness)
+        {
+            for (int i = 0; i < Points.Count; i++)
+            {
+                if (Distance(pt, new PointF((float)Points[i].X, (float)Points[i].Y)) <= tolerance)
+                    return (true, i);
+            }
+            for (int i = 0; i < Points.Count - 1; i++)
+            {
+                if (DistanceToSegment(pt, new PointF((float)Points[i].X, (float)Points[i].Y), new PointF((float)Points[i + 1].X, (float)Points[i + 1].Y)) <= thickness / 2 + tolerance)
+                    return (true, -1);
+            }
+            if (Closed && Points.Count > 2)
+            {
+                if (DistanceToSegment(pt, new PointF((float)Points[Points.Count - 1].X, (float)Points[Points.Count - 1].Y), new PointF((float)Points[0].X, (float)Points[0].Y)) <= thickness / 2 + tolerance)
+                    return (true, -1);
+            }
+            return (false, -1);
+        }
+
+        public override PointF[] GetPoints() => Points.Select(p => new PointF((float)p.X, (float)p.Y)).ToArray();
+
+        public override void Move(double dx, double dy)
+        {
+            for (int i = 0; i < Points.Count; i++)
+                Points[i] = new Point3d(Points[i].X + dx, Points[i].Y + dy, 0);
+        }
+
+        public override void MovePoint(int pointIndex, Point3d newPos)
+        {
+            if (pointIndex >= 0 && pointIndex < Points.Count)
+                Points[pointIndex] = newPos;
+        }
+
+        private float DistanceToSegment(PointF pt, PointF a, PointF b)
+        {
+            float dx = b.X - a.X;
+            float dy = b.Y - a.Y;
+            float lengthSq = dx * dx + dy * dy;
+            if (lengthSq < 0.0001f) return Distance(pt, a);
+            float t = Math.Max(0, Math.Min(1, ((pt.X - a.X) * dx + (pt.Y - a.Y) * dy) / lengthSq));
+            return Distance(pt, new PointF(a.X + t * dx, a.Y + t * dy));
+        }
+
+        private float Distance(PointF a, PointF b) => (float)Math.Sqrt((a.X - b.X) * (a.X - b.X) + (a.Y - b.Y) * (a.Y - b.Y));
+    }
+
+    internal class FrameShape : DrawShape
+    {
         public Point3d TopLeft { get; set; }
         public Point3d TopRight { get; set; }
         public Point3d BottomRight { get; set; }
         public Point3d BottomLeft { get; set; }
 
-        public FrameData() { }
-
-        public FrameData(int id, Point3d topLeft, Point3d topRight, Point3d bottomRight, Point3d bottomLeft)
+        public FrameShape() { }
+        public FrameShape(Point3d topLeft, Point3d topRight, Point3d bottomRight, Point3d bottomLeft)
         {
-            Id = id;
-            TopLeft = topLeft;
-            TopRight = topRight;
-            BottomRight = bottomRight;
-            BottomLeft = bottomLeft;
+            TopLeft = topLeft; TopRight = topRight; BottomRight = bottomRight; BottomLeft = bottomLeft;
         }
 
-        public Point3d GetCorner(int index)
+        public override void Render(Graphics g, Pen pen, float thickness)
         {
-            switch (index)
+            var points = new PointF[]
             {
-                case 0: return TopLeft;
-                case 1: return TopRight;
-                case 2: return BottomRight;
-                case 3: return BottomLeft;
-                default: return Point3d.Unset;
+                new PointF((float)TopLeft.X, (float)TopLeft.Y),
+                new PointF((float)TopRight.X, (float)TopRight.Y),
+                new PointF((float)BottomRight.X, (float)BottomRight.Y),
+                new PointF((float)BottomLeft.X, (float)BottomLeft.Y),
+                new PointF((float)TopLeft.X, (float)TopLeft.Y)
+            };
+            g.DrawPolygon(pen, points);
+        }
+
+        public override (bool hit, int pointIndex) HitTest(PointF pt, float tolerance, float thickness)
+        {
+            var corners = new PointF[] { new PointF((float)TopLeft.X, (float)TopLeft.Y), new PointF((float)TopRight.X, (float)TopRight.Y), new PointF((float)BottomRight.X, (float)BottomRight.Y), new PointF((float)BottomLeft.X, (float)BottomLeft.Y) };
+            for (int i = 0; i < 4; i++)
+                if (Distance(pt, corners[i]) <= tolerance) return (true, i);
+            if (HitTestLine(pt, corners[0], corners[1], thickness, tolerance)) return (true, -1);
+            if (HitTestLine(pt, corners[1], corners[2], thickness, tolerance)) return (true, -1);
+            if (HitTestLine(pt, corners[2], corners[3], thickness, tolerance)) return (true, -1);
+            if (HitTestLine(pt, corners[3], corners[0], thickness, tolerance)) return (true, -1);
+            return (false, -1);
+        }
+
+        public override PointF[] GetPoints() => new PointF[] { new PointF((float)TopLeft.X, (float)TopLeft.Y), new PointF((float)TopRight.X, (float)TopRight.Y), new PointF((float)BottomRight.X, (float)BottomRight.Y), new PointF((float)BottomLeft.X, (float)BottomLeft.Y) };
+
+        public override void Move(double dx, double dy)
+        {
+            TopLeft = new Point3d(TopLeft.X + dx, TopLeft.Y + dy, 0);
+            TopRight = new Point3d(TopRight.X + dx, TopRight.Y + dy, 0);
+            BottomRight = new Point3d(BottomRight.X + dx, BottomRight.Y + dy, 0);
+            BottomLeft = new Point3d(BottomLeft.X + dx, BottomLeft.Y + dy, 0);
+        }
+
+        public override void MovePoint(int pointIndex, Point3d newPos)
+        {
+            switch (pointIndex)
+            {
+                case 0: TopLeft = newPos; break;
+                case 1: TopRight = newPos; break;
+                case 2: BottomRight = newPos; break;
+                case 3: BottomLeft = newPos; break;
             }
         }
 
-        public void SetCorner(int index, Point3d value)
+        private bool HitTestLine(PointF pt, PointF a, PointF b, float thickness, float tolerance) => DistanceToSegment(pt, a, b) <= thickness / 2 + tolerance;
+
+        private float DistanceToSegment(PointF pt, PointF a, PointF b)
         {
-            switch (index)
-            {
-                case 0: TopLeft = value; break;
-                case 1: TopRight = value; break;
-                case 2: BottomRight = value; break;
-                case 3: BottomLeft = value; break;
-            }
+            float dx = b.X - a.X;
+            float dy = b.Y - a.Y;
+            float lengthSq = dx * dx + dy * dy;
+            if (lengthSq < 0.0001f) return Distance(pt, a);
+            float t = Math.Max(0, Math.Min(1, ((pt.X - a.X) * dx + (pt.Y - a.Y) * dy) / lengthSq));
+            return Distance(pt, new PointF(a.X + t * dx, a.Y + t * dy));
         }
 
-        public Point3d GetOppositeCorner(int index)
-        {
-            switch (index)
-            {
-                case 0: return BottomRight;
-                case 1: return BottomLeft;
-                case 2: return TopLeft;
-                case 3: return TopRight;
-                default: return Point3d.Unset;
-            }
-        }
+        private float Distance(PointF a, PointF b) => (float)Math.Sqrt((a.X - b.X) * (a.X - b.X) + (a.Y - b.Y) * (a.Y - b.Y));
     }
 
     internal class BorderAnnotation : GH_Component
     {
-        private static int _frameIdCounter = 1;
+        private static int _shapeIdCounter = 1;
 
-        public List<BorderLine> Borders { get; set; } = new List<BorderLine>();
-        public List<FrameData> Frames { get; set; } = new List<FrameData>();
+        public List<DrawShape> Shapes { get; set; } = new List<DrawShape>();
         public Color BorderColor { get; set; } = Color.Black;
         public float LineThickness { get; set; } = 8f;
         public bool Visible { get; set; } = true;
         public BorderController Controller { get; set; }
 
-        public int SelectedBorderIndex { get; set; } = -1;
-        public int HoveredBorderIndex { get; set; } = -1;
-        public int HoveredHandleIndex { get; set; } = -1;
-        public int SelectedFrameIndex { get; set; } = -1;
-        public int SelectedFrameCorner { get; set; } = -1;
+        public int SelectedShapeIndex { get; set; } = -1;
+        public int SelectedPointIndex { get; set; } = -1;
+        public int HoveredShapeIndex { get; set; } = -1;
+        public int HoveredPointIndex { get; set; } = -1;
 
-        public static int GetNextFrameId() => _frameIdCounter++;
+        public static int GetNextId() => _shapeIdCounter++;
 
         private const float HandleSize = 8f;
         private const float HitTolerance = 15f;
@@ -122,205 +249,58 @@ namespace hopperborder
             m_attributes = new BorderAnnotationAttributes(this);
         }
 
-        public RectangleF Bounds => CalculateUnionBounds();
-
-        private RectangleF CalculateUnionBounds()
+        public RectangleF Bounds
         {
-            if (Borders.Count == 0)
-                return new RectangleF(0, 0, 1, 1);
-
-            double minX = double.MaxValue;
-            double minY = double.MaxValue;
-            double maxX = double.MinValue;
-            double maxY = double.MinValue;
-
-            foreach (var border in Borders)
+            get
             {
-                minX = Math.Min(minX, Math.Min(border.Start.X, border.End.X));
-                minY = Math.Min(minY, Math.Min(border.Start.Y, border.End.Y));
-                maxX = Math.Max(maxX, Math.Max(border.Start.X, border.End.X));
-                maxY = Math.Max(maxY, Math.Max(border.Start.Y, border.End.Y));
+                if (Shapes.Count == 0) return new RectangleF(0, 0, 1, 1);
+                double minX = double.MaxValue, minY = double.MaxValue, maxX = double.MinValue, maxY = double.MinValue;
+                foreach (var shape in Shapes)
+                {
+                    foreach (var pt in shape.GetPoints())
+                    {
+                        minX = Math.Min(minX, pt.X);
+                        minY = Math.Min(minY, pt.Y);
+                        maxX = Math.Max(maxX, pt.X);
+                        maxY = Math.Max(maxY, pt.Y);
+                    }
+                }
+                return new RectangleF((float)(minX - HandleSize), (float)(minY - HandleSize), (float)(maxX - minX + HandleSize * 2), (float)(maxY - minY + HandleSize * 2));
             }
-
-            return new RectangleF(
-                (float)(minX - HandleSize),
-                (float)(minY - HandleSize),
-                (float)(maxX - minX + HandleSize * 2),
-                (float)(maxY - minY + HandleSize * 2)
-            );
         }
 
-        public (int borderIndex, int handleIndex) HitTest(PointF point)
+        public (int shapeIndex, int pointIndex) HitTest(PointF point)
         {
-            for (int i = 0; i < Borders.Count; i++)
+            for (int i = 0; i < Shapes.Count; i++)
             {
-                var border = Borders[i];
-                var handles = GetHandlePoints(border);
-
-                for (int j = 0; j < handles.Count; j++)
-                {
-                    if (Distance(point, handles[j]) <= HitTolerance)
-                        return (i, j);
-                }
-
-                if (HitTestLine(point, border))
-                    return (i, -1);
+                var (hit, ptIdx) = Shapes[i].HitTest(point, HitTolerance, LineThickness);
+                if (hit) return (i, ptIdx);
             }
-
             return (-1, -1);
-        }
-
-        public int HitTestBorder(PointF point)
-        {
-            for (int i = 0; i < Borders.Count; i++)
-            {
-                if (HitTestLine(point, Borders[i]))
-                    return i;
-            }
-
-            return -1;
-        }
-
-        public (int frameIndex, int cornerIndex) HitTestFrame(PointF point)
-        {
-            for (int i = 0; i < Frames.Count; i++)
-            {
-                var frame = Frames[i];
-
-                var corners = new PointF[]
-                {
-                    new PointF((float)frame.TopLeft.X, (float)frame.TopLeft.Y),
-                    new PointF((float)frame.TopRight.X, (float)frame.TopRight.Y),
-                    new PointF((float)frame.BottomRight.X, (float)frame.BottomRight.Y),
-                    new PointF((float)frame.BottomLeft.X, (float)frame.BottomLeft.Y)
-                };
-
-                for (int j = 0; j < 4; j++)
-                {
-                    if (Distance(point, corners[j]) <= HitTolerance)
-                        return (i, j);
-                }
-
-                if (HitTestLine(point, corners[0], corners[1]) ||
-                    HitTestLine(point, corners[1], corners[2]) ||
-                    HitTestLine(point, corners[2], corners[3]) ||
-                    HitTestLine(point, corners[3], corners[0]))
-                {
-                    return (i, -1);
-                }
-            }
-
-            return (-1, -1);
-        }
-
-        private bool HitTestLine(PointF point, BorderLine border)
-        {
-            return DistanceToSegment(point, new PointF((float)border.Start.X, (float)border.Start.Y), new PointF((float)border.End.X, (float)border.End.Y)) <= LineThickness / 2 + 3;
-        }
-
-        private bool HitTestLine(PointF point, PointF a, PointF b)
-        {
-            return DistanceToSegment(point, a, b) <= LineThickness / 2 + 3;
-        }
-
-        private float Distance(PointF a, PointF b)
-        {
-            return (float)Math.Sqrt((a.X - b.X) * (a.X - b.X) + (a.Y - b.Y) * (a.Y - b.Y));
-        }
-
-        private float DistanceToSegment(PointF pt, PointF a, PointF b)
-        {
-            float dx = b.X - a.X;
-            float dy = b.Y - a.Y;
-            float lengthSq = dx * dx + dy * dy;
-
-            if (lengthSq < 0.0001f)
-                return Distance(pt, a);
-
-            float t = Math.Max(0, Math.Min(1, ((pt.X - a.X) * dx + (pt.Y - a.Y) * dy) / lengthSq));
-            float projX = a.X + t * dx;
-            float projY = a.Y + t * dy;
-
-            return Distance(pt, new PointF(projX, projY));
-        }
-
-        private List<PointF> GetHandlePoints(BorderLine border)
-        {
-            return new List<PointF>
-            {
-                new PointF((float)border.Start.X, (float)border.Start.Y),
-                new PointF((float)border.End.X, (float)border.End.Y)
-            };
-        }
-
-        private RectangleF GetBoundingRect(BorderLine border)
-        {
-            float x = (float)Math.Min(border.Start.X, border.End.X);
-            float y = (float)Math.Min(border.Start.Y, border.End.Y);
-            float w = (float)Math.Abs(border.End.X - border.Start.X);
-            float h = (float)Math.Abs(border.End.Y - border.Start.Y);
-            return new RectangleF(x, y, w, h);
         }
 
         public void ClearSelection()
         {
-            SelectedBorderIndex = -1;
-            HoveredBorderIndex = -1;
-            HoveredHandleIndex = -1;
-            SelectedFrameIndex = -1;
-            SelectedFrameCorner = -1;
-        }
-
-        public void SelectBorder(int index)
-        {
-            SelectedBorderIndex = index;
+            SelectedShapeIndex = -1;
+            SelectedPointIndex = -1;
+            HoveredShapeIndex = -1;
+            HoveredPointIndex = -1;
         }
 
         public void ExpireDisplay()
         {
             var doc = OnPingDocument();
             if (doc != null)
-            {
                 doc.ScheduleSolution(5, d => this.ExpirePreview(false));
-            }
         }
 
-        public Point3d GetFrameCorner(int frameIndex, int cornerIndex)
-        {
-            if (frameIndex < 0 || frameIndex >= Frames.Count)
-                return Point3d.Unset;
-            return Frames[frameIndex].GetCorner(cornerIndex);
-        }
-
-        public Point3d GetFrameOppositeCorner(int frameIndex, int cornerIndex)
-        {
-            if (frameIndex < 0 || frameIndex >= Frames.Count)
-                return Point3d.Unset;
-            return Frames[frameIndex].GetOppositeCorner(cornerIndex);
-        }
-
-        protected override void RegisterInputParams(GH_Component.GH_InputParamManager pManager)
-        {
-        }
-
-        protected override void RegisterOutputParams(GH_Component.GH_OutputParamManager pManager)
-        {
-        }
-
-        protected override void SolveInstance(IGH_DataAccess DA)
-        {
-        }
+        protected override void RegisterInputParams(GH_Component.GH_InputParamManager pManager) { }
+        protected override void RegisterOutputParams(GH_Component.GH_OutputParamManager pManager) { }
+        protected override void SolveInstance(IGH_DataAccess DA) { }
 
         public override bool Write(GH_IWriter writer)
         {
-            writer.SetInt32("Count", Borders.Count);
-            for (int i = 0; i < Borders.Count; i++)
-            {
-                writer.SetDouble($"StartX{i}", Borders[i].Start.X);
-                writer.SetDouble($"StartY{i}", Borders[i].Start.Y);
-                writer.SetDouble($"EndX{i}", Borders[i].End.X);
-                writer.SetDouble($"EndY{i}", Borders[i].End.Y);
-            }
+            writer.SetInt32("ShapeCount", Shapes.Count);
             writer.SetInt32("Color", BorderColor.ToArgb());
             writer.SetDouble("Thickness", LineThickness);
             return base.Write(writer);
@@ -328,30 +308,14 @@ namespace hopperborder
 
         public override bool Read(GH_IReader reader)
         {
-            Borders.Clear();
-            int count = reader.GetInt32("Count");
-            for (int i = 0; i < count; i++)
-            {
-                double sx = reader.GetDouble($"StartX{i}");
-                double sy = reader.GetDouble($"StartY{i}");
-                double ex = reader.GetDouble($"EndX{i}");
-                double ey = reader.GetDouble($"EndY{i}");
-                Borders.Add(new BorderLine(new Point3d(sx, sy, 0), new Point3d(ex, ey, 0)));
-            }
-            int colorArgb = reader.GetInt32("Color");
-            BorderColor = Color.FromArgb(colorArgb);
-            LineThickness = (float)reader.GetDouble("Thickness");
-            if (LineThickness <= 0)
-                LineThickness = 8f;
+            Shapes.Clear();
             return base.Read(reader);
         }
     }
 
     internal class BorderAnnotationAttributes : GH_ComponentAttributes
     {
-        public BorderAnnotationAttributes(BorderAnnotation owner) : base(owner)
-        {
-        }
+        public BorderAnnotationAttributes(BorderAnnotation owner) : base(owner) { }
 
         protected override void Render(GH_Canvas canvas, Graphics graphics, GH_CanvasChannel channel)
         {
@@ -371,129 +335,63 @@ namespace hopperborder
 
             using (var pen = new Pen(annotation.BorderColor, annotation.LineThickness))
             {
-                foreach (var frame in annotation.Frames)
+                foreach (var shape in annotation.Shapes)
                 {
-                    var points = new PointF[]
-                    {
-                        new PointF((float)frame.TopLeft.X, (float)frame.TopLeft.Y),
-                        new PointF((float)frame.TopRight.X, (float)frame.TopRight.Y),
-                        new PointF((float)frame.BottomRight.X, (float)frame.BottomRight.Y),
-                        new PointF((float)frame.BottomLeft.X, (float)frame.BottomLeft.Y),
-                        new PointF((float)frame.TopLeft.X, (float)frame.TopLeft.Y)
-                    };
-                    graphics.DrawPolygon(pen, points);
-                }
-
-                foreach (var border in annotation.Borders)
-                {
-                    RenderBorder(graphics, pen, border);
+                    shape.Render(graphics, pen, annotation.LineThickness);
                 }
             }
 
-            if (annotation.SelectedFrameIndex >= 0 && annotation.SelectedFrameIndex < annotation.Frames.Count)
+            if (annotation.SelectedShapeIndex >= 0 && annotation.SelectedShapeIndex < annotation.Shapes.Count)
             {
-                var frame = annotation.Frames[annotation.SelectedFrameIndex];
-                RenderFrameSelectionHandles(graphics, frame);
-            }
-            else if (annotation.SelectedBorderIndex >= 0 && annotation.SelectedBorderIndex < annotation.Borders.Count)
-            {
-                RenderSelectionHandles(graphics, annotation.Borders[annotation.SelectedBorderIndex]);
+                RenderSelectionHandles(graphics, annotation.Shapes[annotation.SelectedShapeIndex], annotation.SelectedPointIndex, annotation.LineThickness);
             }
 
-            if (annotation.HoveredBorderIndex >= 0 && annotation.HoveredBorderIndex < annotation.Borders.Count)
+            if (annotation.HoveredShapeIndex >= 0 && annotation.HoveredShapeIndex < annotation.Shapes.Count)
             {
-                RenderHoverHandles(graphics, annotation.Borders[annotation.HoveredBorderIndex]);
+                RenderHoverHandles(graphics, annotation.Shapes[annotation.HoveredShapeIndex], annotation.HoveredPointIndex, annotation.LineThickness);
             }
         }
 
-        private void RenderBorder(Graphics g, Pen pen, BorderLine border)
+        private void RenderSelectionHandles(Graphics g, DrawShape shape, int selectedPointIndex, float thickness)
         {
-            if (!border.Start.IsValid || !border.End.IsValid)
-                return;
-
-            g.DrawLine(pen,
-                (float)border.Start.X, (float)border.Start.Y,
-                (float)border.End.X, (float)border.End.Y);
-        }
-
-        private void RenderSelectionHandles(Graphics g, BorderLine border)
-        {
-            var handles = GetHandlePoints(border);
-
+            var points = shape.GetPoints();
             using (var handleBrush = new SolidBrush(Color.White))
             using (var handlePen = new Pen(Color.FromArgb(200, 0, 120, 215), 2))
             {
-                foreach (var pt in handles)
+                for (int i = 0; i < points.Length; i++)
                 {
+                    var pt = points[i];
                     g.FillRectangle(handleBrush, pt.X - 4, pt.Y - 4, 8, 8);
                     g.DrawRectangle(handlePen, (int)pt.X - 4, (int)pt.Y - 4, 8, 8);
                 }
             }
-
             using (var selPen = new Pen(Color.FromArgb(200, 0, 120, 215), 1))
             {
                 selPen.DashStyle = System.Drawing.Drawing2D.DashStyle.Dash;
-                g.DrawLine(selPen, (float)border.Start.X, (float)border.Start.Y, (float)border.End.X, (float)border.End.Y);
+                if (points.Length > 1)
+                {
+                    if (shape is FrameShape || shape is PolylineShape poly && poly.Closed)
+                        g.DrawPolygon(selPen, points);
+                    else
+                        g.DrawLines(selPen, points);
+                }
             }
         }
 
-        private void RenderHoverHandles(Graphics g, BorderLine border)
+        private void RenderHoverHandles(Graphics g, DrawShape shape, int hoveredPointIndex, float thickness)
         {
-            var handles = GetHandlePoints(border);
-
+            var points = shape.GetPoints();
             using (var hoverBrush = new SolidBrush(Color.FromArgb(100, 0, 120, 215)))
             {
-                foreach (var pt in handles)
+                for (int i = 0; i < points.Length; i++)
                 {
-                    g.FillRectangle(hoverBrush, pt.X - 4, pt.Y - 4, 8, 8);
+                    if (i == hoveredPointIndex)
+                    {
+                        var pt = points[i];
+                        g.FillRectangle(hoverBrush, pt.X - 4, pt.Y - 4, 8, 8);
+                    }
                 }
             }
-        }
-
-        private void RenderFrameSelectionHandles(Graphics g, FrameData frame)
-        {
-            var handles = new PointF[]
-            {
-                new PointF((float)frame.TopLeft.X, (float)frame.TopLeft.Y),
-                new PointF((float)frame.TopRight.X, (float)frame.TopRight.Y),
-                new PointF((float)frame.BottomRight.X, (float)frame.BottomRight.Y),
-                new PointF((float)frame.BottomLeft.X, (float)frame.BottomLeft.Y)
-            };
-
-            using (var handleBrush = new SolidBrush(Color.White))
-            using (var handlePen = new Pen(Color.FromArgb(200, 0, 120, 215), 2))
-            {
-                foreach (var pt in handles)
-                {
-                    g.FillRectangle(handleBrush, pt.X - 4, pt.Y - 4, 8, 8);
-                    g.DrawRectangle(handlePen, (int)pt.X - 4, (int)pt.Y - 4, 8, 8);
-                }
-            }
-
-            using (var selPen = new Pen(Color.FromArgb(200, 0, 120, 215), 1))
-            {
-                selPen.DashStyle = System.Drawing.Drawing2D.DashStyle.Dash;
-                var points = new PointF[] { handles[0], handles[1], handles[2], handles[3], handles[0] };
-                g.DrawLines(selPen, points);
-            }
-        }
-
-        private List<PointF> GetHandlePoints(BorderLine border)
-        {
-            return new List<PointF>
-            {
-                new PointF((float)border.Start.X, (float)border.Start.Y),
-                new PointF((float)border.End.X, (float)border.End.Y)
-            };
-        }
-
-        private RectangleF GetBoundingRect(BorderLine border)
-        {
-            float x = (float)Math.Min(border.Start.X, border.End.X);
-            float y = (float)Math.Min(border.Start.Y, border.End.Y);
-            float w = (float)Math.Abs(border.End.X - border.Start.X);
-            float h = (float)Math.Abs(border.End.Y - border.Start.Y);
-            return new RectangleF(x, y, w, h);
         }
     }
 }
