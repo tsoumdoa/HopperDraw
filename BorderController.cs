@@ -28,6 +28,7 @@ namespace hopperborder
         private Point3d _dragOffset;
         private bool _isFrameDragging = false;
         private Point3d _dragFrameOffset;
+        private double _dragAspectRatio = 1.0;
 
         private DateTime _lastClickTime = DateTime.MinValue;
         private Point3d _lastClickPosition = Point3d.Unset;
@@ -200,16 +201,44 @@ namespace hopperborder
 
             bool ctrlPressed = (Control.ModifierKeys & Keys.Control) == Keys.Control;
 
-            if (_drawMode == 0 && ctrlPressed)
+            if (_drawMode == 0)
             {
-                _drawStart = pt;
-                _drawEnd = pt;
-                _isDrawing = true;
-                _lastClickTime = DateTime.Now;
-                _lastClickPosition = pt;
-                _annotation.ExpireDisplay();
-                _canvas?.Invalidate();
-                return;
+                if (_isDrawing)
+                {
+                    Point3d endPt = pt;
+                    bool shiftPressed = (Control.ModifierKeys & Keys.Shift) == Keys.Shift;
+                    if (shiftPressed)
+                    {
+                        double dx = pt.X - _drawStart.X;
+                        double dy = pt.Y - _drawStart.Y;
+                        double length = Math.Sqrt(dx * dx + dy * dy);
+                        if (length > 0)
+                        {
+                            double angle = Math.Atan2(dy, dx);
+                            double snapAngle = Math.Round(angle / (Math.PI / 4.0)) * (Math.PI / 4.0);
+                            endPt = new Point3d(
+                                _drawStart.X + length * Math.Cos(snapAngle),
+                                _drawStart.Y + length * Math.Sin(snapAngle),
+                                0);
+                        }
+                    }
+                    _annotation.Shapes.Add(new LineShape(_drawStart, endPt));
+                    _isDrawing = false;
+                    _annotation.ExpireDisplay();
+                    _canvas?.Invalidate();
+                    return;
+                }
+                else if (ctrlPressed)
+                {
+                    _drawStart = pt;
+                    _drawEnd = pt;
+                    _isDrawing = true;
+                    _lastClickTime = DateTime.Now;
+                    _lastClickPosition = pt;
+                    _annotation.ExpireDisplay();
+                    _canvas?.Invalidate();
+                    return;
+                }
             }
             else if (_drawMode == 1)
             {
@@ -265,24 +294,36 @@ namespace hopperborder
                     return;
                 }
             }
-            else if (_drawMode == 2 && ctrlPressed)
+            else if (_drawMode == 2)
             {
-                if (_frameCornerCount == 0)
+                if (_frameCornerCount == 1)
                 {
-                    _frameFirstCorner = pt;
-                    _frameCornerCount = 1;
-                    _isDrawing = true;
+                    Point3d finalPt = pt;
+                    bool shiftPressed = (Control.ModifierKeys & Keys.Shift) == Keys.Shift;
+                    if (shiftPressed)
+                    {
+                        double dx = pt.X - _frameFirstCorner.X;
+                        double dy = pt.Y - _frameFirstCorner.Y;
+                        double size = Math.Max(Math.Abs(dx), Math.Abs(dy));
+                        finalPt = new Point3d(
+                            _frameFirstCorner.X + size * Math.Sign(dx),
+                            _frameFirstCorner.Y + size * Math.Sign(dy),
+                            0);
+                    }
+                    _frameCornerCount = 0;
+                    _isDrawing = false;
+                    CreateFrame(_frameFirstCorner, finalPt);
                     _lastClickTime = DateTime.Now;
                     _lastClickPosition = pt;
                     _annotation.ExpireDisplay();
                     _canvas?.Invalidate();
                     return;
                 }
-                else if (_frameCornerCount == 1)
+                else if (ctrlPressed)
                 {
-                    _frameCornerCount = 0;
-                    _isDrawing = false;
-                    CreateFrame(_frameFirstCorner, pt);
+                    _frameFirstCorner = pt;
+                    _frameCornerCount = 1;
+                    _isDrawing = true;
                     _lastClickTime = DateTime.Now;
                     _lastClickPosition = pt;
                     _annotation.ExpireDisplay();
@@ -308,10 +349,13 @@ namespace hopperborder
                 _dragPointIndex = pointIdx;
 
                 var shape = _annotation.Shapes[shapeIdx];
-                if (shape is FrameShape)
+                if (shape is FrameShape frame)
                 {
                     _isFrameDragging = true;
                     _dragFrameOffset = pt;
+                    double w = Math.Abs(frame.TopRight.X - frame.TopLeft.X);
+                    double h = Math.Abs(frame.TopLeft.Y - frame.BottomLeft.Y);
+                    _dragAspectRatio = (h > 0) ? w / h : 1.0;
                 }
                 else
                 {
@@ -364,33 +408,57 @@ namespace hopperborder
                         Point3d newPos = pt;
                         var fixedCorner = GetFrameOppositeCorner(frame, _dragPointIndex);
 
-                        double w = newPos.X - fixedCorner.X;
-                        double h = newPos.Y - fixedCorner.Y;
+                        bool shiftPressed = (Control.ModifierKeys & Keys.Shift) == Keys.Shift;
+                        if (shiftPressed && _dragAspectRatio > 0)
+                        {
+                            double w = pt.X - fixedCorner.X;
+                            double h = pt.Y - fixedCorner.Y;
+                            double absW = Math.Abs(w);
+                            double absH = Math.Abs(h);
+                            double signW = Math.Sign(w);
+                            double signH = Math.Sign(h);
+
+                            if (absW > 2 && absH > 2)
+                            {
+                                if (absW > absH * _dragAspectRatio)
+                                {
+                                    absH = absW / _dragAspectRatio;
+                                }
+                                else
+                                {
+                                    absW = absH * _dragAspectRatio;
+                                }
+                                newPos = new Point3d(fixedCorner.X + signW * absW, fixedCorner.Y + signH * absH, 0);
+                            }
+                        }
+
+                        double fw = newPos.X - fixedCorner.X;
+                        double fh = newPos.Y - fixedCorner.Y;
 
                         switch (_dragPointIndex)
                         {
                             case 0:
                                 frame.TopLeft = newPos;
-                                frame.TopRight = new Point3d(fixedCorner.X + w, newPos.Y, 0);
-                                frame.BottomLeft = new Point3d(newPos.X, fixedCorner.Y + h, 0);
+                                frame.TopRight = new Point3d(fixedCorner.X, newPos.Y, 0);
+                                frame.BottomLeft = new Point3d(newPos.X, fixedCorner.Y, 0);
                                 frame.BottomRight = fixedCorner;
                                 break;
                             case 1:
                                 frame.TopRight = newPos;
-                                frame.TopLeft = new Point3d(newPos.X - w, fixedCorner.Y + h, 0);
+                                frame.TopLeft = new Point3d(fixedCorner.X, newPos.Y, 0);
                                 frame.BottomRight = new Point3d(newPos.X, fixedCorner.Y, 0);
                                 frame.BottomLeft = fixedCorner;
                                 break;
                             case 2:
                                 frame.BottomRight = newPos;
                                 frame.BottomLeft = new Point3d(fixedCorner.X, newPos.Y, 0);
-                                frame.TopRight = new Point3d(newPos.X, fixedCorner.Y + h, 0);
+                                frame.TopRight = new Point3d(newPos.X, fixedCorner.Y, 0);
                                 frame.TopLeft = fixedCorner;
                                 break;
                             case 3:
                                 frame.BottomLeft = newPos;
-                                frame.BottomRight = new Point3d(fixedCorner.X + w, newPos.Y, 0);
-                                frame.TopLeft = new Point3d(newPos.X, fixedCorner.Y + h, 0);
+                                frame.BottomRight = new Point3d(fixedCorner.X, newPos.Y, 0);
+                                frame.TopLeft = new Point3d(newPos.X, fixedCorner.Y, 0);
                                 frame.TopRight = fixedCorner;
                                 break;
                         }
@@ -410,7 +478,28 @@ namespace hopperborder
                 {
                     if (_dragPointIndex >= 0)
                     {
-                        shape.MovePoint(_dragPointIndex, pt);
+                        Point3d newPos = pt;
+                        if (shape is LineShape line && _dragPointIndex >= 0)
+                        {
+                            var otherPt = _dragPointIndex == 0 ? line.End : line.Start;
+                            bool shiftPressed = (Control.ModifierKeys & Keys.Shift) == Keys.Shift;
+                            if (shiftPressed)
+                            {
+                                double dx = pt.X - otherPt.X;
+                                double dy = pt.Y - otherPt.Y;
+                                double length = Math.Sqrt(dx * dx + dy * dy);
+                                if (length > 0)
+                                {
+                                    double angle = Math.Atan2(dy, dx);
+                                    double snapAngle = Math.Round(angle / (Math.PI / 4.0)) * (Math.PI / 4.0);
+                                    newPos = new Point3d(
+                                        otherPt.X + length * Math.Cos(snapAngle),
+                                        otherPt.Y + length * Math.Sin(snapAngle),
+                                        0);
+                                }
+                            }
+                        }
+                        shape.MovePoint(_dragPointIndex, newPos);
                     }
                     else
                     {
@@ -440,32 +529,7 @@ namespace hopperborder
 
             bool shiftPressed = (Control.ModifierKeys & Keys.Shift) == Keys.Shift;
 
-            if (_isDrawing && _drawMode == 0)
-            {
-                double dx = _drawEnd.X - _drawStart.X;
-                double dy = _drawEnd.Y - _drawStart.Y;
-                double length = Math.Sqrt(dx * dx + dy * dy);
-
-                if (length > 5)
-                {
-                    Point3d end = _drawEnd;
-
-                    if (shiftPressed)
-                    {
-                        double angle = Math.Atan2(dy, dx);
-                        double snapAngle = Math.Round(angle / (Math.PI / 4.0)) * (Math.PI / 4.0);
-                        end = new Point3d(
-                            _drawStart.X + length * Math.Cos(snapAngle),
-                            _drawStart.Y + length * Math.Sin(snapAngle),
-                            0);
-                    }
-
-                    _annotation.Shapes.Add(new LineShape(_drawStart, end));
-                    _annotation.ExpireDisplay();
-                }
-                _isDrawing = false;
-            }
-            else if (_isDrawing && (_drawMode == 1 || _drawMode == 3))
+            if (_isDrawing && (_drawMode == 1 || _drawMode == 3))
             {
                 var pt = ScreenToCanvas(e.Location);
                 Point3d endPt = pt;

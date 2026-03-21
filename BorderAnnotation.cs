@@ -42,6 +42,10 @@ namespace hopperborder
 
         public override (bool hit, int pointIndex) HitTest(PointF pt, float tolerance, float thickness)
         {
+            if (Distance(pt, new PointF((float)Start.X, (float)Start.Y)) <= tolerance)
+                return (true, 0);
+            if (Distance(pt, new PointF((float)End.X, (float)End.Y)) <= tolerance)
+                return (true, 1);
             if (DistanceToSegment(pt, new PointF((float)Start.X, (float)Start.Y), new PointF((float)End.X, (float)End.Y)) <= thickness / 2 + tolerance)
                 return (true, -1);
             return (false, -1);

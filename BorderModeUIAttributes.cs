@@ -192,6 +192,18 @@ namespace hopperborder
                         var corner1 = owner.FrameFirstCorner;
                         var corner2 = _previewPoint;
 
+                        bool shiftPressed = (Control.ModifierKeys & Keys.Shift) == Keys.Shift;
+                        if (shiftPressed)
+                        {
+                            double dx = corner2.X - corner1.X;
+                            double dy = corner2.Y - corner1.Y;
+                            double size = Math.Max(Math.Abs(dx), Math.Abs(dy));
+                            corner2 = new Point3d(
+                                corner1.X + size * Math.Sign(dx),
+                                corner1.Y + size * Math.Sign(dy),
+                                0);
+                        }
+
                         var topLeft = new PointF((float)Math.Min(corner1.X, corner2.X), (float)Math.Max(corner1.Y, corner2.Y));
                         var topRight = new PointF((float)Math.Max(corner1.X, corner2.X), (float)Math.Max(corner1.Y, corner2.Y));
                         var bottomRight = new PointF((float)Math.Max(corner1.X, corner2.X), (float)Math.Min(corner1.Y, corner2.Y));
