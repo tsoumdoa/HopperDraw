@@ -141,17 +141,20 @@ Shapes are serialized with the Grasshopper file:
 
 | Shortcut | Action |
 |----------|--------|
+| Ctrl + A | Select all shapes |
 | Ctrl + Left Click | Start drawing (all modes) |
 | Left Click | Add point / Complete shape |
 | Double Click | Complete polyline/curve |
 | Shift + Drag | Constrain angle (45° snap) |
+| Ctrl + 0 | Reset thickness to 1.0x (default) |
 | Ctrl + 1 | Set 0.5x thickness multiplier |
 | Ctrl + 2 | Set 2x thickness multiplier |
 | Ctrl + 3 | Set 3x thickness multiplier |
-| Right Click | Open color picker (during drawing) |
+| Right Click (during drawing) | Open color picker for next shape |
+| Right Click (on selected) | Open color picker for selected shape(s) |
 | Enter | Complete polyline/curve |
 | Escape | Complete or cancel drawing |
-| Delete | Delete selected shape |
+| Delete | Delete selected shape(s) |
 
 ## Right-Click Menu
 
@@ -165,10 +168,25 @@ Shapes are serialized with the Grasshopper file:
 ## Selection and Editing
 
 Shapes can be selected and manipulated:
-- Click on a shape to select it
+- **Click** on a shape to select it
+- **Click on empty canvas**: Clear selection
+- **Window select**: Click and drag on empty canvas to select multiple shapes
+- **Ctrl + Window select**: Add shapes to current selection
+- **Click on selected shape**: Start multi-drag to move all selected shapes
 - Selected shapes show white handles at control points
 - Drag handles to resize/move shapes
-- Press Delete to remove selected shape
+- **Ctrl + 0**: Reset thickness to 1.0x (default)
+- **Ctrl + 1/2/3**: Change thickness of selected shapes (0.5x, 2x, 3x)
+- **Right-click on selected**: Change color of selected shapes
+- **Escape**: Clear selection (or cancel drawing)
+- **Delete**: Remove all selected shapes
+
+### Multi-Selection Features
+
+1. **Window Selection**: Click and drag on empty canvas to create a selection window
+2. **Additive Selection**: Hold Ctrl while window selecting to add to existing selection
+3. **Multi-Drag**: Click on any selected shape and drag to move all selected shapes together
+4. **Bulk Operations**: Ctrl+1/2/3 and right-click color change apply to ALL selected shapes
 
 ## Technical Notes
 

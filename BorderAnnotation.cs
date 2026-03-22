@@ -512,10 +512,12 @@ namespace hopperborder
         public bool Visible { get; set; } = true;
         public BorderController Controller { get; set; }
 
-        public int SelectedShapeIndex { get; set; } = -1;
+        public List<int> SelectedShapeIndices { get; set; } = new List<int>();
         public int SelectedPointIndex { get; set; } = -1;
         public int HoveredShapeIndex { get; set; } = -1;
         public int HoveredPointIndex { get; set; } = -1;
+
+        public bool HasSelection => SelectedShapeIndices.Count > 0;
 
         public static int GetNextId() => _shapeIdCounter++;
 
@@ -564,9 +566,37 @@ namespace hopperborder
             return (-1, -1);
         }
 
+        public void SelectShapesInRectangle(RectangleF rect, bool additive = false)
+        {
+            if (!additive)
+            {
+                SelectedShapeIndices.Clear();
+            }
+            for (int i = 0; i < Shapes.Count; i++)
+            {
+                if (additive && SelectedShapeIndices.Contains(i))
+                    continue;
+                    
+                var pts = Shapes[i].GetPoints();
+                bool inside = false;
+                foreach (var pt in pts)
+                {
+                    if (rect.Contains(pt))
+                    {
+                        inside = true;
+                        break;
+                    }
+                }
+                if (inside)
+                {
+                    SelectedShapeIndices.Add(i);
+                }
+            }
+        }
+
         public void ClearSelection()
         {
-            SelectedShapeIndex = -1;
+            SelectedShapeIndices.Clear();
             SelectedPointIndex = -1;
             HoveredShapeIndex = -1;
             HoveredPointIndex = -1;
@@ -669,11 +699,17 @@ namespace hopperborder
                 }
             }
 
-            if (annotation.SelectedShapeIndex >= 0 && annotation.SelectedShapeIndex < annotation.Shapes.Count)
+            if (annotation.HasSelection)
             {
-                var selectedShape = annotation.Shapes[annotation.SelectedShapeIndex];
-                float selectedThickness = annotation.LineThickness * selectedShape.ThicknessMultiplier;
-                RenderSelectionHandles(graphics, selectedShape, annotation.SelectedPointIndex, selectedThickness);
+                foreach (var shapeIdx in annotation.SelectedShapeIndices)
+                {
+                    if (shapeIdx >= 0 && shapeIdx < annotation.Shapes.Count)
+                    {
+                        var selectedShape = annotation.Shapes[shapeIdx];
+                        float selectedThickness = annotation.LineThickness * selectedShape.ThicknessMultiplier;
+                        RenderSelectionHandles(graphics, selectedShape, -1, selectedThickness);
+                    }
+                }
             }
 
             if (annotation.HoveredShapeIndex >= 0 && annotation.HoveredShapeIndex < annotation.Shapes.Count)

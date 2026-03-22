@@ -48,6 +48,16 @@ namespace hopperborder
 
         private List<Point3d> _currentPoints = new List<Point3d>();
 
+        private Point3d _windowSelectStart;
+        private bool _isWindowSelecting = false;
+        private bool _additiveSelection = false;
+        private Point3d _multiDragStart;
+        private bool _isMultiDragging = false;
+        private Point3d _clickStartPt;
+        private List<IGH_DocumentObject> _selectedGHObjects = new List<IGH_DocumentObject>();
+        private System.Windows.Forms.Timer _ghDragSyncTimer;
+        private Dictionary<IGH_DocumentObject, PointF> _ghObjectInitialPositions = new Dictionary<IGH_DocumentObject, PointF>();
+
         public BorderController()
             : base("Border Controller", "Border", "Draw and manage canvas borders", "Draw", "Primitive")
         {
@@ -173,6 +183,10 @@ namespace hopperborder
                 _canvas.KeyDown += Canvas_KeyDown;
                 _eventsRegistered = true;
             }
+
+            _ghDragSyncTimer = new System.Windows.Forms.Timer();
+            _ghDragSyncTimer.Interval = 16;
+            _ghDragSyncTimer.Tick += GhDragSyncTimer_Tick;
         }
 
         private void UnregisterCanvasEvents()
@@ -187,6 +201,14 @@ namespace hopperborder
                 _canvas.KeyDown -= Canvas_KeyDown;
             }
             _eventsRegistered = false;
+
+            if (_ghDragSyncTimer != null)
+            {
+                _ghDragSyncTimer.Stop();
+                _ghDragSyncTimer.Tick -= GhDragSyncTimer_Tick;
+                _ghDragSyncTimer.Dispose();
+                _ghDragSyncTimer = null;
+            }
         }
 
         private Point3d ScreenToCanvas(System.Drawing.Point screenPoint)
@@ -204,9 +226,16 @@ namespace hopperborder
             if (!_isActivated || _annotation == null)
                 return;
 
-            if (e.Button == MouseButtons.Right && _isDrawing)
+            if (e.Button == MouseButtons.Right)
             {
-                ShowColorPickerForDrawing();
+                if (_isDrawing)
+                {
+                    ShowColorPickerForDrawing();
+                }
+                else if (_annotation.HasSelection)
+                {
+                    ShowColorPickerForSelected();
+                }
                 return;
             }
 
@@ -220,13 +249,13 @@ namespace hopperborder
                                 (_lastClickPosition.DistanceTo(pt) < 10);
 
             bool ctrlPressed = (Control.ModifierKeys & Keys.Control) == Keys.Control;
+            bool shiftPressed = (Control.ModifierKeys & Keys.Shift) == Keys.Shift;
 
             if (_drawMode == 0)
             {
                 if (_isDrawing)
                 {
                     Point3d endPt = pt;
-                    bool shiftPressed = (Control.ModifierKeys & Keys.Shift) == Keys.Shift;
                     if (shiftPressed)
                     {
                         double dx = pt.X - _drawStart.X;
@@ -334,7 +363,6 @@ namespace hopperborder
                 if (_frameCornerCount == 1)
                 {
                     Point3d finalPt = pt;
-                    bool shiftPressed = (Control.ModifierKeys & Keys.Shift) == Keys.Shift;
                     if (shiftPressed)
                     {
                         double dx = pt.X - _frameFirstCorner.X;
@@ -378,31 +406,93 @@ namespace hopperborder
 
             if (shapeIdx >= 0)
             {
-                _annotation.SelectedShapeIndex = shapeIdx;
-                _annotation.SelectedPointIndex = pointIdx;
-                _dragShapeIndex = shapeIdx;
-                _dragPointIndex = pointIdx;
-
-                var shape = _annotation.Shapes[shapeIdx];
-                if (shape is FrameShape frame)
+                bool isAlreadySelected = _annotation.SelectedShapeIndices.Contains(shapeIdx);
+                bool hasSelectedGH = HasSelectedGHObjects();
+                bool multipleShapesSelected = _annotation.SelectedShapeIndices.Count > 1;
+                
+                if (shiftPressed)
                 {
-                    _isFrameDragging = true;
-                    _dragFrameOffset = pt;
-                    double w = Math.Abs(frame.TopRight.X - frame.TopLeft.X);
-                    double h = Math.Abs(frame.TopLeft.Y - frame.BottomLeft.Y);
-                    _dragAspectRatio = (h > 0) ? w / h : 1.0;
+                    if (isAlreadySelected)
+                    {
+                        _annotation.SelectedShapeIndices.Remove(shapeIdx);
+                    }
+                    else
+                    {
+                        _annotation.SelectedShapeIndices.Add(shapeIdx);
+                    }
+                    _annotation.SelectedPointIndex = pointIdx;
                 }
                 else
                 {
-                    _isFrameDragging = false;
-                    _dragOffset = pt;
+                    if (isAlreadySelected && pointIdx < 0 && (hasSelectedGH || multipleShapesSelected))
+                    {
+                        _annotation.SelectedPointIndex = pointIdx;
+                        _multiDragStart = pt;
+                        _isMultiDragging = true;
+                        CaptureSelectedGHObjects();
+                    }
+                    else if (isAlreadySelected && pointIdx < 0)
+                    {
+                        _annotation.SelectedPointIndex = pointIdx;
+                        _dragShapeIndex = shapeIdx;
+                        _dragPointIndex = pointIdx;
+
+                        var shape = _annotation.Shapes[shapeIdx];
+                        if (shape is FrameShape frame)
+                        {
+                            _isFrameDragging = true;
+                            _dragFrameOffset = pt;
+                            double w = Math.Abs(frame.TopRight.X - frame.TopLeft.X);
+                            double h = Math.Abs(frame.TopLeft.Y - frame.BottomLeft.Y);
+                            _dragAspectRatio = (h > 0) ? w / h : 1.0;
+                        }
+                        else
+                        {
+                            _isFrameDragging = false;
+                            _dragOffset = pt;
+                        }
+                        _isDragging = true;
+                    }
+                    else
+                    {
+                        _annotation.SelectedShapeIndices.Clear();
+                        _annotation.SelectedShapeIndices.Add(shapeIdx);
+                        _annotation.SelectedPointIndex = pointIdx;
+                        _dragShapeIndex = shapeIdx;
+                        _dragPointIndex = pointIdx;
+
+                        var shape = _annotation.Shapes[shapeIdx];
+                        if (shape is FrameShape frame)
+                        {
+                            _isFrameDragging = true;
+                            _dragFrameOffset = pt;
+                            double w = Math.Abs(frame.TopRight.X - frame.TopLeft.X);
+                            double h = Math.Abs(frame.TopLeft.Y - frame.BottomLeft.Y);
+                            _dragAspectRatio = (h > 0) ? w / h : 1.0;
+                        }
+                        else
+                        {
+                            _isFrameDragging = false;
+                            _dragOffset = pt;
+                        }
+                        _isDragging = true;
+                    }
                 }
-                _isDragging = true;
             }
-            else
+            else if (_annotation.HasSelection && HasSelectedGHObjects())
             {
-                _annotation.ClearSelection();
-                _isDragging = false;
+                _multiDragStart = pt;
+                _isMultiDragging = true;
+                CaptureSelectedGHObjects();
+            }
+            else if (_annotation.Shapes.Count > 0)
+            {
+                if (_annotation.HasSelection)
+                {
+                    CaptureGHObjectsAndStartSync(pt);
+                }
+                _clickStartPt = pt;
+                _additiveSelection = ctrlPressed;
             }
 
             _annotation.ExpireDisplay();
@@ -553,6 +643,50 @@ namespace hopperborder
                 _annotation.ExpireDisplay();
                 _canvas?.Invalidate();
             }
+            else if (_isMultiDragging && _annotation.HasSelection)
+            {
+                var deltaX = pt.X - _multiDragStart.X;
+                var deltaY = pt.Y - _multiDragStart.Y;
+                foreach (var idx in _annotation.SelectedShapeIndices)
+                {
+                    _annotation.Shapes[idx].Move(deltaX, deltaY);
+                }
+                foreach (var obj in _selectedGHObjects)
+                {
+                    var pivot = obj.Attributes.Pivot;
+                    obj.Attributes.Pivot = new PointF(
+                        pivot.X + (float)deltaX,
+                        pivot.Y + (float)deltaY);
+                }
+                _multiDragStart = pt;
+                _annotation.ExpireDisplay();
+                _canvas?.Invalidate();
+            }
+            else if (_isWindowSelecting)
+            {
+                _canvas?.Invalidate();
+            }
+            else if (_clickStartPt.IsValid)
+            {
+                double dx = Math.Abs(pt.X - _clickStartPt.X);
+                double dy = Math.Abs(pt.Y - _clickStartPt.Y);
+                if (dx > 5 || dy > 5)
+                {
+                    _windowSelectStart = _clickStartPt;
+                    _isWindowSelecting = true;
+                    if (!_additiveSelection)
+                    {
+                        _annotation.ClearSelection();
+                    }
+                }
+                else
+                {
+                    var (shapeIdx, pointIdx) = _annotation.HitTest(new PointF((float)pt.X, (float)pt.Y));
+                    _annotation.HoveredShapeIndex = shapeIdx >= 0 ? shapeIdx : -1;
+                    _annotation.HoveredPointIndex = pointIdx >= 0 ? pointIdx : -1;
+                }
+                _canvas?.Invalidate();
+            }
             else
             {
                 var (shapeIdx, pointIdx) = _annotation.HitTest(new PointF((float)pt.X, (float)pt.Y));
@@ -600,10 +734,37 @@ namespace hopperborder
                 }
                 _canvas?.Invalidate();
             }
+            else if (_isWindowSelecting)
+            {
+                var pt = ScreenToCanvas(e.Location);
+                float minX = (float)Math.Min(_windowSelectStart.X, pt.X);
+                float maxX = (float)Math.Max(_windowSelectStart.X, pt.X);
+                float minY = (float)Math.Min(_windowSelectStart.Y, pt.Y);
+                float maxY = (float)Math.Max(_windowSelectStart.Y, pt.Y);
+                RectangleF rect = new RectangleF(minX, minY, maxX - minX, maxY - minY);
+                _annotation.SelectShapesInRectangle(rect, _additiveSelection);
+                _isWindowSelecting = false;
+                _annotation.ExpireDisplay();
+                _canvas?.Invalidate();
+            }
+            else if (_clickStartPt.IsValid)
+            {
+                if (!_additiveSelection && _ghObjectInitialPositions.Count == 0 && !_isWindowSelecting)
+                {
+                    _annotation.ClearSelection();
+                }
+                _annotation.ExpireDisplay();
+                _canvas?.Invalidate();
+            }
 
             _isDragging = false;
+            _isMultiDragging = false;
             _dragShapeIndex = -1;
             _dragPointIndex = -1;
+            _clickStartPt = Point3d.Unset;
+            ClearCapturedGHObjects();
+            _ghDragSyncTimer?.Stop();
+            _ghObjectInitialPositions.Clear();
 
             _canvas?.Invalidate();
         }
@@ -629,21 +790,87 @@ namespace hopperborder
 
             if (ctrlPressed)
             {
-                if (e.KeyCode == Keys.D1 || e.KeyCode == Keys.NumPad1)
+                if (e.KeyCode == Keys.D0 || e.KeyCode == Keys.NumPad0)
                 {
-                    _currentThicknessMultiplier = 0.5f;
+                    if (_annotation.HasSelection)
+                    {
+                        foreach (var idx in _annotation.SelectedShapeIndices)
+                        {
+                            _annotation.Shapes[idx].ThicknessMultiplier = 1.0f;
+                        }
+                        _annotation.ExpireDisplay();
+                        _canvas?.Invalidate();
+                    }
+                    else if (!_isDrawing)
+                    {
+                        _currentThicknessMultiplier = 1.0f;
+                    }
+                    e.SuppressKeyPress = true;
+                    return;
+                }
+                else if (e.KeyCode == Keys.A)
+                {
+                    _annotation.SelectedShapeIndices.Clear();
+                    for (int i = 0; i < _annotation.Shapes.Count; i++)
+                    {
+                        _annotation.SelectedShapeIndices.Add(i);
+                    }
+                    _annotation.ExpireDisplay();
+                    _canvas?.Invalidate();
+                    e.SuppressKeyPress = true;
+                    return;
+                }
+                else if (e.KeyCode == Keys.D1 || e.KeyCode == Keys.NumPad1)
+                {
+                    if (_annotation.HasSelection)
+                    {
+                        foreach (var idx in _annotation.SelectedShapeIndices)
+                        {
+                            _annotation.Shapes[idx].ThicknessMultiplier = 0.5f;
+                        }
+                        _annotation.ExpireDisplay();
+                        _canvas?.Invalidate();
+                    }
+                    else if (!_isDrawing)
+                    {
+                        _currentThicknessMultiplier = 0.5f;
+                    }
                     e.SuppressKeyPress = true;
                     return;
                 }
                 else if (e.KeyCode == Keys.D2 || e.KeyCode == Keys.NumPad2)
                 {
-                    _currentThicknessMultiplier = 2.0f;
+                    if (_annotation.HasSelection)
+                    {
+                        foreach (var idx in _annotation.SelectedShapeIndices)
+                        {
+                            _annotation.Shapes[idx].ThicknessMultiplier = 2.0f;
+                        }
+                        _annotation.ExpireDisplay();
+                        _canvas?.Invalidate();
+                    }
+                    else if (!_isDrawing)
+                    {
+                        _currentThicknessMultiplier = 2.0f;
+                    }
                     e.SuppressKeyPress = true;
                     return;
                 }
                 else if (e.KeyCode == Keys.D3 || e.KeyCode == Keys.NumPad3)
                 {
-                    _currentThicknessMultiplier = 3.0f;
+                    if (_annotation.HasSelection)
+                    {
+                        foreach (var idx in _annotation.SelectedShapeIndices)
+                        {
+                            _annotation.Shapes[idx].ThicknessMultiplier = 3.0f;
+                        }
+                        _annotation.ExpireDisplay();
+                        _canvas?.Invalidate();
+                    }
+                    else if (!_isDrawing)
+                    {
+                        _currentThicknessMultiplier = 3.0f;
+                    }
                     e.SuppressKeyPress = true;
                     return;
                 }
@@ -711,13 +938,20 @@ namespace hopperborder
                     _annotation.ExpireDisplay();
                     e.SuppressKeyPress = true;
                 }
+                else if (_annotation.HasSelection)
+                {
+                    _annotation.ClearSelection();
+                    _annotation.ExpireDisplay();
+                    _canvas?.Invalidate();
+                    e.SuppressKeyPress = true;
+                }
             }
 
             if (e.KeyCode == Keys.Delete)
             {
-                if (_annotation.SelectedShapeIndex >= 0)
+                if (_annotation.HasSelection)
                 {
-                    DeleteSelectedShape();
+                    DeleteSelectedShapes();
                     e.SuppressKeyPress = true;
                 }
             }
@@ -725,12 +959,16 @@ namespace hopperborder
             _canvas?.Invalidate();
         }
 
-        private void DeleteSelectedShape()
+        private void DeleteSelectedShapes()
         {
-            if (_annotation.SelectedShapeIndex >= 0)
+            if (_annotation.HasSelection)
             {
-                _annotation.Shapes.RemoveAt(_annotation.SelectedShapeIndex);
-                _annotation.SelectedShapeIndex = -1;
+                var indicesToRemove = _annotation.SelectedShapeIndices.OrderByDescending(i => i).ToList();
+                foreach (var idx in indicesToRemove)
+                {
+                    _annotation.Shapes.RemoveAt(idx);
+                }
+                _annotation.ClearSelection();
                 _annotation.ExpireDisplay();
                 _canvas?.Invalidate();
             }
@@ -762,16 +1000,19 @@ namespace hopperborder
 
         private void ShowColorPickerForSelected()
         {
-            if (_annotation == null || _annotation.SelectedShapeIndex < 0)
+            if (_annotation == null || !_annotation.HasSelection)
                 return;
 
-            var shape = _annotation.Shapes[_annotation.SelectedShapeIndex];
+            var firstShape = _annotation.Shapes[_annotation.SelectedShapeIndices[0]];
             using (var dialog = new ColorDialog())
             {
-                dialog.Color = shape.OverrideColor ?? _borderColor;
+                dialog.Color = firstShape.OverrideColor ?? _borderColor;
                 if (dialog.ShowDialog() == DialogResult.OK)
                 {
-                    shape.OverrideColor = dialog.Color;
+                    foreach (var idx in _annotation.SelectedShapeIndices)
+                    {
+                        _annotation.Shapes[idx].OverrideColor = dialog.Color;
+                    }
                     _canvas?.Invalidate();
                 }
             }
@@ -799,6 +1040,122 @@ namespace hopperborder
                 _canvas?.Invalidate();
             };
             return item;
+        }
+
+        private void CaptureSelectedGHObjects()
+        {
+            _selectedGHObjects.Clear();
+            var canvas = Grasshopper.Instances.ActiveCanvas;
+            if (canvas?.Document != null)
+            {
+                foreach (var obj in canvas.Document.Objects)
+                {
+                    if (obj?.Attributes?.Selected == true)
+                    {
+                        _selectedGHObjects.Add(obj);
+                    }
+                }
+            }
+        }
+
+        private void ClearCapturedGHObjects()
+        {
+            _selectedGHObjects.Clear();
+        }
+
+        private bool HasSelectedGHObjects()
+        {
+            var canvas = Grasshopper.Instances.ActiveCanvas;
+            if (canvas?.Document != null)
+            {
+                foreach (var obj in canvas.Document.Objects)
+                {
+                    if (obj?.Attributes?.Selected == true)
+                        return true;
+                }
+            }
+            return false;
+        }
+
+        private void CaptureGHObjectsAndStartSync(Point3d pt)
+        {
+            _ghObjectInitialPositions.Clear();
+            var canvas = Grasshopper.Instances.ActiveCanvas;
+            if (canvas?.Document != null)
+            {
+                foreach (var obj in canvas.Document.Objects)
+                {
+                    if (obj?.Attributes?.Selected == true)
+                    {
+                        _ghObjectInitialPositions[obj] = obj.Attributes.Pivot;
+                    }
+                }
+            }
+            if (_ghObjectInitialPositions.Count > 0 && _ghDragSyncTimer != null)
+            {
+                _ghDragSyncTimer.Start();
+            }
+        }
+
+        private void GhDragSyncTimer_Tick(object sender, EventArgs e)
+        {
+            if (!_annotation.HasSelection || _ghObjectInitialPositions.Count == 0)
+            {
+                _ghDragSyncTimer?.Stop();
+                return;
+            }
+
+            var canvas = Grasshopper.Instances.ActiveCanvas;
+            if (canvas?.Document == null)
+            {
+                _ghDragSyncTimer?.Stop();
+                return;
+            }
+
+            bool anyMoved = false;
+            float totalDeltaX = 0;
+            float totalDeltaY = 0;
+            int movedCount = 0;
+
+            foreach (var kvp in _ghObjectInitialPositions)
+            {
+                var obj = kvp.Key;
+                if (obj?.Attributes == null) continue;
+
+                var currentPos = obj.Attributes.Pivot;
+                var initialPos = kvp.Value;
+                var deltaX = currentPos.X - initialPos.X;
+                var deltaY = currentPos.Y - initialPos.Y;
+
+                if (Math.Abs(deltaX) > 0.1f || Math.Abs(deltaY) > 0.1f)
+                {
+                    anyMoved = true;
+                    totalDeltaX += deltaX;
+                    totalDeltaY += deltaY;
+                    movedCount++;
+                }
+            }
+
+            if (anyMoved && movedCount > 0)
+            {
+                float avgDeltaX = totalDeltaX / movedCount;
+                float avgDeltaY = totalDeltaY / movedCount;
+
+                foreach (var idx in _annotation.SelectedShapeIndices)
+                {
+                    _annotation.Shapes[idx].Move(avgDeltaX, avgDeltaY);
+                }
+
+                var updatedPositions = new Dictionary<IGH_DocumentObject, PointF>();
+                foreach (var kvp in _ghObjectInitialPositions)
+                {
+                    updatedPositions[kvp.Key] = kvp.Key.Attributes.Pivot;
+                }
+                _ghObjectInitialPositions = updatedPositions;
+
+                _annotation.ExpireDisplay();
+                _canvas?.Invalidate();
+            }
         }
 
         public override void RemovedFromDocument(GH_Document document)
