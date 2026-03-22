@@ -43,6 +43,8 @@ namespace hopperborder
         private int _drawMode = 0;
         private int _frameCornerCount = 0;
         private Point3d _frameFirstCorner;
+        private float _currentThicknessMultiplier = 1.0f;
+        private Color? _pendingColorOverride;
 
         private List<Point3d> _currentPoints = new List<Point3d>();
 
@@ -58,9 +60,10 @@ namespace hopperborder
         {
             pManager.AddBooleanParameter("Active", "A", "Enable border drawing", GH_ParamAccess.item, true);
             pManager.AddBooleanParameter("Show", "S", "Display borders on canvas", GH_ParamAccess.item, true);
-            pManager.AddIntegerParameter("DrawMode", "M", "Drawing mode", GH_ParamAccess.item, 0);
-            pManager.AddColourParameter("Color", "C", "Border color", GH_ParamAccess.item, Color.Black);
-            pManager.AddNumberParameter("Thickness", "T", "Line thickness", GH_ParamAccess.item, 8.0);
+            pManager.AddIntegerParameter("DrawMode", "M", "Drawing mode: 0=Line, 1=Polyline, 2=Frame, 3=Curve", GH_ParamAccess.item, 0);
+            pManager.AddColourParameter("Color", "C", "Default border color. Right-click during drawing to set per-shape color override", GH_ParamAccess.item, Color.Black);
+            pManager.AddNumberParameter("Thickness", "T", "Base thickness. Use Ctrl+1 (0.5x), Ctrl+2 (2x), Ctrl+3 (3x) to modify", GH_ParamAccess.item, 8.0);
+            pManager.AddIntegerParameter("DrawOrder", "O", "0=Below components, 1=Above components", GH_ParamAccess.item, 1);
         }
 
         protected override void AfterSolveInstance()
@@ -72,6 +75,13 @@ namespace hopperborder
                 drawModeParam.AddNamedValue("Polyline", 1);
                 drawModeParam.AddNamedValue("Frame", 2);
                 drawModeParam.AddNamedValue("Curve", 3);
+            }
+
+            var drawOrderParam = Params.Input[5] as Param_Integer;
+            if (drawOrderParam != null)
+            {
+                drawOrderParam.AddNamedValue("Below", 0);
+                drawOrderParam.AddNamedValue("Above", 1);
             }
         }
 
@@ -95,6 +105,9 @@ namespace hopperborder
 
             double thickness = 8.0;
             DA.GetData(4, ref thickness);
+
+            int drawOrder = 0;
+            DA.GetData(5, ref drawOrder);
 
             _borderColor = color;
             _lineThickness = (float)thickness;
@@ -123,6 +136,7 @@ namespace hopperborder
                 _annotation.Visible = show && !this.Locked;
                 _annotation.BorderColor = _borderColor;
                 _annotation.LineThickness = _lineThickness;
+                _annotation.DrawOrder = drawOrder;
             }
 
             ExpirePreview(false);
@@ -190,6 +204,12 @@ namespace hopperborder
             if (!_isActivated || _annotation == null)
                 return;
 
+            if (e.Button == MouseButtons.Right && _isDrawing)
+            {
+                ShowColorPickerForDrawing();
+                return;
+            }
+
             if (e.Button != MouseButtons.Left)
                 return;
 
@@ -222,8 +242,13 @@ namespace hopperborder
                                 0);
                         }
                     }
-                    _annotation.Shapes.Add(new LineShape(_drawStart, endPt));
+                    var lineShape = new LineShape(_drawStart, endPt);
+                    lineShape.ThicknessMultiplier = _currentThicknessMultiplier;
+                    lineShape.OverrideColor = _pendingColorOverride;
+                    _annotation.Shapes.Add(lineShape);
                     _isDrawing = false;
+                    _pendingColorOverride = null;
+                    _currentThicknessMultiplier = 1.0f;
                     _annotation.ExpireDisplay();
                     _canvas?.Invalidate();
                     return;
@@ -257,9 +282,14 @@ namespace hopperborder
                 }
                 else if (_isDrawing && _currentPoints.Count >= 2 && isDoubleClick)
                 {
-                    _annotation.Shapes.Add(new PolylineShape(new List<Point3d>(_currentPoints), true));
+                    var polyShape = new PolylineShape(new List<Point3d>(_currentPoints), true);
+                    polyShape.ThicknessMultiplier = _currentThicknessMultiplier;
+                    polyShape.OverrideColor = _pendingColorOverride;
+                    _annotation.Shapes.Add(polyShape);
                     _currentPoints.Clear();
                     _isDrawing = false;
+                    _pendingColorOverride = null;
+                    _currentThicknessMultiplier = 1.0f;
                     _lastClickTime = DateTime.Now;
                     _lastClickPosition = pt;
                     _annotation.ExpireDisplay();
@@ -284,9 +314,14 @@ namespace hopperborder
                 }
                 else if (_isDrawing && _currentPoints.Count >= 2 && isDoubleClick)
                 {
-                    _annotation.Shapes.Add(new CurveShape(new List<Point3d>(_currentPoints), true));
+                    var curveShape = new CurveShape(new List<Point3d>(_currentPoints), true);
+                    curveShape.ThicknessMultiplier = _currentThicknessMultiplier;
+                    curveShape.OverrideColor = _pendingColorOverride;
+                    _annotation.Shapes.Add(curveShape);
                     _currentPoints.Clear();
                     _isDrawing = false;
+                    _pendingColorOverride = null;
+                    _currentThicknessMultiplier = 1.0f;
                     _lastClickTime = DateTime.Now;
                     _lastClickPosition = pt;
                     _annotation.ExpireDisplay();
@@ -381,7 +416,12 @@ namespace hopperborder
             Point3d topRight = new Point3d(bottomRight.X, topLeft.Y, 0);
             Point3d bottomLeft = new Point3d(topLeft.X, bottomRight.Y, 0);
 
-            _annotation.Shapes.Add(new FrameShape(topLeft, topRight, bottomRight, bottomLeft));
+            var frameShape = new FrameShape(topLeft, topRight, bottomRight, bottomLeft);
+            frameShape.ThicknessMultiplier = _currentThicknessMultiplier;
+            frameShape.OverrideColor = _pendingColorOverride;
+            _annotation.Shapes.Add(frameShape);
+            _pendingColorOverride = null;
+            _currentThicknessMultiplier = 1.0f;
             _annotation.ExpireDisplay();
         }
 
@@ -585,20 +625,52 @@ namespace hopperborder
             if (!_isActivated || _annotation == null)
                 return;
 
+            bool ctrlPressed = (Control.ModifierKeys & Keys.Control) == Keys.Control;
+
+            if (ctrlPressed)
+            {
+                if (e.KeyCode == Keys.D1 || e.KeyCode == Keys.NumPad1)
+                {
+                    _currentThicknessMultiplier = 0.5f;
+                    e.SuppressKeyPress = true;
+                    return;
+                }
+                else if (e.KeyCode == Keys.D2 || e.KeyCode == Keys.NumPad2)
+                {
+                    _currentThicknessMultiplier = 2.0f;
+                    e.SuppressKeyPress = true;
+                    return;
+                }
+                else if (e.KeyCode == Keys.D3 || e.KeyCode == Keys.NumPad3)
+                {
+                    _currentThicknessMultiplier = 3.0f;
+                    e.SuppressKeyPress = true;
+                    return;
+                }
+            }
+
             if (e.KeyCode == Keys.Enter)
             {
                 if (_currentPoints.Count >= 2)
                 {
                     if (_drawMode == 1)
                     {
-                        _annotation.Shapes.Add(new PolylineShape(new List<Point3d>(_currentPoints), false));
+                        var polyShape = new PolylineShape(new List<Point3d>(_currentPoints), false);
+                        polyShape.ThicknessMultiplier = _currentThicknessMultiplier;
+                        polyShape.OverrideColor = _pendingColorOverride;
+                        _annotation.Shapes.Add(polyShape);
                     }
                     else if (_drawMode == 3)
                     {
-                        _annotation.Shapes.Add(new CurveShape(new List<Point3d>(_currentPoints), false));
+                        var curveShape = new CurveShape(new List<Point3d>(_currentPoints), false);
+                        curveShape.ThicknessMultiplier = _currentThicknessMultiplier;
+                        curveShape.OverrideColor = _pendingColorOverride;
+                        _annotation.Shapes.Add(curveShape);
                     }
                     _currentPoints.Clear();
                     _isDrawing = false;
+                    _pendingColorOverride = null;
+                    _currentThicknessMultiplier = 1.0f;
                     _annotation.ExpireDisplay();
                     e.SuppressKeyPress = true;
                 }
@@ -607,13 +679,27 @@ namespace hopperborder
             {
                 if (_drawMode == 1 && _currentPoints.Count >= 2)
                 {
-                    _annotation.Shapes.Add(new PolylineShape(new List<Point3d>(_currentPoints), false));
+                    var polyShape = new PolylineShape(new List<Point3d>(_currentPoints), false);
+                    polyShape.ThicknessMultiplier = _currentThicknessMultiplier;
+                    polyShape.OverrideColor = _pendingColorOverride;
+                    _annotation.Shapes.Add(polyShape);
+                    _currentPoints.Clear();
+                    _isDrawing = false;
+                    _pendingColorOverride = null;
+                    _currentThicknessMultiplier = 1.0f;
+                    _annotation.ExpireDisplay();
+                    e.SuppressKeyPress = true;
                 }
                 else if (_drawMode == 3 && _currentPoints.Count >= 2)
                 {
-                    _annotation.Shapes.Add(new CurveShape(new List<Point3d>(_currentPoints), false));
+                    var curveShape = new CurveShape(new List<Point3d>(_currentPoints), false);
+                    curveShape.ThicknessMultiplier = _currentThicknessMultiplier;
+                    curveShape.OverrideColor = _pendingColorOverride;
+                    _annotation.Shapes.Add(curveShape);
                     _currentPoints.Clear();
                     _isDrawing = false;
+                    _pendingColorOverride = null;
+                    _currentThicknessMultiplier = 1.0f;
                     _annotation.ExpireDisplay();
                     e.SuppressKeyPress = true;
                 }
@@ -621,6 +707,7 @@ namespace hopperborder
                 {
                     _currentPoints.Clear();
                     _isDrawing = false;
+                    _pendingColorOverride = null;
                     _annotation.ExpireDisplay();
                     e.SuppressKeyPress = true;
                 }
@@ -673,6 +760,35 @@ namespace hopperborder
             return base.AppendMenuItems(menu);
         }
 
+        private void ShowColorPickerForSelected()
+        {
+            if (_annotation == null || _annotation.SelectedShapeIndex < 0)
+                return;
+
+            var shape = _annotation.Shapes[_annotation.SelectedShapeIndex];
+            using (var dialog = new ColorDialog())
+            {
+                dialog.Color = shape.OverrideColor ?? _borderColor;
+                if (dialog.ShowDialog() == DialogResult.OK)
+                {
+                    shape.OverrideColor = dialog.Color;
+                    _canvas?.Invalidate();
+                }
+            }
+        }
+
+        private void ShowColorPickerForDrawing()
+        {
+            using (var dialog = new ColorDialog())
+            {
+                dialog.Color = _pendingColorOverride ?? _borderColor;
+                if (dialog.ShowDialog() == DialogResult.OK)
+                {
+                    _pendingColorOverride = dialog.Color;
+                }
+            }
+        }
+
         private ToolStripMenuItem CreateModeMenuItem(string label, int mode)
         {
             var item = new ToolStripMenuItem(label);
@@ -713,5 +829,7 @@ namespace hopperborder
         public int DrawMode => _drawMode;
         public List<Point3d> CurrentPoints => _currentPoints;
         public Point3d FrameFirstCorner => _frameFirstCorner;
+        public float CurrentThicknessMultiplier => _currentThicknessMultiplier;
+        public Color? PendingColorOverride => _pendingColorOverride;
     }
 }

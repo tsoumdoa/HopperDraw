@@ -1,4 +1,4 @@
-# HopperBorder Implementation Plan v2
+# HopperBorder Implementation Plan v2 (Updated)
 
 ## Overview
 
@@ -6,14 +6,55 @@ A Grasshopper plugin that lets users draw thick visual border/separator lines on
 
 ---
 
+## User Stories (Implemented)
+
+### US1: Per-Shape Thickness Multiplier
+- **How to use:** Hold Ctrl and press 1 (0.5x), 2 (2x), or 3 (3x) to set thickness multiplier BEFORE or DURING drawing
+- Multiplier applies to newly created shapes
+- Preview shows correct thickness while drawing
+- Each shape tracks its own `ThicknessMultiplier`
+
+### US2: Drawing Order Control (Default: Above)
+- Set `DrawOrder` input: 0=Below (Objects channel), 1=Above (Overlay channel)
+- Default is **1 (Above)** - borders appear on top of GH components
+- Borders render in appropriate channel based on setting
+
+### US3: Per-Shape Color Override
+- **How to use:** Right-click during drawing mode to set color override for the NEXT shape
+- Right-click opens ColorDialog
+- Color applies to newly created shapes
+- Preview shows correct color while drawing
+- Each shape stores optional `OverrideColor` (nullable Color)
+- `null` = use component default color
+
+### US4: Fixed Serialization (Read was empty)
+- `Write()` now saves all shape data including new properties
+- `Read()` now properly restores all shapes with their properties
+- Shapes persist across save/reload
+
+---
+
+## Keyboard Shortcuts
+
+| Shortcut | Action |
+|----------|--------|
+| Ctrl+1 | Set thickness multiplier to 0.5x (half) |
+| Ctrl+2 | Set thickness multiplier to 2x (double) |
+| Ctrl+3 | Set thickness multiplier to 3x (triple) |
+| Right-click (during drawing) | Open color picker for next shape |
+| Shift (while drawing) | Constrain angle (45° snap) - works with thickness/color |
+
+---
+
 ## Architecture
 
-### Hybrid Approach: Custom GH_Annotation + Controller Component
+### Hybrid Approach: Custom GH_Component + Controller Component
 
 ```
 GH Document
-├── BorderAnnotation (GH_Annotation) - persistent border data
-│   ├── Renders borders on canvas
+├── BorderAnnotation (GH_Component) - persistent border data
+│   ├── Stores all DrawShape objects in Shapes list
+│   ├── Renders borders on canvas (Objects or Overlay channel)
 │   ├── Handles hit-testing for selection
 │   ├── Persists when controller is deleted
 │   └── Serializes with .gh file
@@ -21,7 +62,7 @@ GH Document
 └── BorderController (GH_Component) - UI controller
     ├── Draw mode: create new borders
     ├── Edit mode: select/move/resize/delete
-    ├── Menu: clear all, color picker, lock/unlock
+    ├── Menu: Clear All, Draw Mode submenu
     └── Manages annotation lifecycle
 ```
 
@@ -29,591 +70,197 @@ GH Document
 
 ## Class Structure
 
-### 1. BorderAnnotation.cs
-
-Inherits from `GH_Annotation` - provides native canvas annotation persistence.
+### DrawShape Hierarchy (BorderAnnotation.cs)
 
 ```csharp
-public class BorderAnnotation : GH_Annotation
+internal abstract class DrawShape
 {
-    // Data
-    public List<BorderLine> Borders { get; set; } = new();
+    public int Id { get; set; }
+    public float ThicknessMultiplier { get; set; } = 1.0f;  // US1: 0.5, 1.0, 2.0, 3.0
+    public Color? OverrideColor { get; set; }               // US3
+    
+    public abstract void Render(Graphics g, Pen pen, float thickness);
+    public abstract (bool hit, int pointIndex) HitTest(PointF pt, float tolerance, float thickness);
+    public abstract PointF[] GetPoints();
+    public abstract void Move(double dx, double dy);
+    public abstract void MovePoint(int pointIndex, Point3d newPos);
+    public abstract void Write(GH_IWriter writer, int index);
+    public abstract void Read(GH_IReader reader, int index);
+}
+
+internal class LineShape : DrawShape { ... }      // Type 0
+internal class PolylineShape : DrawShape { ... } // Type 1
+internal class FrameShape : DrawShape { ... }    // Type 2
+internal class CurveShape : DrawShape { ... }    // Type 3
+```
+
+### BorderAnnotation (BorderAnnotation.cs)
+
+```csharp
+internal class BorderAnnotation : GH_Component
+{
+    public List<DrawShape> Shapes { get; set; } = new List<DrawShape>();
     public Color BorderColor { get; set; } = Color.Black;
-    public float LineThickness { get; set; } = 3f;
-    public bool IsLocked { get; set; } = false;
+    public float LineThickness { get; set; } = 8f;
+    public int DrawOrder { get; set; } = 1;  // US2: Default = Above
+    public bool Visible { get; set; } = true;
     
     // Selection state (runtime only)
-    public int SelectedBorderIndex { get; set; } = -1;
-    public int HoveredHandleIndex { get; set; } = -1;
+    public int SelectedShapeIndex { get; set; } = -1;
     
-    // GH_Annotation overrides
-    public override Guid ComponentGuid => new Guid("...");
-    public override string Name => "Canvas Border";
-    public override string Category => "Draw";
-    public override string SubCategory => "Annotation";
-    
-    // Bounds for hit testing
-    public override RectangleF Bounds => CalculateUnionBounds();
-    
-    // Rendering
-    protected override void Render(GH_Canvas canvas, Graphics g, GH_CanvasChannel ch)
-    {
-        if (ch != GH_CanvasChannel.Annotation) return;
-        
-        // Render each border with color/thickness
-        // Draw selection handles on selected border
-    }
-    
-    // Hit testing
-    public override bool HitTest(PointF pt, GH_Canvas canvas)
-    {
-        // Test each border with tolerance
-    }
-    
-    // Serialization
+    // Serialization (US4)
     public override bool Write(GH_IWriter writer);
     public override bool Read(GH_IReader reader);
 }
-
-public class BorderLine
-{
-    public Point3d Start { get; set; }
-    public Point3d End { get; set; }
-}
 ```
 
-### 2. BorderController.cs
-
-Inherits from `GH_Component` - provides UI controls and event handling.
+### BorderController (BorderController.cs)
 
 ```csharp
 public class BorderController : GH_Component
 {
-    // State
-    private bool _isActivated;
-    private bool _isDrawingMode = true;
-    private Point3d _drawStart;
-    private Point3d _drawEnd;
-    private bool _isDrawing;
-    private bool _isDragging;
-    private int _dragBorderIndex = -1;
-    private int _dragHandleIndex = -1;
-    
-    // Reference to annotation
-    private BorderAnnotation _annotation;
+    // Runtime state
+    private float _currentThicknessMultiplier = 1.0f;  // US1
+    private Color? _pendingColorOverride;               // US3
     
     // Inputs
-    private GH_Boolean _inputEnable;
-    private GH_Colour _inputColor;
-    private GH_Number _inputThickness;
+    // 0: Active (bool)
+    // 1: Show (bool)
+    // 2: DrawMode (int: 0=Line, 1=Polyline, 2=Frame, 3=Curve)
+    // 3: Color (Color) - "Right-click during drawing to set per-shape color override"
+    // 4: Thickness (double) - "Base thickness. Use Ctrl+1 (0.5x), Ctrl+2 (2x), Ctrl+3 (3x)"
+    // 5: DrawOrder (int: 0=Below, 1=Above) - Default = 1 (Above)
     
-    // Canvas event registration
-    private GH_Canvas _canvas;
-    private bool _eventsRegistered;
-}
-```
-
-### 3. BorderControllerAttributes.cs
-
-Custom attributes - minimal visible UI (collapsed icon).
-
-```csharp
-public class BorderControllerAttributes : GH_ComponentAttributes
-{
-    protected override void Render(GH_Canvas canvas, Graphics g, GH_CanvasChannel ch)
-    {
-        // Render minimal collapsed icon
-    }
+    // Exposed properties for preview rendering
+    public float CurrentThicknessMultiplier => _currentThicknessMultiplier;
+    public Color? PendingColorOverride => _pendingColorOverride;
 }
 ```
 
 ---
 
-## Persistence (Requirement 1)
+## Preview Rendering (BorderModeUIAttributes.cs)
 
-### Problem
-Current borders disappear when the component that created them is deleted.
-
-### Solution: GH_Annotation
-
-1. **BorderAnnotation** is a `GH_Annotation` subclass added to the document
-2. Borders are stored in the annotation's `Borders` list
-3. When controller is deleted, annotation remains
-4. Serialization via Write/Read happens automatically
-
-### Flow
-
-```
-User draws → Controller creates BorderAnnotation
-           → Adds to document: doc.AddObject(annotation, false)
-           → All border data stored in annotation
-
-Controller deleted → Annotation persists on canvas
-
-Document saved → Annotation.Write() serializes borders
-Document loaded → Annotation.Read() restores borders
-```
-
----
-
-## Transparent Rectangle Suppression (Requirement 2)
-
-### Problem
-During drawing/dragging, a transparent preview rectangle appears.
-
-### Solution
-
-In `BorderController.Canvas_MouseDown`:
+The preview correctly applies thickness multiplier and color override:
 
 ```csharp
-private void Canvas_MouseDown(object sender, MouseEventArgs e)
-{
-    if (!_isActivated) return;
-    
-    // Suppress default selection rectangle
-    if (_canvas?.Viewport != null)
-    {
-        _canvas.Viewport.SuppressSelectionRectangle = true;
-    }
-    
-    // Drawing logic...
-}
-```
+float effectiveThickness = annotation.LineThickness * owner.CurrentThicknessMultiplier;
+Color effectiveColor = owner.PendingColorOverride ?? annotation.BorderColor;
 
-Reset in `Canvas_MouseUp`:
-
-```csharp
-private void Canvas_MouseUp(object sender, MouseEventArgs e)
+using (var pen = new Pen(effectiveColor, effectiveThickness))
 {
-    if (_canvas?.Viewport != null)
-    {
-        _canvas.Viewport.SuppressSelectionRectangle = false;
-    }
+    // Draw preview with correct thickness and color
 }
 ```
 
 ---
 
-## Colored Border Rendering (Requirement 3)
-
-### Rendering Pipeline
+## Drawing Flow with Thickness/Color Overrides
 
 ```
-GH_CanvasChannel order:
-1. Wires
-2. Objects  
-3. Annotation ← BorderAnnotation renders here
-4. Overlay (post-paint)
+1. User presses Ctrl+1/2/3 → Sets _currentThicknessMultiplier
+2. User right-clicks → Opens ColorDialog → Sets _pendingColorOverride
+3. User Ctrl+clicks to start drawing
+4. User optionally holds Shift while dragging to constrain angle
+5. On completion (left click to finish):
+   - Creates shape with _currentThicknessMultiplier applied
+   - Creates shape with _pendingColorOverride applied
+   - Clears _pendingColorOverride (but keeps multiplier for next shape)
 ```
-
-### Implementation
-
-In `BorderAnnotation.Render()`:
-
-```csharp
-protected override void Render(GH_Canvas canvas, Graphics g, GH_CanvasChannel ch)
-{
-    if (ch != GH_CanvasChannel.Annotation) return;
-    
-    using (var pen = new Pen(BorderColor, LineThickness))
-    {
-        foreach (var border in Borders)
-        {
-            var start = border.Start;
-            var end = border.End;
-            
-            // Constrain to orthogonal
-            var constrained = ConstrainToOrthogonal(start, end);
-            
-            // Draw line or rectangle based on size
-            if (IsRectangular(start, constrained))
-            {
-                g.DrawRectangle(pen, ...);
-            }
-            else
-            {
-                g.DrawLine(pen, ...);
-            }
-        }
-    }
-    
-    // Draw selection/hover states
-    if (SelectedBorderIndex >= 0)
-    {
-        DrawSelectionHandles(g, Borders[SelectedBorderIndex]);
-    }
-}
-```
-
-### Selection/Hover States
-
-| State | Visual |
-|-------|--------|
-| Normal | Border color, configured thickness |
-| Hovered | Slight brightness increase |
-| Selected | Handles at endpoints, different cursor |
 
 ---
 
-## Feature Implementation (Requirement 4)
+## Serialization
 
-### Adjustable Line Thickness
-
-- Input parameter: `GH_Number` for thickness
-- Stored in `BorderAnnotation.LineThickness`
-- Applied in render pen creation
-
-### Edit Mode
-
-- Menu toggle: "Edit Mode" checkbox
-- When enabled: MouseDown hits borders for selection
-- When disabled: MouseDown starts new border draw
-
-### Selecting Borders
-
-```csharp
-private void Canvas_MouseDown(object sender, MouseEventArgs e)
-{
-    var pt = ScreenToCanvas(e.Location);
-    
-    if (_annotation.HitTestHandles(pt, out int handleIdx))
-    {
-        _dragHandleIndex = handleIdx;
-        _isDragging = true;
-        _annotation.SelectedBorderIndex = handleIdx / 2;
-    }
-    else if (_annotation.HitTest(pt, out int borderIdx))
-    {
-        _annotation.SelectedBorderIndex = borderIdx;
-        _dragBorderIndex = borderIdx;
-        _isDragging = true;
-    }
-}
-```
-
-### Moving / Resizing
-
-- **Move entire border**: Drag center of border
-- **Reshape**: Drag endpoints (handled via handle indices)
-- Update coordinates in real-time during MouseMove
-
-### Delete Selected Border
-
-```csharp
-public void DeleteSelected()
-{
-    if (_annotation.SelectedBorderIndex >= 0)
-    {
-        var doc = OnPingDocument();
-        
-        // Create undo record
-        var before = _annotation.Borders.ToList();
-        _annotation.Borders.RemoveAt(_annotation.SelectedBorderIndex);
-        var after = _annotation.Borders.ToList();
-        
-        doc.UndoManager.Add(new GH_UndoRecord("Delete Border",
-            () => _annotation.Borders = before.ToList(),
-            () => _annotation.Borders = after.ToList()
-        ));
-        
-        _annotation.SelectedBorderIndex = -1;
-    }
-}
-```
-
-### Delete All Borders
-
-```csharp
-public void ClearAll()
-{
-    var doc = OnPingDocument();
-    var before = _annotation.Borders.ToList();
-    
-    _annotation.Borders.Clear();
-    
-    doc.UndoManager.Add(new GH_UndoRecord("Clear All Borders",
-        () => _annotation.Borders = before.ToList(),
-        () => _annotation.Borders = new List<BorderLine>()
-    ));
-}
-```
-
-### Color Picker
-
-```csharp
-private void ShowColorPicker()
-{
-    var dialog = new ColorDialog();
-    dialog.Color = _annotation.BorderColor;
-    
-    if (dialog.ShowDialog() == DialogResult.OK)
-    {
-        _annotation.BorderColor = dialog.Color;
-    }
-}
-```
-
-### Lock/Unlock
-
-```csharp
-public void ToggleLock()
-{
-    _annotation.IsLocked = !_annotation.IsLocked;
-}
-
-// In hit testing
-public override bool HitTest(...)
-{
-    if (IsLocked) return false;
-    // ... hit test logic
-}
-```
-
-### Z-Order / Draw Order
-
-- Order in `Borders` list = draw order
-- "Bring to Front": Move selected index to end
-- "Send to Back": Move selected index to 0
-
-### Snap/Alignment Behavior
-
-Optional feature:
-
-```csharp
-private Point3d ApplySnap(Point3d pt)
-{
-    if (!EnableSnap) return pt;
-    
-    var gridSize = 10.0; // Configurable
-    return new Point3d(
-        Math.Round(pt.X / gridSize) * gridSize,
-        Math.Round(pt.Y / gridSize) * gridSize,
-        0
-    );
-}
-```
-
-### Save/Load
-
-Automatic via `GH_Annotation` base class:
+### Write()
 
 ```csharp
 public override bool Write(GH_IWriter writer)
 {
-    writer.SetInt32("Count", Borders.Count);
-    for (int i = 0; i < Borders.Count; i++)
+    writer.SetInt32("ShapeCount", Shapes.Count);
+    writer.SetInt32("Color", BorderColor.ToArgb());
+    writer.SetDouble("Thickness", LineThickness);
+    writer.SetInt32("DrawOrder", DrawOrder);
+    
+    for (int i = 0; i < Shapes.Count; i++)
     {
-        writer.SetPoint3d($"Start{i}", Borders[i].Start);
-        writer.SetPoint3d($"End{i}", Borders[i].End);
+        Shapes[i].Write(writer, i);
     }
-    writer.SetColor("Color", BorderColor);
-    writer.SetFloat("Thickness", LineThickness);
-    writer.SetBoolean("Locked", IsLocked);
     return base.Write(writer);
 }
 ```
 
-### Undo/Redo Integration
-
-All modifications use `GH_UndoRecord`:
+### Per-Shape Write (example: LineShape)
 
 ```csharp
-private void ModifyWithUndo(string actionName, Action undo, Action redo)
+public override void Write(GH_IWriter writer, int index)
 {
-    var doc = OnPingDocument();
-    if (doc == null) return;
-    
-    redo(); // Apply change
-    
-    doc.UndoManager.Add(new GH_UndoRecord(actionName, undo, redo));
-    ExpireSolution(true);
-}
-```
-
-### Clean Hit-Testing
-
-- Use tolerance-based distance check
-- Test endpoints first, then line segments
-- Return closest hit
-
-```csharp
-public (int borderIndex, int handleIndex) HitTest(Point3d pt, float tolerance)
-{
-    for (int i = 0; i < Borders.Count; i++)
+    writer.SetDouble($"StartX{index}", Start.X);
+    writer.SetDouble($"StartY{index}", Start.Y);
+    writer.SetDouble($"StartZ{index}", Start.Z);
+    writer.SetDouble($"EndX{index}", End.X);
+    writer.SetDouble($"EndY{index}", End.Y);
+    writer.SetDouble($"EndZ{index}", End.Z);
+    writer.SetInt32($"Type{index}", 0);
+    writer.SetDouble($"ThickMult{index}", ThicknessMultiplier);
+    if (OverrideColor.HasValue)
     {
-        // Test handles first
-        if (Distance(pt, Borders[i].Start) < tolerance)
-            return (i, 0);
-        if (Distance(pt, Borders[i].End) < tolerance)
-            return (i, 1);
-        
-        // Test line segment
-        if (DistanceToLine(pt, Borders[i]) < tolerance)
-            return (i, -1);
+        writer.SetInt32($"Color{index}", OverrideColor.Value.ToArgb());
     }
-    return (-1, -1);
 }
 ```
 
 ---
 
-## Event Flow
+## Right-Click Menu (Simplified)
 
-### Activation Flow
+Only two items remain:
+1. **Draw Mode** submenu → Line, Polyline, Frame, Curve
+2. **Clear All** → Removes all shapes
 
-```
-User sets Enable = true
-  → RegisterCanvasEvents()
-  → FindOrCreateAnnotation()
-  → Subscribe to MouseDown/Move/Up
-```
+Removed: Thickness Override menu, Set Shape Color (now handled via keyboard shortcuts and right-click during drawing)
 
-### Drawing Flow
+---
 
-```
-MouseDown:
-  1. SuppressSelectionRectangle = true
-  2. Store _drawStart at cursor position
-  
-MouseMove:
-  1. Update _drawEnd
-  2. Invalidate canvas for preview
-  
-MouseUp:
-  1. SuppressSelectionRectangle = false
-  2. Create border from start to end
-  3. Add to annotation with undo record
-  4. Expire solution
-```
+## Files Modified
 
-### Selection/Edit Flow
+| File | Changes |
+|------|---------|
+| `BorderAnnotation.cs` | Added `ThicknessMultiplier` (float), `OverrideColor`; Added `DrawOrder` (default=1); Fixed `Write()`/`Read()`; Updated `Render()` for Objects/Overlay channel |
+| `BorderController.cs` | Added `DrawOrder` input; Added `CurrentThicknessMultiplier`, `PendingColorOverride` properties; Added right-click color picker; Added Ctrl+1/2/3 keyboard handling; Wired up all shape creations |
+| `BorderModeUIAttributes.cs` | Updated preview to use `effectiveThickness` and `effectiveColor` |
+| `plan_v2.md` | This document |
 
-```
-MouseDown:
-  1. Hit test borders and handles
-  2. If hit: set _dragBorderIndex, _dragHandleIndex
-  3. Set SelectedBorderIndex
-  
-MouseMove:
-  1. If dragging: update coordinates
-  2. Invalidate canvas
-  
-MouseUp:
-  1. Commit changes with undo record
-```
+---
 
-### Delete Flow
+## Implementation Status
+
+| Feature | Status | Location |
+|---------|--------|----------|
+| Per-shape thickness (0.5x/2x/3x) | ✅ Implemented | Ctrl+1/2/3 keys, `_currentThicknessMultiplier` |
+| Per-shape color override | ✅ Implemented | Right-click during drawing, `_pendingColorOverride` |
+| Drawing order control | ✅ Implemented | `DrawOrder` input, default=1 (Above) |
+| Fix empty Read() | ✅ Implemented | Full `Read()` with shape restoration |
+| Render in Objects/Overlay | ✅ Implemented | `BorderAnnotationAttributes.Render()` |
+| Preview with overrides | ✅ Implemented | `BorderModeUIAttributes.Render()` |
+| Tooltips | ✅ Implemented | Input parameter descriptions |
+
+---
+
+## Build Output
 
 ```
-Delete key pressed:
-  1. If selected: remove with undo record
-  2. Clear selection
-  3. Invalidate
+Build succeeded.
+- net48: hopperborder.gha
+- net7.0-windows: hopperborder.gha (locked by Rhino)
 ```
 
 ---
 
-## Key Grasshopper/RhinoCommon Classes
+## Open Questions / Future Enhancements
 
-| Class | Purpose |
-|-------|---------|
-| `GH_Annotation` | Base class for canvas annotations |
-| `GH_Component` | Base class for components |
-| `GH_ComponentAttributes` | Custom rendering for components |
-| `GH_Canvas` | Canvas control |
-| `GH_CanvasChannel` | Rendering channels (Wires, Objects, Annotation, Overlay) |
-| `GH_UndoRecord` | Undo/redo actions |
-| `GH_IWriter` / `GH_IReader` | Serialization |
-| `GH_Document` | Document container |
+1. **Remove color override** - Currently once set, user cannot easily remove the override to go back to default color. Could add "Use Default Color" option.
 
----
+2. **Undo/Redo** - Not yet implemented for any operations.
 
-## Serialization Details
-
-### Data to Persist
-
-| Field | Type | Key |
-|-------|------|-----|
-| Borders | List<BorderLine> | "Start{i}", "End{i}" |
-| BorderColor | Color | "Color" |
-| LineThickness | float | "Thickness" |
-| IsLocked | bool | "Locked" |
-
-### Write Pattern
-
-```csharp
-public override bool Write(GH_IWriter writer)
-{
-    writer.SetInt32("Count", Borders.Count);
-    for (int i = 0; i < Borders.Count; i++)
-    {
-        writer.SetPoint3d($"Start{i}", Borders[i].Start);
-        writer.SetPoint3d($"End{i}", Borders[i].End);
-    }
-    writer.SetColor("Color", BorderColor);
-    writer.SetFloat("Thickness", LineThickness);
-    writer.SetBoolean("Locked", IsLocked);
-    return base.Write(writer);
-}
-```
-
-### Read Pattern
-
-```csharp
-public override bool Read(GH_IReader reader)
-{
-    Borders.Clear();
-    int count = reader.GetInt32("Count");
-    for (int i = 0; i < count; i++)
-    {
-        Borders.Add(new BorderLine(
-            reader.GetPoint3d($"Start{i}"),
-            reader.GetPoint3d($"End{i}")
-        ));
-    }
-    BorderColor = reader.GetColor("Color");
-    LineThickness = reader.GetFloat("Thickness");
-    IsLocked = reader.GetBoolean("Locked");
-    return base.Read(reader);
-}
-```
-
----
-
-## Tradeoffs
-
-| Approach | Pros | Cons |
-|----------|------|------|
-| **GH_Annotation (chosen)** | Native persistence, independent, built-in selection | More complex hit-testing |
-| Hidden helper component | Simple, keeps current architecture | Data conceptually tied to component |
-| Document user data | Pure document-level | No visual representation |
-
----
-
-## Implementation Order
-
-1. Create `BorderAnnotation.cs` with data model
-2. Add Write/Read serialization
-3. Implement Render method
-4. Add HitTest method
-5. Create `BorderController.cs` component
-6. Add canvas event handlers
-7. Implement draw mode
-8. Add transparent rect suppression
-9. Implement selection/move/resize
-10. Add undo records
-11. Add menu items (clear, color, lock)
-12. Test persistence when component deleted
-
----
-
-## File Structure
-
-```
-hopperborder/
-├── hopperborder.csproj
-├── hopperborderInfo.cs
-├── BorderAnnotation.cs      # NEW - annotation class
-├── BorderController.cs      # NEW - controller component
-└── BorderAnnotationAttributes.cs  # NEW - annotation attributes
-```
+3. **Default thickness multiplier input** - Currently only via Ctrl+1/2/3 before drawing. Could add component input for default multiplier.

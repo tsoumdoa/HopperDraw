@@ -19,11 +19,16 @@ namespace hopperborder
     internal abstract class DrawShape
     {
         public int Id { get; set; }
+        public float ThicknessMultiplier { get; set; } = 1.0f;
+        public Color? OverrideColor { get; set; }
+
         public abstract void Render(Graphics g, Pen pen, float thickness);
         public abstract (bool hit, int pointIndex) HitTest(PointF pt, float tolerance, float thickness);
         public abstract PointF[] GetPoints();
         public abstract void Move(double dx, double dy);
         public abstract void MovePoint(int pointIndex, Point3d newPos);
+        public abstract void Write(GH_IWriter writer, int index);
+        public abstract void Read(GH_IReader reader, int index);
     }
 
     internal class LineShape : DrawShape
@@ -63,6 +68,40 @@ namespace hopperborder
         {
             if (pointIndex == 0) Start = newPos;
             else if (pointIndex == 1) End = newPos;
+        }
+
+        public override void Write(GH_IWriter writer, int index)
+        {
+            writer.SetDouble($"StartX{index}", Start.X);
+            writer.SetDouble($"StartY{index}", Start.Y);
+            writer.SetDouble($"StartZ{index}", Start.Z);
+            writer.SetDouble($"EndX{index}", End.X);
+            writer.SetDouble($"EndY{index}", End.Y);
+            writer.SetDouble($"EndZ{index}", End.Z);
+            writer.SetInt32($"Type{index}", 0);
+            writer.SetDouble($"ThickMult{index}", ThicknessMultiplier);
+            if (OverrideColor.HasValue)
+            {
+                writer.SetInt32($"Color{index}", OverrideColor.Value.ToArgb());
+            }
+        }
+
+        public override void Read(GH_IReader reader, int index)
+        {
+            double sx = reader.GetDouble($"StartX{index}");
+            double sy = reader.GetDouble($"StartY{index}");
+            double sz = reader.GetDouble($"StartZ{index}");
+            double ex = reader.GetDouble($"EndX{index}");
+            double ey = reader.GetDouble($"EndY{index}");
+            double ez = reader.GetDouble($"EndZ{index}");
+            Start = new Point3d(sx, sy, sz);
+            End = new Point3d(ex, ey, ez);
+            ThicknessMultiplier = (float)reader.GetDouble($"ThickMult{index}");
+            int colorArgb = reader.GetInt32($"Color{index}");
+            if (colorArgb != 0)
+            {
+                OverrideColor = Color.FromArgb(colorArgb);
+            }
         }
 
         private float DistanceToSegment(PointF pt, PointF a, PointF b)
@@ -134,6 +173,44 @@ namespace hopperborder
                 Points[pointIndex] = newPos;
         }
 
+        public override void Write(GH_IWriter writer, int index)
+        {
+            writer.SetInt32($"PointCount{index}", Points.Count);
+            writer.SetBoolean($"Closed{index}", Closed);
+            for (int i = 0; i < Points.Count; i++)
+            {
+                writer.SetDouble($"Pt{i}X{index}", Points[i].X);
+                writer.SetDouble($"Pt{i}Y{index}", Points[i].Y);
+                writer.SetDouble($"Pt{i}Z{index}", Points[i].Z);
+            }
+            writer.SetInt32($"Type{index}", 1);
+            writer.SetDouble($"ThickMult{index}", ThicknessMultiplier);
+            if (OverrideColor.HasValue)
+            {
+                writer.SetInt32($"Color{index}", OverrideColor.Value.ToArgb());
+            }
+        }
+
+        public override void Read(GH_IReader reader, int index)
+        {
+            int count = reader.GetInt32($"PointCount{index}");
+            Closed = reader.GetBoolean($"Closed{index}");
+            Points.Clear();
+            for (int i = 0; i < count; i++)
+            {
+                double px = reader.GetDouble($"Pt{i}X{index}");
+                double py = reader.GetDouble($"Pt{i}Y{index}");
+                double pz = reader.GetDouble($"Pt{i}Z{index}");
+                Points.Add(new Point3d(px, py, pz));
+            }
+            ThicknessMultiplier = (float)reader.GetDouble($"ThickMult{index}");
+            int colorArgb = reader.GetInt32($"Color{index}");
+            if (colorArgb != 0)
+            {
+                OverrideColor = Color.FromArgb(colorArgb);
+            }
+        }
+
         private float DistanceToSegment(PointF pt, PointF a, PointF b)
         {
             float dx = b.X - a.X;
@@ -199,6 +276,44 @@ namespace hopperborder
         {
             if (pointIndex >= 0 && pointIndex < Points.Count)
                 Points[pointIndex] = newPos;
+        }
+
+        public override void Write(GH_IWriter writer, int index)
+        {
+            writer.SetInt32($"PointCount{index}", Points.Count);
+            writer.SetBoolean($"Closed{index}", Closed);
+            for (int i = 0; i < Points.Count; i++)
+            {
+                writer.SetDouble($"Pt{i}X{index}", Points[i].X);
+                writer.SetDouble($"Pt{i}Y{index}", Points[i].Y);
+                writer.SetDouble($"Pt{i}Z{index}", Points[i].Z);
+            }
+            writer.SetInt32($"Type{index}", 3);
+            writer.SetDouble($"ThickMult{index}", ThicknessMultiplier);
+            if (OverrideColor.HasValue)
+            {
+                writer.SetInt32($"Color{index}", OverrideColor.Value.ToArgb());
+            }
+        }
+
+        public override void Read(GH_IReader reader, int index)
+        {
+            int count = reader.GetInt32($"PointCount{index}");
+            Closed = reader.GetBoolean($"Closed{index}");
+            Points.Clear();
+            for (int i = 0; i < count; i++)
+            {
+                double px = reader.GetDouble($"Pt{i}X{index}");
+                double py = reader.GetDouble($"Pt{i}Y{index}");
+                double pz = reader.GetDouble($"Pt{i}Z{index}");
+                Points.Add(new Point3d(px, py, pz));
+            }
+            ThicknessMultiplier = (float)reader.GetDouble($"ThickMult{index}");
+            int colorArgb = reader.GetInt32($"Color{index}");
+            if (colorArgb != 0)
+            {
+                OverrideColor = Color.FromArgb(colorArgb);
+            }
         }
 
         private List<PointF> SampleCurve(int segmentsPerSpan)
@@ -335,6 +450,42 @@ namespace hopperborder
             }
         }
 
+        public override void Write(GH_IWriter writer, int index)
+        {
+            writer.SetDouble($"TLX{index}", TopLeft.X);
+            writer.SetDouble($"TLY{index}", TopLeft.Y);
+            writer.SetDouble($"TLZ{index}", TopLeft.Z);
+            writer.SetDouble($"TRX{index}", TopRight.X);
+            writer.SetDouble($"TRY{index}", TopRight.Y);
+            writer.SetDouble($"TRZ{index}", TopRight.Z);
+            writer.SetDouble($"BRX{index}", BottomRight.X);
+            writer.SetDouble($"BRY{index}", BottomRight.Y);
+            writer.SetDouble($"BRZ{index}", BottomRight.Z);
+            writer.SetDouble($"BLX{index}", BottomLeft.X);
+            writer.SetDouble($"BLY{index}", BottomLeft.Y);
+            writer.SetDouble($"BLZ{index}", BottomLeft.Z);
+            writer.SetInt32($"Type{index}", 2);
+            writer.SetDouble($"ThickMult{index}", ThicknessMultiplier);
+            if (OverrideColor.HasValue)
+            {
+                writer.SetInt32($"Color{index}", OverrideColor.Value.ToArgb());
+            }
+        }
+
+        public override void Read(GH_IReader reader, int index)
+        {
+            TopLeft = new Point3d(reader.GetDouble($"TLX{index}"), reader.GetDouble($"TLY{index}"), reader.GetDouble($"TLZ{index}"));
+            TopRight = new Point3d(reader.GetDouble($"TRX{index}"), reader.GetDouble($"TRY{index}"), reader.GetDouble($"TRZ{index}"));
+            BottomRight = new Point3d(reader.GetDouble($"BRX{index}"), reader.GetDouble($"BRY{index}"), reader.GetDouble($"BRZ{index}"));
+            BottomLeft = new Point3d(reader.GetDouble($"BLX{index}"), reader.GetDouble($"BLY{index}"), reader.GetDouble($"BLZ{index}"));
+            ThicknessMultiplier = (float)reader.GetDouble($"ThickMult{index}");
+            int colorArgb = reader.GetInt32($"Color{index}");
+            if (colorArgb != 0)
+            {
+                OverrideColor = Color.FromArgb(colorArgb);
+            }
+        }
+
         private bool HitTestLine(PointF pt, PointF a, PointF b, float thickness, float tolerance) => DistanceToSegment(pt, a, b) <= thickness / 2 + tolerance;
 
         private float DistanceToSegment(PointF pt, PointF a, PointF b)
@@ -357,6 +508,7 @@ namespace hopperborder
         public List<DrawShape> Shapes { get; set; } = new List<DrawShape>();
         public Color BorderColor { get; set; } = Color.Black;
         public float LineThickness { get; set; } = 8f;
+        public int DrawOrder { get; set; } = 1;
         public bool Visible { get; set; } = true;
         public BorderController Controller { get; set; }
 
@@ -436,12 +588,46 @@ namespace hopperborder
             writer.SetInt32("ShapeCount", Shapes.Count);
             writer.SetInt32("Color", BorderColor.ToArgb());
             writer.SetDouble("Thickness", LineThickness);
+            writer.SetInt32("DrawOrder", DrawOrder);
+            for (int i = 0; i < Shapes.Count; i++)
+            {
+                Shapes[i].Write(writer, i);
+            }
             return base.Write(writer);
         }
 
         public override bool Read(GH_IReader reader)
         {
             Shapes.Clear();
+            int count = reader.GetInt32("ShapeCount");
+            BorderColor = Color.FromArgb(reader.GetInt32("Color"));
+            LineThickness = (float)reader.GetDouble("Thickness");
+            DrawOrder = reader.GetInt32("DrawOrder");
+            for (int i = 0; i < count; i++)
+            {
+                int type = reader.GetInt32($"Type{i}");
+                DrawShape shape;
+                switch (type)
+                {
+                    case 0:
+                        shape = new LineShape();
+                        break;
+                    case 1:
+                        shape = new PolylineShape();
+                        break;
+                    case 2:
+                        shape = new FrameShape();
+                        break;
+                    case 3:
+                        shape = new CurveShape();
+                        break;
+                    default:
+                        shape = new LineShape();
+                        break;
+                }
+                shape.Read(reader, i);
+                Shapes.Add(shape);
+            }
             return base.Read(reader);
         }
     }
@@ -452,13 +638,20 @@ namespace hopperborder
 
         protected override void Render(GH_Canvas canvas, Graphics graphics, GH_CanvasChannel channel)
         {
-            if (channel != GH_CanvasChannel.Objects)
+            var annotation = (BorderAnnotation)Owner;
+
+            bool shouldRenderInThisChannel = 
+                (annotation.DrawOrder == 0 && channel == GH_CanvasChannel.Objects) ||
+                (annotation.DrawOrder == 1 && channel == GH_CanvasChannel.Overlay);
+
+            if (!shouldRenderInThisChannel)
             {
-                base.Render(canvas, graphics, channel);
+                if (channel == GH_CanvasChannel.Objects || channel == GH_CanvasChannel.Overlay)
+                {
+                    base.Render(canvas, graphics, channel);
+                }
                 return;
             }
-
-            var annotation = (BorderAnnotation)Owner;
 
             if (!annotation.Visible || (annotation.Controller != null && annotation.Controller.Locked))
             {
@@ -466,22 +659,28 @@ namespace hopperborder
                 return;
             }
 
-            using (var pen = new Pen(annotation.BorderColor, annotation.LineThickness))
+            foreach (var shape in annotation.Shapes)
             {
-                foreach (var shape in annotation.Shapes)
+                float effectiveThickness = annotation.LineThickness * shape.ThicknessMultiplier;
+                Color effectiveColor = shape.OverrideColor ?? annotation.BorderColor;
+                using (var pen = new Pen(effectiveColor, effectiveThickness))
                 {
-                    shape.Render(graphics, pen, annotation.LineThickness);
+                    shape.Render(graphics, pen, effectiveThickness);
                 }
             }
 
             if (annotation.SelectedShapeIndex >= 0 && annotation.SelectedShapeIndex < annotation.Shapes.Count)
             {
-                RenderSelectionHandles(graphics, annotation.Shapes[annotation.SelectedShapeIndex], annotation.SelectedPointIndex, annotation.LineThickness);
+                var selectedShape = annotation.Shapes[annotation.SelectedShapeIndex];
+                float selectedThickness = annotation.LineThickness * selectedShape.ThicknessMultiplier;
+                RenderSelectionHandles(graphics, selectedShape, annotation.SelectedPointIndex, selectedThickness);
             }
 
             if (annotation.HoveredShapeIndex >= 0 && annotation.HoveredShapeIndex < annotation.Shapes.Count)
             {
-                RenderHoverHandles(graphics, annotation.Shapes[annotation.HoveredShapeIndex], annotation.HoveredPointIndex, annotation.LineThickness);
+                var hoveredShape = annotation.Shapes[annotation.HoveredShapeIndex];
+                float hoveredThickness = annotation.LineThickness * hoveredShape.ThicknessMultiplier;
+                RenderHoverHandles(graphics, hoveredShape, annotation.HoveredPointIndex, hoveredThickness);
             }
         }
 

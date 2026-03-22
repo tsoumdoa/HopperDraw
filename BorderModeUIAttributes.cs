@@ -71,8 +71,10 @@ namespace hopperborder
             if (!owner.Locked && owner.IsActivated && owner.Annotation != null && owner.Annotation.Visible)
             {
                 var annotation = owner.Annotation;
+                float effectiveThickness = annotation.LineThickness * owner.CurrentThicknessMultiplier;
+                Color effectiveColor = owner.PendingColorOverride ?? annotation.BorderColor;
 
-                using (var pen = new Pen(annotation.BorderColor, annotation.LineThickness))
+                using (var pen = new Pen(effectiveColor, effectiveThickness))
                 {
                     if (owner.DrawMode == 0 && owner.IsDrawing && owner.DrawStart.IsValid && owner.DrawEnd.IsValid)
                     {
