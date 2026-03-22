@@ -149,12 +149,6 @@ namespace hopperborder
                     {
                         var pts = owner.CurrentPoints;
 
-                        if (pts.Count >= 2)
-                        {
-                            var points = pts.Select(p => new PointF((float)p.X, (float)p.Y)).ToArray();
-                            graphics.DrawCurve(pen, points, 0.5f);
-                        }
-
                         if (_previewPoint.IsValid && pts.Count > 0)
                         {
                             var lastPt = pts[pts.Count - 1];
@@ -178,15 +172,31 @@ namespace hopperborder
                                 }
                             }
 
-                            graphics.DrawLine(pen,
-                                (float)lastPt.X, (float)lastPt.Y,
-                                (float)endPt.X, (float)endPt.Y);
+                            var previewPoints = new List<PointF>();
+                            previewPoints.AddRange(pts.Select(p => new PointF((float)p.X, (float)p.Y)));
+                            previewPoints.Add(new PointF((float)endPt.X, (float)endPt.Y));
+
+                            if (previewPoints.Count >= 2)
+                            {
+                                graphics.DrawCurve(pen, previewPoints.ToArray(), 0.5f);
+                            }
+                        }
+                        else if (pts.Count >= 2)
+                        {
+                            var points = pts.Select(p => new PointF((float)p.X, (float)p.Y)).ToArray();
+                            graphics.DrawCurve(pen, points, 0.5f);
                         }
 
                         foreach (var p in pts)
                         {
                             graphics.FillRectangle(new SolidBrush(Color.White), (float)p.X - 4, (float)p.Y - 4, 8, 8);
                             graphics.DrawRectangle(new Pen(Color.FromArgb(200, 0, 120, 215), 2), (int)p.X - 4, (int)p.Y - 4, 8, 8);
+                        }
+
+                        if (_previewPoint.IsValid)
+                        {
+                            graphics.FillRectangle(new SolidBrush(Color.Yellow), (float)_previewPoint.X - 4, (float)_previewPoint.Y - 4, 8, 8);
+                            graphics.DrawRectangle(new Pen(Color.FromArgb(200, 0, 120, 215), 2), (int)_previewPoint.X - 4, (int)_previewPoint.Y - 4, 8, 8);
                         }
                     }
                     else if (owner.DrawMode == 2 && owner.IsDrawing && owner.FrameFirstCorner.IsValid && _previewPoint.IsValid)
