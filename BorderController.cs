@@ -874,6 +874,26 @@ namespace hopperborder
                     e.SuppressKeyPress = true;
                     return;
                 }
+                else if (e.KeyCode == Keys.D)
+                {
+                    if (_annotation.HasSelection && !_isDrawing)
+                    {
+                        var newIndices = new List<int>();
+                        foreach (var idx in _annotation.SelectedShapeIndices)
+                        {
+                            var clone = _annotation.Shapes[idx].Clone();
+                            clone.Move(15, 15);
+                            _annotation.Shapes.Add(clone);
+                            newIndices.Add(_annotation.Shapes.Count - 1);
+                        }
+                        _annotation.SelectedShapeIndices.Clear();
+                        _annotation.SelectedShapeIndices.AddRange(newIndices);
+                        _annotation.ExpireDisplay();
+                        _canvas?.Invalidate();
+                        e.SuppressKeyPress = true;
+                        return;
+                    }
+                }
             }
 
             if (e.KeyCode == Keys.Enter)

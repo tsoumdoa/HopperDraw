@@ -29,6 +29,7 @@ namespace hopperborder
         public abstract void MovePoint(int pointIndex, Point3d newPos);
         public abstract void Write(GH_IWriter writer, int index);
         public abstract void Read(GH_IReader reader, int index);
+        public abstract DrawShape Clone();
     }
 
     internal class LineShape : DrawShape
@@ -115,6 +116,16 @@ namespace hopperborder
         }
 
         private float Distance(PointF a, PointF b) => (float)Math.Sqrt((a.X - b.X) * (a.X - b.X) + (a.Y - b.Y) * (a.Y - b.Y));
+
+        public override DrawShape Clone()
+        {
+            return new LineShape(Start, End)
+            {
+                ThicknessMultiplier = ThicknessMultiplier,
+                OverrideColor = OverrideColor,
+                Id = BorderAnnotation.GetNextId()
+            };
+        }
     }
 
     internal class PolylineShape : DrawShape
@@ -222,6 +233,16 @@ namespace hopperborder
         }
 
         private float Distance(PointF a, PointF b) => (float)Math.Sqrt((a.X - b.X) * (a.X - b.X) + (a.Y - b.Y) * (a.Y - b.Y));
+
+        public override DrawShape Clone()
+        {
+            return new PolylineShape(new List<Point3d>(Points), Closed)
+            {
+                ThicknessMultiplier = ThicknessMultiplier,
+                OverrideColor = OverrideColor,
+                Id = BorderAnnotation.GetNextId()
+            };
+        }
     }
 
     internal class CurveShape : DrawShape
@@ -389,6 +410,16 @@ namespace hopperborder
         }
 
         private float Distance(PointF a, PointF b) => (float)Math.Sqrt((a.X - b.X) * (a.X - b.X) + (a.Y - b.Y) * (a.Y - b.Y));
+
+        public override DrawShape Clone()
+        {
+            return new CurveShape(new List<Point3d>(Points), Closed)
+            {
+                ThicknessMultiplier = ThicknessMultiplier,
+                OverrideColor = OverrideColor,
+                Id = BorderAnnotation.GetNextId()
+            };
+        }
     }
 
     internal class FrameShape : DrawShape
@@ -499,6 +530,16 @@ namespace hopperborder
         }
 
         private float Distance(PointF a, PointF b) => (float)Math.Sqrt((a.X - b.X) * (a.X - b.X) + (a.Y - b.Y) * (a.Y - b.Y));
+
+        public override DrawShape Clone()
+        {
+            return new FrameShape(TopLeft, TopRight, BottomRight, BottomLeft)
+            {
+                ThicknessMultiplier = ThicknessMultiplier,
+                OverrideColor = OverrideColor,
+                Id = BorderAnnotation.GetNextId()
+            };
+        }
     }
 
     internal class BorderAnnotation : GH_Component
