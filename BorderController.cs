@@ -469,7 +469,7 @@ namespace hopperborder
                 }
                 else
                 {
-                    if (isAlreadySelected && pointIdx < 0 && (hasSelectedGH || multipleShapesSelected))
+                    if (multipleShapesSelected && isAlreadySelected && pointIdx < 0)
                     {
                         _annotation.SelectedPointIndex = pointIdx;
                         _multiDragStart = pt;
@@ -938,7 +938,7 @@ namespace hopperborder
                         foreach (var idx in _annotation.SelectedShapeIndices)
                         {
                             var clone = _annotation.Shapes[idx].Clone();
-                            clone.Move(15, 15);
+                            clone.Move(30, 30);
                             _annotation.Shapes.Add(clone);
                             newIndices.Add(_annotation.Shapes.Count - 1);
                         }
