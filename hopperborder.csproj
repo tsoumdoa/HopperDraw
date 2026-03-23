@@ -23,6 +23,10 @@
   </PropertyGroup>
   
   <ItemGroup>
+    <None Remove="nul" />
+  </ItemGroup>
+  
+  <ItemGroup>
     <PackageReference Include="Grasshopper" Version="8.0.23304.9001" ExcludeAssets="runtime" />
   </ItemGroup>
   

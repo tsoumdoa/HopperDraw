@@ -188,6 +188,12 @@ Shapes can be selected and manipulated:
 3. **Multi-Drag**: Click on any selected shape and drag to move all selected shapes together
 4. **Bulk Operations**: Ctrl+1/2/3 and right-click color change apply to ALL selected shapes
 
+## Limitations
+
+- Drawn elements cannot be used to drag GH components behind them
+- Selection boundary does not include drawn elements
+- Ctrl+A (select all) creates a selection bounding box that incorrectly includes objects far up in the top-left
+
 ## Technical Notes
 
 ### Why Use GH_CanvasChannel.Overlay?
