@@ -72,7 +72,7 @@ namespace hopperborder
             pManager.AddBooleanParameter("Show", "S", "Display borders on canvas", GH_ParamAccess.item, true);
             pManager.AddIntegerParameter("DrawMode", "M", "Drawing mode: 0=Line, 1=Polyline, 2=Frame, 3=Curve", GH_ParamAccess.item, 0);
             pManager.AddColourParameter("Color", "C", "Default border color. Right-click during drawing to set per-shape color override", GH_ParamAccess.item, Color.Black);
-            pManager.AddNumberParameter("Thickness", "T", "Base thickness. Use Ctrl+1 (0.5x), Ctrl+2 (2x), Ctrl+3 (3x) to modify", GH_ParamAccess.item, 8.0);
+            pManager.AddNumberParameter("Thickness", "T", "Base thickness. Use Ctrl+1 (0.5x), Ctrl+2 (2x), Ctrl+3 (1x default) to modify", GH_ParamAccess.item, 8.0);
             pManager.AddIntegerParameter("DrawOrder", "O", "0=Below components, 1=Above components", GH_ParamAccess.item, 1);
         }
 
@@ -842,26 +842,7 @@ namespace hopperborder
 
             if (ctrlPressed)
             {
-                if (e.KeyCode == Keys.D0 || e.KeyCode == Keys.NumPad0)
-                {
-                    if (_annotation.HasSelection)
-                    {
-                        foreach (var idx in _annotation.SelectedShapeIndices)
-                        {
-                            _annotation.Shapes[idx].ThicknessMultiplier = 1.0f;
-                        }
-                        MarkDocumentModified();
-                        _annotation.ExpireDisplay();
-                        _canvas?.Invalidate();
-                    }
-                    else if (!_isDrawing)
-                    {
-                        _currentThicknessMultiplier = 1.0f;
-                    }
-                    e.SuppressKeyPress = true;
-                    return;
-                }
-                else if (e.KeyCode == Keys.A)
+                if (e.KeyCode == Keys.A)
                 {
                     _annotation.SelectedShapeIndices.Clear();
                     for (int i = 0; i < _annotation.Shapes.Count; i++)
@@ -917,15 +898,15 @@ namespace hopperborder
                     {
                         foreach (var idx in _annotation.SelectedShapeIndices)
                         {
-                            _annotation.Shapes[idx].ThicknessMultiplier = 3.0f;
+                            _annotation.Shapes[idx].ThicknessMultiplier = 1.0f;
                         }
                         MarkDocumentModified();
                         _annotation.ExpireDisplay();
                         _canvas?.Invalidate();
                     }
-                    else if (!_isDrawing)
+                    else
                     {
-                        _currentThicknessMultiplier = 3.0f;
+                        _currentThicknessMultiplier = 1.0f;
                     }
                     e.SuppressKeyPress = true;
                     return;
