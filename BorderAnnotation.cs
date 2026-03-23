@@ -16,7 +16,7 @@ namespace hopperborder
 {
     internal enum DrawMode { Line = 0, Polyline = 1, Frame = 2, Curve = 3 }
 
-    internal abstract class DrawShape
+    public abstract class DrawShape
     {
         public int Id { get; set; }
         public float ThicknessMultiplier { get; set; } = 1.0f;
@@ -32,7 +32,7 @@ namespace hopperborder
         public abstract DrawShape Clone();
     }
 
-    internal class LineShape : DrawShape
+    public class LineShape : DrawShape
     {
         public Point3d Start { get; set; }
         public Point3d End { get; set; }
@@ -81,10 +81,7 @@ namespace hopperborder
             writer.SetDouble($"EndZ{index}", End.Z);
             writer.SetInt32($"Type{index}", 0);
             writer.SetDouble($"ThickMult{index}", ThicknessMultiplier);
-            if (OverrideColor.HasValue)
-            {
-                writer.SetInt32($"Color{index}", OverrideColor.Value.ToArgb());
-            }
+            writer.SetInt32($"Color{index}", OverrideColor.HasValue ? OverrideColor.Value.ToArgb() : 0);
         }
 
         public override void Read(GH_IReader reader, int index)
@@ -128,7 +125,7 @@ namespace hopperborder
         }
     }
 
-    internal class PolylineShape : DrawShape
+    public class PolylineShape : DrawShape
     {
         public List<Point3d> Points { get; set; } = new List<Point3d>();
         public bool Closed { get; set; } = false;
@@ -196,10 +193,7 @@ namespace hopperborder
             }
             writer.SetInt32($"Type{index}", 1);
             writer.SetDouble($"ThickMult{index}", ThicknessMultiplier);
-            if (OverrideColor.HasValue)
-            {
-                writer.SetInt32($"Color{index}", OverrideColor.Value.ToArgb());
-            }
+            writer.SetInt32($"Color{index}", OverrideColor.HasValue ? OverrideColor.Value.ToArgb() : 0);
         }
 
         public override void Read(GH_IReader reader, int index)
@@ -245,7 +239,7 @@ namespace hopperborder
         }
     }
 
-    internal class CurveShape : DrawShape
+    public class CurveShape : DrawShape
     {
         public List<Point3d> Points { get; set; } = new List<Point3d>();
         public bool Closed { get; set; } = false;
@@ -311,10 +305,7 @@ namespace hopperborder
             }
             writer.SetInt32($"Type{index}", 3);
             writer.SetDouble($"ThickMult{index}", ThicknessMultiplier);
-            if (OverrideColor.HasValue)
-            {
-                writer.SetInt32($"Color{index}", OverrideColor.Value.ToArgb());
-            }
+            writer.SetInt32($"Color{index}", OverrideColor.HasValue ? OverrideColor.Value.ToArgb() : 0);
         }
 
         public override void Read(GH_IReader reader, int index)
@@ -422,7 +413,7 @@ namespace hopperborder
         }
     }
 
-    internal class FrameShape : DrawShape
+    public class FrameShape : DrawShape
     {
         public Point3d TopLeft { get; set; }
         public Point3d TopRight { get; set; }
@@ -497,10 +488,7 @@ namespace hopperborder
             writer.SetDouble($"BLZ{index}", BottomLeft.Z);
             writer.SetInt32($"Type{index}", 2);
             writer.SetDouble($"ThickMult{index}", ThicknessMultiplier);
-            if (OverrideColor.HasValue)
-            {
-                writer.SetInt32($"Color{index}", OverrideColor.Value.ToArgb());
-            }
+            writer.SetInt32($"Color{index}", OverrideColor.HasValue ? OverrideColor.Value.ToArgb() : 0);
         }
 
         public override void Read(GH_IReader reader, int index)
@@ -542,7 +530,7 @@ namespace hopperborder
         }
     }
 
-    internal class BorderAnnotation : GH_Component
+    public class BorderAnnotation : GH_Component
     {
         private static int _shapeIdCounter = 1;
 
@@ -551,7 +539,20 @@ namespace hopperborder
         public float LineThickness { get; set; } = 8f;
         public int DrawOrder { get; set; } = 1;
         public bool Visible { get; set; } = true;
-        public BorderController Controller { get; set; }
+
+        private BorderController _controller;
+        public BorderController Controller
+        {
+            get => _controller;
+            set
+            {
+                if (_controller != null && value != _controller)
+                    _controller._annotation = null;
+                _controller = value;
+                if (value != null && value._annotation != this)
+                    value._annotation = this;
+            }
+        }
 
         public List<int> SelectedShapeIndices { get; set; } = new List<int>();
         public int SelectedPointIndex { get; set; } = -1;
@@ -656,54 +657,80 @@ namespace hopperborder
 
         public override bool Write(GH_IWriter writer)
         {
+            System.Diagnostics.Debug.WriteLine($"[BorderAnnotation Write] Called. Shapes.Count={Shapes.Count}, Color={BorderColor}, Thickness={LineThickness}, DrawOrder={DrawOrder}");
+            bool result = base.Write(writer);
+            if (!result) return false;
+
             writer.SetInt32("ShapeCount", Shapes.Count);
             writer.SetInt32("Color", BorderColor.ToArgb());
             writer.SetDouble("Thickness", LineThickness);
             writer.SetInt32("DrawOrder", DrawOrder);
             for (int i = 0; i < Shapes.Count; i++)
             {
+                System.Diagnostics.Debug.WriteLine($"[BorderAnnotation Write] Writing shape {i} of type {Shapes[i].GetType().Name}");
                 Shapes[i].Write(writer, i);
             }
-            return base.Write(writer);
+            return true;
         }
 
         public override bool Read(GH_IReader reader)
         {
-            Shapes.Clear();
-            int count = reader.GetInt32("ShapeCount");
-            BorderColor = Color.FromArgb(reader.GetInt32("Color"));
-            LineThickness = (float)reader.GetDouble("Thickness");
-            DrawOrder = reader.GetInt32("DrawOrder");
-            for (int i = 0; i < count; i++)
+            System.Diagnostics.Debug.WriteLine($"[BorderAnnotation Read] Called. reader={reader == null}");
+            try
             {
-                int type = reader.GetInt32($"Type{i}");
-                DrawShape shape;
-                switch (type)
+                bool result = base.Read(reader);
+                System.Diagnostics.Debug.WriteLine($"[BorderAnnotation Read] base.Read returned {result}");
+                if (!result) return false;
+
+                Shapes.Clear();
+                int count = reader.GetInt32("ShapeCount");
+                System.Diagnostics.Debug.WriteLine($"[BorderAnnotation Read] ShapeCount={count}");
+                BorderColor = Color.FromArgb(reader.GetInt32("Color"));
+                LineThickness = (float)reader.GetDouble("Thickness");
+                DrawOrder = reader.GetInt32("DrawOrder");
+                System.Diagnostics.Debug.WriteLine($"[BorderAnnotation Read] Color={BorderColor}, Thickness={LineThickness}, DrawOrder={DrawOrder}");
+                for (int i = 0; i < count; i++)
                 {
-                    case 0:
-                        shape = new LineShape();
-                        break;
-                    case 1:
-                        shape = new PolylineShape();
-                        break;
-                    case 2:
-                        shape = new FrameShape();
-                        break;
-                    case 3:
-                        shape = new CurveShape();
-                        break;
-                    default:
-                        shape = new LineShape();
-                        break;
+                    System.Diagnostics.Debug.WriteLine($"[BorderAnnotation Read] About to read Type{i}");
+                    int type = reader.GetInt32($"Type{i}");
+                    System.Diagnostics.Debug.WriteLine($"[BorderAnnotation Read] Reading shape {i} of type {type}");
+                    DrawShape shape;
+                    switch (type)
+                    {
+                        case 0:
+                            shape = new LineShape();
+                            break;
+                        case 1:
+                            shape = new PolylineShape();
+                            break;
+                        case 2:
+                            shape = new FrameShape();
+                            break;
+                        case 3:
+                            shape = new CurveShape();
+                            break;
+                        default:
+                            shape = new LineShape();
+                            break;
+                    }
+                    System.Diagnostics.Debug.WriteLine($"[BorderAnnotation Read] Calling shape.Read for shape {i}");
+                    shape.Read(reader, i);
+                    System.Diagnostics.Debug.WriteLine($"[BorderAnnotation Read] Adding shape {i} to list");
+                    Shapes.Add(shape);
                 }
-                shape.Read(reader, i);
-                Shapes.Add(shape);
+                System.Diagnostics.Debug.WriteLine($"[BorderAnnotation Read] Done. Shapes.Count={Shapes.Count}");
+                return true;
             }
-            return base.Read(reader);
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[BorderAnnotation Read] EXCEPTION: {ex.GetType().Name}: {ex.Message}");
+                System.Diagnostics.Debug.WriteLine($"[BorderAnnotation Read] StackTrace: {ex.StackTrace}");
+                return false;
+            }
         }
     }
 
-    internal class BorderAnnotationAttributes : GH_ComponentAttributes
+    public class BorderAnnotationAttributes : GH_ComponentAttributes
     {
         public BorderAnnotationAttributes(BorderAnnotation owner) : base(owner) { }
 

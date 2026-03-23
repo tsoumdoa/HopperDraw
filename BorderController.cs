@@ -36,7 +36,7 @@ namespace hopperborder
         private GH_Canvas _canvas;
         private bool _eventsRegistered;
 
-        private BorderAnnotation _annotation;
+        internal BorderAnnotation _annotation;
 
         private float _lineThickness = 8f;
         private Color _borderColor = Color.Black;
@@ -101,6 +101,7 @@ namespace hopperborder
 
         protected override void SolveInstance(IGH_DataAccess DA)
         {
+            System.Diagnostics.Debug.WriteLine($"[BorderController SolveInstance] Called. _isActivated={_isActivated}");
             bool active = true;
             if (!DA.GetData(0, ref active)) return;
 
@@ -133,6 +134,7 @@ namespace hopperborder
 
             if (_isActivated && !wasActivated)
             {
+                System.Diagnostics.Debug.WriteLine($"[BorderController SolveInstance] Activating!");
                 EnsureAnnotation();
                 RegisterCanvasEvents();
             }
@@ -143,10 +145,15 @@ namespace hopperborder
 
             if (_annotation != null)
             {
+                System.Diagnostics.Debug.WriteLine($"[BorderController SolveInstance] Updating annotation. Shapes count = {_annotation.Shapes.Count}");
                 _annotation.Visible = show && !this.Locked;
                 _annotation.BorderColor = _borderColor;
                 _annotation.LineThickness = _lineThickness;
                 _annotation.DrawOrder = drawOrder;
+            }
+            else
+            {
+                System.Diagnostics.Debug.WriteLine($"[BorderController SolveInstance] _annotation is null!");
             }
 
             ExpirePreview(false);
@@ -157,9 +164,31 @@ namespace hopperborder
             var doc = OnPingDocument();
             if (doc == null) return;
 
-            if (_annotation != null)
-                return;
+            System.Diagnostics.Debug.WriteLine($"[EnsureAnnotation] Called. _annotation is null? {_annotation == null}. Doc has {doc.Objects.Count} objects.");
 
+            if (_annotation == null)
+            {
+                foreach (var obj in doc.Objects)
+                {
+                    System.Diagnostics.Debug.WriteLine($"[EnsureAnnotation] Checking object: {obj?.GetType().Name} - {obj?.ComponentGuid}");
+                    if (obj is BorderAnnotation existing)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"[EnsureAnnotation] Found existing BorderAnnotation!");
+                        _annotation = existing;
+                        _annotation.Controller = this;
+                        System.Diagnostics.Debug.WriteLine($"[EnsureAnnotation] Reconnected. Shapes count: {_annotation.Shapes.Count}");
+                        break;
+                    }
+                }
+            }
+
+            if (_annotation != null)
+            {
+                System.Diagnostics.Debug.WriteLine($"[EnsureAnnotation] Using existing annotation with {_annotation.Shapes.Count} shapes.");
+                return;
+            }
+
+            System.Diagnostics.Debug.WriteLine($"[EnsureAnnotation] Creating NEW annotation.");
             _annotation = new BorderAnnotation();
             _annotation.Controller = this;
             _annotation.BorderColor = _borderColor;
