@@ -159,6 +159,19 @@ namespace hopperborder
             ExpirePreview(false);
         }
 
+        private void MarkDocumentModified()
+        {
+            if (_annotation != null)
+            {
+                _annotation.ExpirePreview(false);
+            }
+            var doc = OnPingDocument();
+            if (doc != null)
+            {
+                doc.IsModified = true;
+            }
+        }
+
         private void EnsureAnnotation()
         {
             var doc = OnPingDocument();
@@ -304,6 +317,7 @@ namespace hopperborder
                     lineShape.ThicknessMultiplier = _currentThicknessMultiplier;
                     lineShape.OverrideColor = _pendingColorOverride;
                     _annotation.Shapes.Add(lineShape);
+                    MarkDocumentModified();
                     _isDrawing = false;
                     _pendingColorOverride = null;
                     _currentThicknessMultiplier = 1.0f;
@@ -344,6 +358,7 @@ namespace hopperborder
                     polyShape.ThicknessMultiplier = _currentThicknessMultiplier;
                     polyShape.OverrideColor = _pendingColorOverride;
                     _annotation.Shapes.Add(polyShape);
+                    MarkDocumentModified();
                     _currentPoints.Clear();
                     _isDrawing = false;
                     _pendingColorOverride = null;
@@ -376,6 +391,7 @@ namespace hopperborder
                     curveShape.ThicknessMultiplier = _currentThicknessMultiplier;
                     curveShape.OverrideColor = _pendingColorOverride;
                     _annotation.Shapes.Add(curveShape);
+                    MarkDocumentModified();
                     _currentPoints.Clear();
                     _isDrawing = false;
                     _pendingColorOverride = null;
@@ -539,6 +555,7 @@ namespace hopperborder
             frameShape.ThicknessMultiplier = _currentThicknessMultiplier;
             frameShape.OverrideColor = _pendingColorOverride;
             _annotation.Shapes.Add(frameShape);
+            MarkDocumentModified();
             _pendingColorOverride = null;
             _currentThicknessMultiplier = 1.0f;
             _annotation.ExpireDisplay();
@@ -786,6 +803,7 @@ namespace hopperborder
                 _canvas?.Invalidate();
             }
 
+            bool wasDragging = _isDragging || _isMultiDragging;
             _isDragging = false;
             _isMultiDragging = false;
             _dragShapeIndex = -1;
@@ -794,6 +812,11 @@ namespace hopperborder
             ClearCapturedGHObjects();
             _ghDragSyncTimer?.Stop();
             _ghObjectInitialPositions.Clear();
+
+            if (wasDragging)
+            {
+                MarkDocumentModified();
+            }
 
             _canvas?.Invalidate();
         }
@@ -827,6 +850,7 @@ namespace hopperborder
                         {
                             _annotation.Shapes[idx].ThicknessMultiplier = 1.0f;
                         }
+                        MarkDocumentModified();
                         _annotation.ExpireDisplay();
                         _canvas?.Invalidate();
                     }
@@ -857,6 +881,7 @@ namespace hopperborder
                         {
                             _annotation.Shapes[idx].ThicknessMultiplier = 0.5f;
                         }
+                        MarkDocumentModified();
                         _annotation.ExpireDisplay();
                         _canvas?.Invalidate();
                     }
@@ -875,6 +900,7 @@ namespace hopperborder
                         {
                             _annotation.Shapes[idx].ThicknessMultiplier = 2.0f;
                         }
+                        MarkDocumentModified();
                         _annotation.ExpireDisplay();
                         _canvas?.Invalidate();
                     }
@@ -893,6 +919,7 @@ namespace hopperborder
                         {
                             _annotation.Shapes[idx].ThicknessMultiplier = 3.0f;
                         }
+                        MarkDocumentModified();
                         _annotation.ExpireDisplay();
                         _canvas?.Invalidate();
                     }
@@ -915,6 +942,7 @@ namespace hopperborder
                             _annotation.Shapes.Add(clone);
                             newIndices.Add(_annotation.Shapes.Count - 1);
                         }
+                        MarkDocumentModified();
                         _annotation.SelectedShapeIndices.Clear();
                         _annotation.SelectedShapeIndices.AddRange(newIndices);
                         _annotation.ExpireDisplay();
@@ -943,6 +971,7 @@ namespace hopperborder
                         curveShape.OverrideColor = _pendingColorOverride;
                         _annotation.Shapes.Add(curveShape);
                     }
+                    MarkDocumentModified();
                     _currentPoints.Clear();
                     _isDrawing = false;
                     _pendingColorOverride = null;
@@ -959,6 +988,7 @@ namespace hopperborder
                     polyShape.ThicknessMultiplier = _currentThicknessMultiplier;
                     polyShape.OverrideColor = _pendingColorOverride;
                     _annotation.Shapes.Add(polyShape);
+                    MarkDocumentModified();
                     _currentPoints.Clear();
                     _isDrawing = false;
                     _pendingColorOverride = null;
@@ -972,6 +1002,7 @@ namespace hopperborder
                     curveShape.ThicknessMultiplier = _currentThicknessMultiplier;
                     curveShape.OverrideColor = _pendingColorOverride;
                     _annotation.Shapes.Add(curveShape);
+                    MarkDocumentModified();
                     _currentPoints.Clear();
                     _isDrawing = false;
                     _pendingColorOverride = null;
@@ -1017,6 +1048,7 @@ namespace hopperborder
                 {
                     _annotation.Shapes.RemoveAt(idx);
                 }
+                MarkDocumentModified();
                 _annotation.ClearSelection();
                 _annotation.ExpireDisplay();
                 _canvas?.Invalidate();
@@ -1028,6 +1060,7 @@ namespace hopperborder
             if (_annotation == null) return;
 
             _annotation.Shapes.Clear();
+            MarkDocumentModified();
             _currentPoints.Clear();
             _annotation.ExpireDisplay();
             _canvas?.Invalidate();
@@ -1062,6 +1095,7 @@ namespace hopperborder
                     {
                         _annotation.Shapes[idx].OverrideColor = dialog.Color;
                     }
+                    MarkDocumentModified();
                     _canvas?.Invalidate();
                 }
             }
