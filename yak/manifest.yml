@@ -1,0 +1,8 @@
+---
+name: hopperdraw
+version: 0.1.0.0
+authors:
+- AEC Tooling
+description: Canvas drawing plugin for Grasshopper
+url: https://github.com/tsoumdoa/HopperBorder
+icon: icon.png
