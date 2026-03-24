@@ -76,8 +76,8 @@ namespace hopperborder
             pManager.AddIntegerParameter("DrawMode", "M", "Drawing mode: 0=Line, 1=Polyline, 2=Frame, 3=Curve", GH_ParamAccess.item, 0);
             pManager.AddColourParameter("Color", "C", "Default border color. Right-click during drawing to set per-shape color override", GH_ParamAccess.item, Color.Black);
             pManager.AddNumberParameter("Thickness", "T", "Base thickness. Use Ctrl+1 (0.5x), Ctrl+2 (2x), Ctrl+3 (1x default) to modify", GH_ParamAccess.item, 8.0);
-            pManager.AddIntegerParameter("DrawOrder", "O", "0=Below components, 1=Above components", GH_ParamAccess.item, 1);
             pManager.AddIntegerParameter("LineType", "L", "Line type: 0=Solid, 1=Dash, 2=Dot, 3=DashDot. Use Ctrl+B to cycle on selected shapes", GH_ParamAccess.item, 0);
+            pManager.AddIntegerParameter("DrawOrder", "O", "0=Below components, 1=Above components", GH_ParamAccess.item, 1);
         }
 
         protected override void AfterSolveInstance()
@@ -91,20 +91,21 @@ namespace hopperborder
                 drawModeParam.AddNamedValue("Curve", 3);
             }
 
-            var drawOrderParam = Params.Input[5] as Param_Integer;
-            if (drawOrderParam != null)
-            {
-                drawOrderParam.AddNamedValue("Below", 0);
-                drawOrderParam.AddNamedValue("Above", 1);
-            }
-
-            var lineTypeParam = Params.Input[6] as Param_Integer;
+            var lineTypeParam = Params.Input[5] as Param_Integer;
             if (lineTypeParam != null)
             {
                 lineTypeParam.AddNamedValue("Solid", 0);
                 lineTypeParam.AddNamedValue("Dash", 1);
                 lineTypeParam.AddNamedValue("Dot", 2);
                 lineTypeParam.AddNamedValue("DashDot", 3);
+                lineTypeParam.AddNamedValue("DashDotDot", 4);
+            }
+
+            var drawOrderParam = Params.Input[6] as Param_Integer;
+            if (drawOrderParam != null)
+            {
+                drawOrderParam.AddNamedValue("Below", 0);
+                drawOrderParam.AddNamedValue("Above", 1);
             }
         }
 
@@ -114,7 +115,9 @@ namespace hopperborder
 
         protected override void SolveInstance(IGH_DataAccess DA)
         {
+#if DEBUG
             System.Diagnostics.Debug.WriteLine($"[BorderController SolveInstance] Called. _isActivated={_isActivated}");
+#endif
             bool active = true;
             if (!DA.GetData(0, ref active)) return;
 
@@ -130,11 +133,11 @@ namespace hopperborder
             double thickness = 8.0;
             DA.GetData(4, ref thickness);
 
-            int drawOrder = 0;
-            DA.GetData(5, ref drawOrder);
-
             int lineType = 0;
-            DA.GetData(6, ref lineType);
+            DA.GetData(5, ref lineType);
+
+            int drawOrder = 0;
+            DA.GetData(6, ref drawOrder);
 
             _borderColor = color;
             _lineThickness = (float)thickness;
@@ -151,7 +154,9 @@ namespace hopperborder
 
             if (_isActivated && !wasActivated)
             {
+#if DEBUG
                 System.Diagnostics.Debug.WriteLine($"[BorderController SolveInstance] Activating!");
+#endif
                 EnsureAnnotation();
                 RegisterCanvasEvents();
             }
@@ -162,7 +167,9 @@ namespace hopperborder
 
             if (_annotation != null)
             {
+#if DEBUG
                 System.Diagnostics.Debug.WriteLine($"[BorderController SolveInstance] Updating annotation. Shapes count = {_annotation.Shapes.Count}");
+#endif
                 _annotation.Visible = show && !this.Locked;
                 _annotation.BorderColor = _borderColor;
                 _annotation.LineThickness = _lineThickness;
@@ -170,7 +177,9 @@ namespace hopperborder
             }
             else
             {
+#if DEBUG
                 System.Diagnostics.Debug.WriteLine($"[BorderController SolveInstance] _annotation is null!");
+#endif
             }
 
             ExpirePreview(false);
@@ -194,19 +203,26 @@ namespace hopperborder
             var doc = OnPingDocument();
             if (doc == null) return;
 
+#if DEBUG
             System.Diagnostics.Debug.WriteLine($"[EnsureAnnotation] Called. _annotation is null? {_annotation == null}. Doc has {doc.Objects.Count} objects.");
-
+#endif
             if (_annotation == null)
             {
                 foreach (var obj in doc.Objects)
                 {
+#if DEBUG
                     System.Diagnostics.Debug.WriteLine($"[EnsureAnnotation] Checking object: {obj?.GetType().Name} - {obj?.ComponentGuid}");
+#endif
                     if (obj is BorderAnnotation existing)
                     {
+#if DEBUG
                         System.Diagnostics.Debug.WriteLine($"[EnsureAnnotation] Found existing BorderAnnotation!");
+#endif
                         _annotation = existing;
                         _annotation.Controller = this;
+#if DEBUG
                         System.Diagnostics.Debug.WriteLine($"[EnsureAnnotation] Reconnected. Shapes count: {_annotation.Shapes.Count}");
+#endif
                         break;
                     }
                 }
@@ -214,11 +230,15 @@ namespace hopperborder
 
             if (_annotation != null)
             {
+#if DEBUG
                 System.Diagnostics.Debug.WriteLine($"[EnsureAnnotation] Using existing annotation with {_annotation.Shapes.Count} shapes.");
+#endif
                 return;
             }
 
+#if DEBUG
             System.Diagnostics.Debug.WriteLine($"[EnsureAnnotation] Creating NEW annotation.");
+#endif
             _annotation = new BorderAnnotation();
             _annotation.Controller = this;
             _annotation.BorderColor = _borderColor;
@@ -956,7 +976,7 @@ namespace hopperborder
                         foreach (var idx in _annotation.SelectedShapeIndices)
                         {
                             int currentType = (int)_annotation.Shapes[idx].LineType;
-                            int nextType = (currentType + 1) % 4;
+                            int nextType = (currentType + 1) % 5;
                             _annotation.Shapes[idx].LineType = (System.Drawing.Drawing2D.DashStyle)nextType;
                         }
                         MarkDocumentModified();
@@ -966,7 +986,7 @@ namespace hopperborder
                     else if (!_isDrawing)
                     {
                         int currentType = (int)_currentLineType;
-                        int nextType = (currentType + 1) % 4;
+                        int nextType = (currentType + 1) % 5;
                         _currentLineType = (System.Drawing.Drawing2D.DashStyle)nextType;
                     }
                     e.SuppressKeyPress = true;
@@ -1116,13 +1136,6 @@ namespace hopperborder
         public override bool AppendMenuItems(ToolStripDropDown menu)
         {
             Menu_AppendItem(menu, "Clear All", (s, e) => ClearAll());
-
-            var modeMenu = new ToolStripMenuItem("Draw Mode");
-            modeMenu.DropDownItems.Add(new ToolStripMenuItem("Line", null, (s, e) => { _drawMode = 0; _canvas?.Invalidate(); }));
-            modeMenu.DropDownItems.Add(new ToolStripMenuItem("Polyline", null, (s, e) => { _drawMode = 1; _canvas?.Invalidate(); }));
-            modeMenu.DropDownItems.Add(new ToolStripMenuItem("Frame", null, (s, e) => { _drawMode = 2; _canvas?.Invalidate(); }));
-            modeMenu.DropDownItems.Add(new ToolStripMenuItem("Curve", null, (s, e) => { _drawMode = 3; _canvas?.Invalidate(); }));
-            menu.Items.Insert(0, modeMenu);
 
             return base.AppendMenuItems(menu);
         }

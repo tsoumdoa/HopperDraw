@@ -15,8 +15,6 @@ using GH_IO.Serialization;
 
 namespace hopperborder
 {
-    internal enum DrawMode { Line = 0, Polyline = 1, Frame = 2, Curve = 3 }
-
     public abstract class DrawShape
     {
         public int Id { get; set; }
@@ -32,6 +30,28 @@ namespace hopperborder
         public abstract void Write(GH_IWriter writer, int index);
         public abstract void Read(GH_IReader reader, int index);
         public abstract DrawShape Clone();
+
+        protected void WriteCommonProperties(GH_IWriter writer, int index, int type)
+        {
+            writer.SetInt32($"Type{index}", type);
+            writer.SetDouble($"ThickMult{index}", ThicknessMultiplier);
+            writer.SetInt32($"Color{index}", OverrideColor.HasValue ? OverrideColor.Value.ToArgb() : 0);
+            writer.SetInt32($"LineType{index}", (int)LineType);
+        }
+
+        protected void ReadCommonProperties(GH_IReader reader, int index)
+        {
+            ThicknessMultiplier = (float)reader.GetDouble($"ThickMult{index}");
+            int colorArgb = reader.GetInt32($"Color{index}");
+            if (colorArgb != 0)
+            {
+                OverrideColor = Color.FromArgb(colorArgb);
+            }
+            if (reader.GetInt32($"LineType{index}") is int lineType && lineType >= 0 && lineType <= 3)
+            {
+                LineType = (DashStyle)lineType;
+            }
+        }
     }
 
     public class LineShape : DrawShape
@@ -50,11 +70,11 @@ namespace hopperborder
 
         public override (bool hit, int pointIndex) HitTest(PointF pt, float tolerance, float thickness)
         {
-            if (Distance(pt, new PointF((float)Start.X, (float)Start.Y)) <= tolerance)
+            if (GeometryUtilities.Distance(pt, new PointF((float)Start.X, (float)Start.Y)) <= tolerance)
                 return (true, 0);
-            if (Distance(pt, new PointF((float)End.X, (float)End.Y)) <= tolerance)
+            if (GeometryUtilities.Distance(pt, new PointF((float)End.X, (float)End.Y)) <= tolerance)
                 return (true, 1);
-            if (DistanceToSegment(pt, new PointF((float)Start.X, (float)Start.Y), new PointF((float)End.X, (float)End.Y)) <= thickness / 2 + tolerance)
+            if (GeometryUtilities.DistanceToSegment(pt, new PointF((float)Start.X, (float)Start.Y), new PointF((float)End.X, (float)End.Y)) <= thickness / 2 + tolerance)
                 return (true, -1);
             return (false, -1);
         }
@@ -81,10 +101,7 @@ namespace hopperborder
             writer.SetDouble($"EndX{index}", End.X);
             writer.SetDouble($"EndY{index}", End.Y);
             writer.SetDouble($"EndZ{index}", End.Z);
-            writer.SetInt32($"Type{index}", 0);
-            writer.SetDouble($"ThickMult{index}", ThicknessMultiplier);
-            writer.SetInt32($"Color{index}", OverrideColor.HasValue ? OverrideColor.Value.ToArgb() : 0);
-            writer.SetInt32($"LineType{index}", (int)LineType);
+            WriteCommonProperties(writer, index, 0);
         }
 
         public override void Read(GH_IReader reader, int index)
@@ -97,29 +114,8 @@ namespace hopperborder
             double ez = reader.GetDouble($"EndZ{index}");
             Start = new Point3d(sx, sy, sz);
             End = new Point3d(ex, ey, ez);
-            ThicknessMultiplier = (float)reader.GetDouble($"ThickMult{index}");
-            int colorArgb = reader.GetInt32($"Color{index}");
-            if (colorArgb != 0)
-            {
-                OverrideColor = Color.FromArgb(colorArgb);
-            }
-            if (reader.GetInt32($"LineType{index}") is int lineType && lineType >= 0 && lineType <= 3)
-            {
-                LineType = (DashStyle)lineType;
-            }
+            ReadCommonProperties(reader, index);
         }
-
-        private float DistanceToSegment(PointF pt, PointF a, PointF b)
-        {
-            float dx = b.X - a.X;
-            float dy = b.Y - a.Y;
-            float lengthSq = dx * dx + dy * dy;
-            if (lengthSq < 0.0001f) return Distance(pt, a);
-            float t = Math.Max(0, Math.Min(1, ((pt.X - a.X) * dx + (pt.Y - a.Y) * dy) / lengthSq));
-            return Distance(pt, new PointF(a.X + t * dx, a.Y + t * dy));
-        }
-
-        private float Distance(PointF a, PointF b) => (float)Math.Sqrt((a.X - b.X) * (a.X - b.X) + (a.Y - b.Y) * (a.Y - b.Y));
 
         public override DrawShape Clone()
         {
@@ -159,17 +155,17 @@ namespace hopperborder
         {
             for (int i = 0; i < Points.Count; i++)
             {
-                if (Distance(pt, new PointF((float)Points[i].X, (float)Points[i].Y)) <= tolerance)
+                if (GeometryUtilities.Distance(pt, new PointF((float)Points[i].X, (float)Points[i].Y)) <= tolerance)
                     return (true, i);
             }
             for (int i = 0; i < Points.Count - 1; i++)
             {
-                if (DistanceToSegment(pt, new PointF((float)Points[i].X, (float)Points[i].Y), new PointF((float)Points[i + 1].X, (float)Points[i + 1].Y)) <= thickness / 2 + tolerance)
+                if (GeometryUtilities.DistanceToSegment(pt, new PointF((float)Points[i].X, (float)Points[i].Y), new PointF((float)Points[i + 1].X, (float)Points[i + 1].Y)) <= thickness / 2 + tolerance)
                     return (true, -1);
             }
             if (Closed && Points.Count > 2)
             {
-                if (DistanceToSegment(pt, new PointF((float)Points[Points.Count - 1].X, (float)Points[Points.Count - 1].Y), new PointF((float)Points[0].X, (float)Points[0].Y)) <= thickness / 2 + tolerance)
+                if (GeometryUtilities.DistanceToSegment(pt, new PointF((float)Points[Points.Count - 1].X, (float)Points[Points.Count - 1].Y), new PointF((float)Points[0].X, (float)Points[0].Y)) <= thickness / 2 + tolerance)
                     return (true, -1);
             }
             return (false, -1);
@@ -199,10 +195,7 @@ namespace hopperborder
                 writer.SetDouble($"Pt{i}Y{index}", Points[i].Y);
                 writer.SetDouble($"Pt{i}Z{index}", Points[i].Z);
             }
-            writer.SetInt32($"Type{index}", 1);
-            writer.SetDouble($"ThickMult{index}", ThicknessMultiplier);
-            writer.SetInt32($"Color{index}", OverrideColor.HasValue ? OverrideColor.Value.ToArgb() : 0);
-            writer.SetInt32($"LineType{index}", (int)LineType);
+            WriteCommonProperties(writer, index, 1);
         }
 
         public override void Read(GH_IReader reader, int index)
@@ -217,29 +210,8 @@ namespace hopperborder
                 double pz = reader.GetDouble($"Pt{i}Z{index}");
                 Points.Add(new Point3d(px, py, pz));
             }
-            ThicknessMultiplier = (float)reader.GetDouble($"ThickMult{index}");
-            int colorArgb = reader.GetInt32($"Color{index}");
-            if (colorArgb != 0)
-            {
-                OverrideColor = Color.FromArgb(colorArgb);
-            }
-            if (reader.GetInt32($"LineType{index}") is int lineType && lineType >= 0 && lineType <= 3)
-            {
-                LineType = (DashStyle)lineType;
-            }
+            ReadCommonProperties(reader, index);
         }
-
-        private float DistanceToSegment(PointF pt, PointF a, PointF b)
-        {
-            float dx = b.X - a.X;
-            float dy = b.Y - a.Y;
-            float lengthSq = dx * dx + dy * dy;
-            if (lengthSq < 0.0001f) return Distance(pt, a);
-            float t = Math.Max(0, Math.Min(1, ((pt.X - a.X) * dx + (pt.Y - a.Y) * dy) / lengthSq));
-            return Distance(pt, new PointF(a.X + t * dx, a.Y + t * dy));
-        }
-
-        private float Distance(PointF a, PointF b) => (float)Math.Sqrt((a.X - b.X) * (a.X - b.X) + (a.Y - b.Y) * (a.Y - b.Y));
 
         public override DrawShape Clone()
         {
@@ -280,14 +252,14 @@ namespace hopperborder
         {
             for (int i = 0; i < Points.Count; i++)
             {
-                if (Distance(pt, new PointF((float)Points[i].X, (float)Points[i].Y)) <= tolerance)
+                if (GeometryUtilities.Distance(pt, new PointF((float)Points[i].X, (float)Points[i].Y)) <= tolerance)
                     return (true, i);
             }
 
             var curvePoints = SampleCurve(20);
             for (int i = 0; i < curvePoints.Count - 1; i++)
             {
-                if (DistanceToSegment(pt, curvePoints[i], curvePoints[i + 1]) <= thickness / 2 + tolerance)
+                if (GeometryUtilities.DistanceToSegment(pt, curvePoints[i], curvePoints[i + 1]) <= thickness / 2 + tolerance)
                     return (true, -1);
             }
             return (false, -1);
@@ -317,10 +289,7 @@ namespace hopperborder
                 writer.SetDouble($"Pt{i}Y{index}", Points[i].Y);
                 writer.SetDouble($"Pt{i}Z{index}", Points[i].Z);
             }
-            writer.SetInt32($"Type{index}", 3);
-            writer.SetDouble($"ThickMult{index}", ThicknessMultiplier);
-            writer.SetInt32($"Color{index}", OverrideColor.HasValue ? OverrideColor.Value.ToArgb() : 0);
-            writer.SetInt32($"LineType{index}", (int)LineType);
+            WriteCommonProperties(writer, index, 3);
         }
 
         public override void Read(GH_IReader reader, int index)
@@ -335,16 +304,7 @@ namespace hopperborder
                 double pz = reader.GetDouble($"Pt{i}Z{index}");
                 Points.Add(new Point3d(px, py, pz));
             }
-            ThicknessMultiplier = (float)reader.GetDouble($"ThickMult{index}");
-            int colorArgb = reader.GetInt32($"Color{index}");
-            if (colorArgb != 0)
-            {
-                OverrideColor = Color.FromArgb(colorArgb);
-            }
-            if (reader.GetInt32($"LineType{index}") is int lineType && lineType >= 0 && lineType <= 3)
-            {
-                LineType = (DashStyle)lineType;
-            }
+            ReadCommonProperties(reader, index);
         }
 
         private List<PointF> SampleCurve(int segmentsPerSpan)
@@ -409,18 +369,6 @@ namespace hopperborder
             );
         }
 
-        private float DistanceToSegment(PointF pt, PointF a, PointF b)
-        {
-            float dx = b.X - a.X;
-            float dy = b.Y - a.Y;
-            float lengthSq = dx * dx + dy * dy;
-            if (lengthSq < 0.0001f) return Distance(pt, a);
-            float t = Math.Max(0, Math.Min(1, ((pt.X - a.X) * dx + (pt.Y - a.Y) * dy) / lengthSq));
-            return Distance(pt, new PointF(a.X + t * dx, a.Y + t * dy));
-        }
-
-        private float Distance(PointF a, PointF b) => (float)Math.Sqrt((a.X - b.X) * (a.X - b.X) + (a.Y - b.Y) * (a.Y - b.Y));
-
         public override DrawShape Clone()
         {
             return new CurveShape(new List<Point3d>(Points), Closed)
@@ -463,11 +411,11 @@ namespace hopperborder
         {
             var corners = new PointF[] { new PointF((float)TopLeft.X, (float)TopLeft.Y), new PointF((float)TopRight.X, (float)TopRight.Y), new PointF((float)BottomRight.X, (float)BottomRight.Y), new PointF((float)BottomLeft.X, (float)BottomLeft.Y) };
             for (int i = 0; i < 4; i++)
-                if (Distance(pt, corners[i]) <= tolerance) return (true, i);
-            if (HitTestLine(pt, corners[0], corners[1], thickness, tolerance)) return (true, -1);
-            if (HitTestLine(pt, corners[1], corners[2], thickness, tolerance)) return (true, -1);
-            if (HitTestLine(pt, corners[2], corners[3], thickness, tolerance)) return (true, -1);
-            if (HitTestLine(pt, corners[3], corners[0], thickness, tolerance)) return (true, -1);
+                if (GeometryUtilities.Distance(pt, corners[i]) <= tolerance) return (true, i);
+            if (GeometryUtilities.DistanceToSegment(pt, corners[0], corners[1]) <= thickness / 2 + tolerance) return (true, -1);
+            if (GeometryUtilities.DistanceToSegment(pt, corners[1], corners[2]) <= thickness / 2 + tolerance) return (true, -1);
+            if (GeometryUtilities.DistanceToSegment(pt, corners[2], corners[3]) <= thickness / 2 + tolerance) return (true, -1);
+            if (GeometryUtilities.DistanceToSegment(pt, corners[3], corners[0]) <= thickness / 2 + tolerance) return (true, -1);
             return (false, -1);
         }
 
@@ -506,10 +454,7 @@ namespace hopperborder
             writer.SetDouble($"BLX{index}", BottomLeft.X);
             writer.SetDouble($"BLY{index}", BottomLeft.Y);
             writer.SetDouble($"BLZ{index}", BottomLeft.Z);
-            writer.SetInt32($"Type{index}", 2);
-            writer.SetDouble($"ThickMult{index}", ThicknessMultiplier);
-            writer.SetInt32($"Color{index}", OverrideColor.HasValue ? OverrideColor.Value.ToArgb() : 0);
-            writer.SetInt32($"LineType{index}", (int)LineType);
+            WriteCommonProperties(writer, index, 2);
         }
 
         public override void Read(GH_IReader reader, int index)
@@ -518,31 +463,8 @@ namespace hopperborder
             TopRight = new Point3d(reader.GetDouble($"TRX{index}"), reader.GetDouble($"TRY{index}"), reader.GetDouble($"TRZ{index}"));
             BottomRight = new Point3d(reader.GetDouble($"BRX{index}"), reader.GetDouble($"BRY{index}"), reader.GetDouble($"BRZ{index}"));
             BottomLeft = new Point3d(reader.GetDouble($"BLX{index}"), reader.GetDouble($"BLY{index}"), reader.GetDouble($"BLZ{index}"));
-            ThicknessMultiplier = (float)reader.GetDouble($"ThickMult{index}");
-            int colorArgb = reader.GetInt32($"Color{index}");
-            if (colorArgb != 0)
-            {
-                OverrideColor = Color.FromArgb(colorArgb);
-            }
-            if (reader.GetInt32($"LineType{index}") is int lineType && lineType >= 0 && lineType <= 3)
-            {
-                LineType = (DashStyle)lineType;
-            }
+            ReadCommonProperties(reader, index);
         }
-
-        private bool HitTestLine(PointF pt, PointF a, PointF b, float thickness, float tolerance) => DistanceToSegment(pt, a, b) <= thickness / 2 + tolerance;
-
-        private float DistanceToSegment(PointF pt, PointF a, PointF b)
-        {
-            float dx = b.X - a.X;
-            float dy = b.Y - a.Y;
-            float lengthSq = dx * dx + dy * dy;
-            if (lengthSq < 0.0001f) return Distance(pt, a);
-            float t = Math.Max(0, Math.Min(1, ((pt.X - a.X) * dx + (pt.Y - a.Y) * dy) / lengthSq));
-            return Distance(pt, new PointF(a.X + t * dx, a.Y + t * dy));
-        }
-
-        private float Distance(PointF a, PointF b) => (float)Math.Sqrt((a.X - b.X) * (a.X - b.X) + (a.Y - b.Y) * (a.Y - b.Y));
 
         public override DrawShape Clone()
         {
@@ -602,7 +524,7 @@ namespace hopperborder
             };
         }
 
-        public RectangleF GetBoundingBox()
+        internal RectangleF GetBoundingBox()
         {
             if (Children.Count == 0) return RectangleF.Empty;
 
@@ -639,10 +561,7 @@ namespace hopperborder
             {
                 Children[i].Write(writer, 1000 * index + i);
             }
-            writer.SetInt32($"Type{index}", 4);
-            writer.SetDouble($"ThickMult{index}", ThicknessMultiplier);
-            writer.SetInt32($"Color{index}", OverrideColor.HasValue ? OverrideColor.Value.ToArgb() : 0);
-            writer.SetInt32($"LineType{index}", (int)LineType);
+            WriteCommonProperties(writer, index, 4);
         }
 
         public override void Read(GH_IReader reader, int index)
@@ -665,16 +584,7 @@ namespace hopperborder
                 child.Read(reader, childIndex);
                 Children.Add(child);
             }
-            ThicknessMultiplier = (float)reader.GetDouble($"ThickMult{index}");
-            int colorArgb = reader.GetInt32($"Color{index}");
-            if (colorArgb != 0)
-            {
-                OverrideColor = Color.FromArgb(colorArgb);
-            }
-            if (reader.GetInt32($"LineType{index}") is int lineType && lineType >= 0 && lineType <= 3)
-            {
-                LineType = (DashStyle)lineType;
-            }
+            ReadCommonProperties(reader, index);
         }
 
         public override DrawShape Clone()
@@ -739,26 +649,6 @@ namespace hopperborder
         public override void CreateAttributes()
         {
             m_attributes = new BorderAnnotationAttributes(this);
-        }
-
-        public RectangleF Bounds
-        {
-            get
-            {
-                if (Shapes.Count == 0) return new RectangleF(0, 0, 1, 1);
-                double minX = double.MaxValue, minY = double.MaxValue, maxX = double.MinValue, maxY = double.MinValue;
-                foreach (var shape in Shapes)
-                {
-                    foreach (var pt in shape.GetPoints())
-                    {
-                        minX = Math.Min(minX, pt.X);
-                        minY = Math.Min(minY, pt.Y);
-                        maxX = Math.Max(maxX, pt.X);
-                        maxY = Math.Max(maxY, pt.Y);
-                    }
-                }
-                return new RectangleF((float)(minX - HandleSize), (float)(minY - HandleSize), (float)(maxX - minX + HandleSize * 2), (float)(maxY - minY + HandleSize * 2));
-            }
         }
 
         public (int shapeIndex, int pointIndex) HitTest(PointF point)
@@ -859,13 +749,6 @@ namespace hopperborder
             SelectedShapeIndices.AddRange(newSelections);
         }
 
-        public DrawShapeGroup GetGroupAtIndex(int index)
-        {
-            if (index >= 0 && index < Shapes.Count && Shapes[index] is DrawShapeGroup group)
-                return group;
-            return null;
-        }
-
         public void ExpireDisplay()
         {
             var doc = OnPingDocument();
@@ -879,7 +762,9 @@ namespace hopperborder
 
         public override bool Write(GH_IWriter writer)
         {
+#if DEBUG
             System.Diagnostics.Debug.WriteLine($"[BorderAnnotation Write] Called. Shapes.Count={Shapes.Count}, Color={BorderColor}, Thickness={LineThickness}, DrawOrder={DrawOrder}");
+#endif
             bool result = base.Write(writer);
             if (!result) return false;
 
@@ -889,7 +774,9 @@ namespace hopperborder
             writer.SetInt32("DrawOrder", DrawOrder);
             for (int i = 0; i < Shapes.Count; i++)
             {
+#if DEBUG
                 System.Diagnostics.Debug.WriteLine($"[BorderAnnotation Write] Writing shape {i} of type {Shapes[i].GetType().Name}");
+#endif
                 Shapes[i].Write(writer, i);
             }
             return true;
@@ -897,25 +784,37 @@ namespace hopperborder
 
         public override bool Read(GH_IReader reader)
         {
+#if DEBUG
             System.Diagnostics.Debug.WriteLine($"[BorderAnnotation Read] Called. reader={reader == null}");
+#endif
             try
             {
                 bool result = base.Read(reader);
+#if DEBUG
                 System.Diagnostics.Debug.WriteLine($"[BorderAnnotation Read] base.Read returned {result}");
+#endif
                 if (!result) return false;
 
                 Shapes.Clear();
                 int count = reader.GetInt32("ShapeCount");
+#if DEBUG
                 System.Diagnostics.Debug.WriteLine($"[BorderAnnotation Read] ShapeCount={count}");
+#endif
                 BorderColor = Color.FromArgb(reader.GetInt32("Color"));
                 LineThickness = (float)reader.GetDouble("Thickness");
                 DrawOrder = reader.GetInt32("DrawOrder");
+#if DEBUG
                 System.Diagnostics.Debug.WriteLine($"[BorderAnnotation Read] Color={BorderColor}, Thickness={LineThickness}, DrawOrder={DrawOrder}");
+#endif
                 for (int i = 0; i < count; i++)
                 {
+#if DEBUG
                     System.Diagnostics.Debug.WriteLine($"[BorderAnnotation Read] About to read Type{i}");
+#endif
                     int type = reader.GetInt32($"Type{i}");
+#if DEBUG
                     System.Diagnostics.Debug.WriteLine($"[BorderAnnotation Read] Reading shape {i} of type {type}");
+#endif
                     DrawShape shape;
                     switch (type)
                     {
@@ -938,18 +837,26 @@ namespace hopperborder
                             shape = new LineShape();
                             break;
                     }
+#if DEBUG
                     System.Diagnostics.Debug.WriteLine($"[BorderAnnotation Read] Calling shape.Read for shape {i}");
+#endif
                     shape.Read(reader, i);
+#if DEBUG
                     System.Diagnostics.Debug.WriteLine($"[BorderAnnotation Read] Adding shape {i} to list");
+#endif
                     Shapes.Add(shape);
                 }
+#if DEBUG
                 System.Diagnostics.Debug.WriteLine($"[BorderAnnotation Read] Done. Shapes.Count={Shapes.Count}");
+#endif
                 return true;
             }
             catch (Exception ex)
             {
+#if DEBUG
                 System.Diagnostics.Debug.WriteLine($"[BorderAnnotation Read] EXCEPTION: {ex.GetType().Name}: {ex.Message}");
                 System.Diagnostics.Debug.WriteLine($"[BorderAnnotation Read] StackTrace: {ex.StackTrace}");
+#endif
                 return false;
             }
         }
