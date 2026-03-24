@@ -83,18 +83,7 @@ namespace hopperdraw
                         bool shiftPressed = (Control.ModifierKeys & Keys.Shift) == Keys.Shift;
                         if (shiftPressed)
                         {
-                            double dx = owner.DrawEnd.X - owner.DrawStart.X;
-                            double dy = owner.DrawEnd.Y - owner.DrawStart.Y;
-                            double length = Math.Sqrt(dx * dx + dy * dy);
-                            if (length > 0)
-                            {
-                                double angle = Math.Atan2(dy, dx);
-                                double snapAngle = Math.Round(angle / (Math.PI / 4.0)) * (Math.PI / 4.0);
-                                end = new Point3d(
-                                    owner.DrawStart.X + length * Math.Cos(snapAngle),
-                                    owner.DrawStart.Y + length * Math.Sin(snapAngle),
-                                    0);
-                            }
+                            end = GeometryUtilities.SnapAngle(owner.DrawStart, owner.DrawEnd);
                         }
 
                         graphics.DrawLine(pen,
@@ -107,7 +96,7 @@ namespace hopperdraw
 
                         if (pts.Count >= 2)
                         {
-                            var points = pts.Select(p => new PointF((float)p.X, (float)p.Y)).ToArray();
+                            var points = pts.ToPointFArray();
                             graphics.DrawLines(pen, points);
                         }
 
@@ -119,19 +108,7 @@ namespace hopperdraw
                             bool shiftPressed = (Control.ModifierKeys & Keys.Shift) == Keys.Shift;
                             if (shiftPressed)
                             {
-                                double dx = endPt.X - lastPt.X;
-                                double dy = endPt.Y - lastPt.Y;
-                                double length = Math.Sqrt(dx * dx + dy * dy);
-
-                                if (length > 0)
-                                {
-                                    double angle = Math.Atan2(dy, dx);
-                                    double snapAngle = Math.Round(angle / (Math.PI / 4.0)) * (Math.PI / 4.0);
-                                    endPt = new Point3d(
-                                        lastPt.X + length * Math.Cos(snapAngle),
-                                        lastPt.Y + length * Math.Sin(snapAngle),
-                                        0);
-                                }
+                                endPt = GeometryUtilities.SnapAngle(lastPt, _previewPoint);
                             }
 
                             graphics.DrawLine(pen,
@@ -157,24 +134,12 @@ namespace hopperdraw
                             bool shiftPressed = (Control.ModifierKeys & Keys.Shift) == Keys.Shift;
                             if (shiftPressed)
                             {
-                                double dx = endPt.X - lastPt.X;
-                                double dy = endPt.Y - lastPt.Y;
-                                double length = Math.Sqrt(dx * dx + dy * dy);
-
-                                if (length > 0)
-                                {
-                                    double angle = Math.Atan2(dy, dx);
-                                    double snapAngle = Math.Round(angle / (Math.PI / 4.0)) * (Math.PI / 4.0);
-                                    endPt = new Point3d(
-                                        lastPt.X + length * Math.Cos(snapAngle),
-                                        lastPt.Y + length * Math.Sin(snapAngle),
-                                        0);
-                                }
+                                endPt = GeometryUtilities.SnapAngle(lastPt, _previewPoint);
                             }
 
                             var previewPoints = new List<PointF>();
-                            previewPoints.AddRange(pts.Select(p => new PointF((float)p.X, (float)p.Y)));
-                            previewPoints.Add(new PointF((float)endPt.X, (float)endPt.Y));
+                            previewPoints.AddRange(pts.ToPointFArray());
+                            previewPoints.Add(endPt.ToPointF());
 
                             if (previewPoints.Count >= 2)
                             {
@@ -183,7 +148,7 @@ namespace hopperdraw
                         }
                         else if (pts.Count >= 2)
                         {
-                            var points = pts.Select(p => new PointF((float)p.X, (float)p.Y)).ToArray();
+                            var points = pts.ToPointFArray();
                             graphics.DrawCurve(pen, points, 0.5f);
                         }
 

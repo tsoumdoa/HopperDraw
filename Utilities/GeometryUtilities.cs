@@ -9,6 +9,9 @@ namespace hopperdraw
         public static float Distance(PointF a, PointF b) =>
             (float)Math.Sqrt((a.X - b.X) * (a.X - b.X) + (a.Y - b.Y) * (a.Y - b.Y));
 
+        public static float Distance(Point3d a, Point3d b) =>
+            (float)a.DistanceTo(b);
+
         public static float DistanceToSegment(PointF pt, PointF a, PointF b)
         {
             float dx = b.X - a.X;
@@ -32,6 +35,22 @@ namespace hopperdraw
                     start.X + length * Math.Cos(snapAngle),
                     start.Y + length * Math.Sin(snapAngle),
                     0);
+            }
+            return end;
+        }
+
+        public static PointF SnapAngle(PointF start, PointF end)
+        {
+            float dx = end.X - start.X;
+            float dy = end.Y - start.Y;
+            float length = (float)Math.Sqrt(dx * dx + dy * dy);
+            if (length > 0)
+            {
+                double angle = Math.Atan2(dy, dx);
+                double snapAngle = Math.Round(angle / (Math.PI / 4.0)) * (Math.PI / 4.0);
+                return new PointF(
+                    start.X + (float)(length * Math.Cos(snapAngle)),
+                    start.Y + (float)(length * Math.Sin(snapAngle)));
             }
             return end;
         }
