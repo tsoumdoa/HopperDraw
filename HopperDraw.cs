@@ -10,8 +10,10 @@ using Rhino.Geometry;
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.Drawing.Drawing2D;
 using System.Linq;
 using System.Windows.Forms;
+using GH_IO.Serialization;
 
 namespace hopperdraw
 {
@@ -36,8 +38,6 @@ namespace hopperdraw
         private GH_Canvas _canvas;
         private bool _eventsRegistered;
 
-        internal HopperDrawAnnotation _annotation;
-
         private float _lineThickness = 8f;
         private Color _borderColor = Color.Black;
         private int _drawMode = 0;
@@ -60,6 +60,22 @@ namespace hopperdraw
         private List<IGH_DocumentObject> _selectedGHObjects = new List<IGH_DocumentObject>();
         private System.Windows.Forms.Timer _ghDragSyncTimer;
         private Dictionary<IGH_DocumentObject, PointF> _ghObjectInitialPositions = new Dictionary<IGH_DocumentObject, PointF>();
+
+        private static int _shapeIdCounter = 1;
+
+        public List<DrawShape> Shapes { get; set; } = new List<DrawShape>();
+        public Color BorderColor { get; set; } = Color.Black;
+        public float LineThickness { get; set; } = 8f;
+        public int DrawOrder { get; set; } = 1;
+        public bool Visible { get; set; } = true;
+
+        public List<int> SelectedShapeIndices { get; set; } = new List<int>();
+        public int SelectedPointIndex { get; set; } = -1;
+        public int HoveredShapeIndex { get; set; } = -1;
+        public int HoveredPointIndex { get; set; } = -1;
+
+        private const float HandleSize = 8f;
+        private const float HitTolerance = 15f;
 
         public HopperDraw()
             : base("Hopper Draw", "HDraw", "Draw and manage canvas borders", "Draw", "Primitive")
@@ -154,15 +170,9 @@ namespace hopperdraw
 
             if (_isActivated && !wasActivated)
             {
-                if (AnotherHopperDrawExists())
-                {
-                    AddRuntimeMessage(GH_RuntimeMessageLevel.Error, "Only one Hopper Draw is allowed per document.");
-                    return;
-                }
 #if DEBUG
                 System.Diagnostics.Debug.WriteLine($"[HopperDraw SolveInstance] Activating!");
 #endif
-                EnsureAnnotation();
                 RegisterCanvasEvents();
             }
             else if (!_isActivated && wasActivated)
@@ -170,103 +180,25 @@ namespace hopperdraw
                 UnregisterCanvasEvents();
             }
 
-            if (_annotation != null)
-            {
 #if DEBUG
-                System.Diagnostics.Debug.WriteLine($"[HopperDraw SolveInstance] Updating annotation. Shapes count = {_annotation.Shapes.Count}");
+            System.Diagnostics.Debug.WriteLine($"[HopperDraw SolveInstance] Updating. Shapes count = {Shapes.Count}");
 #endif
-                _annotation.Visible = show && !this.Locked;
-                _annotation.BorderColor = _borderColor;
-                _annotation.LineThickness = _lineThickness;
-                _annotation.DrawOrder = drawOrder;
-            }
-            else
-            {
-#if DEBUG
-                System.Diagnostics.Debug.WriteLine($"[HopperDraw SolveInstance] _annotation is null!");
-#endif
-            }
+            Visible = show && !this.Locked;
+            BorderColor = _borderColor;
+            LineThickness = _lineThickness;
+            DrawOrder = drawOrder;
 
             ExpirePreview(false);
         }
 
         private void MarkDocumentModified()
         {
-            if (_annotation != null)
-            {
-                _annotation.ExpirePreview(false);
-            }
+            ExpirePreview(false);
             var doc = OnPingDocument();
             if (doc != null)
             {
                 doc.IsModified = true;
             }
-        }
-
-        private bool AnotherHopperDrawExists()
-        {
-            var doc = OnPingDocument();
-            if (doc == null) return false;
-
-            foreach (var obj in doc.Objects)
-            {
-                if (obj is HopperDraw existing && existing != this)
-                {
-                    return true;
-                }
-            }
-            return false;
-        }
-
-        private void EnsureAnnotation()
-        {
-            var doc = OnPingDocument();
-            if (doc == null) return;
-
-#if DEBUG
-            System.Diagnostics.Debug.WriteLine($"[EnsureAnnotation] Called. _annotation is null? {_annotation == null}. Doc has {doc.Objects.Count} objects.");
-#endif
-            if (_annotation == null)
-            {
-                foreach (var obj in doc.Objects)
-                {
-#if DEBUG
-                    System.Diagnostics.Debug.WriteLine($"[EnsureAnnotation] Checking object: {obj?.GetType().Name} - {obj?.ComponentGuid}");
-#endif
-                    if (obj is HopperDrawAnnotation existing)
-                    {
-#if DEBUG
-                        System.Diagnostics.Debug.WriteLine($"[EnsureAnnotation] Found existing HopperDrawAnnotation!");
-#endif
-                        _annotation = existing;
-                        _annotation.Controller = this;
-#if DEBUG
-                        System.Diagnostics.Debug.WriteLine($"[EnsureAnnotation] Reconnected. Shapes count: {_annotation.Shapes.Count}");
-#endif
-                        break;
-                    }
-                }
-            }
-
-            if (_annotation != null)
-            {
-#if DEBUG
-                System.Diagnostics.Debug.WriteLine($"[EnsureAnnotation] Using existing annotation with {_annotation.Shapes.Count} shapes.");
-#endif
-                return;
-            }
-
-#if DEBUG
-            System.Diagnostics.Debug.WriteLine($"[EnsureAnnotation] Creating NEW annotation.");
-#endif
-            _annotation = new HopperDrawAnnotation();
-            _annotation.Controller = this;
-            _annotation.BorderColor = _borderColor;
-            _annotation.LineThickness = _lineThickness;
-
-            doc.AddObject(_annotation, false, -1);
-
-            _annotation.Attributes.Pivot = new PointF(-10000, -10000);
         }
 
         private void RegisterCanvasEvents()
@@ -322,7 +254,7 @@ namespace hopperdraw
 
         private void Canvas_MouseDown(object sender, MouseEventArgs e)
         {
-            if (!_isActivated || _annotation == null)
+            if (!_isActivated)
                 return;
 
             if (e.Button == MouseButtons.Right)
@@ -331,7 +263,7 @@ namespace hopperdraw
                 {
                     ShowColorPickerForDrawing();
                 }
-                else if (_annotation.HasSelection)
+                else if (HasSelection)
                 {
                     ShowColorPickerForSelected();
                 }
@@ -373,12 +305,12 @@ namespace hopperdraw
                     var lineShape = new LineShape(_drawStart, endPt);
                     lineShape.ThicknessMultiplier = _currentThicknessMultiplier;
                     lineShape.OverrideColor = _pendingColorOverride;
-                    _annotation.Shapes.Add(lineShape);
+                    Shapes.Add(lineShape);
                     MarkDocumentModified();
                     _isDrawing = false;
                     _pendingColorOverride = null;
                     _currentThicknessMultiplier = 1.0f;
-                    _annotation.ExpireDisplay();
+                    ExpireDisplay();
                     _canvas?.Invalidate();
                     return;
                 }
@@ -389,7 +321,7 @@ namespace hopperdraw
                     _isDrawing = true;
                     _lastClickTime = DateTime.Now;
                     _lastClickPosition = pt;
-                    _annotation.ExpireDisplay();
+                    ExpireDisplay();
                     _canvas?.Invalidate();
                     return;
                 }
@@ -404,7 +336,7 @@ namespace hopperdraw
                         _isDrawing = true;
                         _lastClickTime = DateTime.Now;
                         _lastClickPosition = pt;
-                        _annotation.ExpireDisplay();
+                        ExpireDisplay();
                         _canvas?.Invalidate();
                         return;
                     }
@@ -414,7 +346,7 @@ namespace hopperdraw
                     var polyShape = new PolylineShape(new List<Point3d>(_currentPoints), true);
                     polyShape.ThicknessMultiplier = _currentThicknessMultiplier;
                     polyShape.OverrideColor = _pendingColorOverride;
-                    _annotation.Shapes.Add(polyShape);
+                    Shapes.Add(polyShape);
                     MarkDocumentModified();
                     _currentPoints.Clear();
                     _isDrawing = false;
@@ -422,7 +354,7 @@ namespace hopperdraw
                     _currentThicknessMultiplier = 1.0f;
                     _lastClickTime = DateTime.Now;
                     _lastClickPosition = pt;
-                    _annotation.ExpireDisplay();
+                    ExpireDisplay();
                     _canvas?.Invalidate();
                     return;
                 }
@@ -437,7 +369,7 @@ namespace hopperdraw
                         _isDrawing = true;
                         _lastClickTime = DateTime.Now;
                         _lastClickPosition = pt;
-                        _annotation.ExpireDisplay();
+                        ExpireDisplay();
                         _canvas?.Invalidate();
                         return;
                     }
@@ -447,7 +379,7 @@ namespace hopperdraw
                     var curveShape = new CurveShape(new List<Point3d>(_currentPoints), true);
                     curveShape.ThicknessMultiplier = _currentThicknessMultiplier;
                     curveShape.OverrideColor = _pendingColorOverride;
-                    _annotation.Shapes.Add(curveShape);
+                    Shapes.Add(curveShape);
                     MarkDocumentModified();
                     _currentPoints.Clear();
                     _isDrawing = false;
@@ -455,7 +387,7 @@ namespace hopperdraw
                     _currentThicknessMultiplier = 1.0f;
                     _lastClickTime = DateTime.Now;
                     _lastClickPosition = pt;
-                    _annotation.ExpireDisplay();
+                    ExpireDisplay();
                     _canvas?.Invalidate();
                     return;
                 }
@@ -480,7 +412,7 @@ namespace hopperdraw
                     CreateFrame(_frameFirstCorner, finalPt);
                     _lastClickTime = DateTime.Now;
                     _lastClickPosition = pt;
-                    _annotation.ExpireDisplay();
+                    ExpireDisplay();
                     _canvas?.Invalidate();
                     return;
                 }
@@ -491,7 +423,7 @@ namespace hopperdraw
                     _isDrawing = true;
                     _lastClickTime = DateTime.Now;
                     _lastClickPosition = pt;
-                    _annotation.ExpireDisplay();
+                    ExpireDisplay();
                     _canvas?.Invalidate();
                     return;
                 }
@@ -504,42 +436,42 @@ namespace hopperdraw
                 return;
             }
 
-            var (shapeIdx, pointIdx) = _annotation.HitTest(new PointF((float)pt.X, (float)pt.Y));
+            var (shapeIdx, pointIdx) = HitTest(new PointF((float)pt.X, (float)pt.Y));
 
             if (shapeIdx >= 0)
             {
-                bool isAlreadySelected = _annotation.SelectedShapeIndices.Contains(shapeIdx);
+                bool isAlreadySelected = SelectedShapeIndices.Contains(shapeIdx);
                 bool hasSelectedGH = HasSelectedGHObjects();
-                bool multipleShapesSelected = _annotation.SelectedShapeIndices.Count > 1;
+                bool multipleShapesSelected = SelectedShapeIndices.Count > 1;
                 
                 if (shiftPressed)
                 {
                     if (isAlreadySelected)
                     {
-                        _annotation.SelectedShapeIndices.Remove(shapeIdx);
+                        SelectedShapeIndices.Remove(shapeIdx);
                     }
                     else
                     {
-                        _annotation.SelectedShapeIndices.Add(shapeIdx);
+                        SelectedShapeIndices.Add(shapeIdx);
                     }
-                    _annotation.SelectedPointIndex = pointIdx;
+                    SelectedPointIndex = pointIdx;
                 }
                 else
                 {
                     if (multipleShapesSelected && isAlreadySelected && pointIdx < 0)
                     {
-                        _annotation.SelectedPointIndex = pointIdx;
+                        SelectedPointIndex = pointIdx;
                         _multiDragStart = pt;
                         _isMultiDragging = true;
                         CaptureSelectedGHObjects();
                     }
                     else if (isAlreadySelected && pointIdx < 0)
                     {
-                        _annotation.SelectedPointIndex = pointIdx;
+                        SelectedPointIndex = pointIdx;
                         _dragShapeIndex = shapeIdx;
                         _dragPointIndex = pointIdx;
 
-                        var shape = _annotation.Shapes[shapeIdx];
+                        var shape = Shapes[shapeIdx];
                         if (shape is FrameShape frame)
                         {
                             _isFrameDragging = true;
@@ -557,13 +489,13 @@ namespace hopperdraw
                     }
                     else
                     {
-                        _annotation.SelectedShapeIndices.Clear();
-                        _annotation.SelectedShapeIndices.Add(shapeIdx);
-                        _annotation.SelectedPointIndex = pointIdx;
+                        SelectedShapeIndices.Clear();
+                        SelectedShapeIndices.Add(shapeIdx);
+                        SelectedPointIndex = pointIdx;
                         _dragShapeIndex = shapeIdx;
                         _dragPointIndex = pointIdx;
 
-                        var shape = _annotation.Shapes[shapeIdx];
+                        var shape = Shapes[shapeIdx];
                         if (shape is FrameShape frame)
                         {
                             _isFrameDragging = true;
@@ -581,15 +513,15 @@ namespace hopperdraw
                     }
                 }
             }
-            else if (_annotation.HasSelection && HasSelectedGHObjects())
+            else if (HasSelection && HasSelectedGHObjects())
             {
                 _multiDragStart = pt;
                 _isMultiDragging = true;
                 CaptureSelectedGHObjects();
             }
-            else if (_annotation.Shapes.Count > 0)
+            else if (Shapes.Count > 0)
             {
-                if (_annotation.HasSelection)
+                if (HasSelection)
                 {
                     CaptureGHObjectsAndStartSync(pt);
                 }
@@ -597,7 +529,7 @@ namespace hopperdraw
                 _additiveSelection = ctrlPressed;
             }
 
-            _annotation.ExpireDisplay();
+            ExpireDisplay();
             _canvas?.Invalidate();
         }
 
@@ -611,16 +543,16 @@ namespace hopperdraw
             var frameShape = new FrameShape(topLeft, topRight, bottomRight, bottomLeft);
             frameShape.ThicknessMultiplier = _currentThicknessMultiplier;
             frameShape.OverrideColor = _pendingColorOverride;
-            _annotation.Shapes.Add(frameShape);
+            Shapes.Add(frameShape);
             MarkDocumentModified();
             _pendingColorOverride = null;
             _currentThicknessMultiplier = 1.0f;
-            _annotation.ExpireDisplay();
+            ExpireDisplay();
         }
 
         private void Canvas_MouseMove(object sender, MouseEventArgs e)
         {
-            if (!_isActivated || _annotation == null)
+            if (!_isActivated)
                 return;
 
             var pt = ScreenToCanvas(e.Location);
@@ -632,7 +564,7 @@ namespace hopperdraw
             }
             else if (_isDragging && _dragShapeIndex >= 0)
             {
-                var shape = _annotation.Shapes[_dragShapeIndex];
+                var shape = Shapes[_dragShapeIndex];
 
                 if (_isFrameDragging && shape is FrameShape frame)
                 {
@@ -743,16 +675,16 @@ namespace hopperdraw
                     }
                 }
 
-                _annotation.ExpireDisplay();
+                ExpireDisplay();
                 _canvas?.Invalidate();
             }
-            else if (_isMultiDragging && _annotation.HasSelection)
+            else if (_isMultiDragging && HasSelection)
             {
                 var deltaX = pt.X - _multiDragStart.X;
                 var deltaY = pt.Y - _multiDragStart.Y;
-                foreach (var idx in _annotation.SelectedShapeIndices)
+                foreach (var idx in SelectedShapeIndices)
                 {
-                    _annotation.Shapes[idx].Move(deltaX, deltaY);
+                    Shapes[idx].Move(deltaX, deltaY);
                 }
                 foreach (var obj in _selectedGHObjects)
                 {
@@ -762,7 +694,7 @@ namespace hopperdraw
                         pivot.Y + (float)deltaY);
                 }
                 _multiDragStart = pt;
-                _annotation.ExpireDisplay();
+                ExpireDisplay();
                 _canvas?.Invalidate();
             }
             else if (_isWindowSelecting)
@@ -779,29 +711,29 @@ namespace hopperdraw
                     _isWindowSelecting = true;
                     if (!_additiveSelection)
                     {
-                        _annotation.ClearSelection();
+                        ClearSelection();
                     }
                 }
                 else
                 {
-                    var (shapeIdx, pointIdx) = _annotation.HitTest(new PointF((float)pt.X, (float)pt.Y));
-                    _annotation.HoveredShapeIndex = shapeIdx >= 0 ? shapeIdx : -1;
-                    _annotation.HoveredPointIndex = pointIdx >= 0 ? pointIdx : -1;
+                    var (shapeIdx, pointIdx) = HitTest(new PointF((float)pt.X, (float)pt.Y));
+                    HoveredShapeIndex = shapeIdx >= 0 ? shapeIdx : -1;
+                    HoveredPointIndex = pointIdx >= 0 ? pointIdx : -1;
                 }
                 _canvas?.Invalidate();
             }
             else
             {
-                var (shapeIdx, pointIdx) = _annotation.HitTest(new PointF((float)pt.X, (float)pt.Y));
-                _annotation.HoveredShapeIndex = shapeIdx >= 0 ? shapeIdx : -1;
-                _annotation.HoveredPointIndex = pointIdx >= 0 ? pointIdx : -1;
+                var (shapeIdx, pointIdx) = HitTest(new PointF((float)pt.X, (float)pt.Y));
+                HoveredShapeIndex = shapeIdx >= 0 ? shapeIdx : -1;
+                HoveredPointIndex = pointIdx >= 0 ? pointIdx : -1;
                 _canvas?.Invalidate();
             }
         }
 
         private void Canvas_MouseUp(object sender, MouseEventArgs e)
         {
-            if (!_isActivated || _annotation == null)
+            if (!_isActivated)
                 return;
 
             bool shiftPressed = (Control.ModifierKeys & Keys.Shift) == Keys.Shift;
@@ -833,7 +765,7 @@ namespace hopperdraw
                 if (dist > 5)
                 {
                     _currentPoints.Add(endPt);
-                    _annotation.ExpireDisplay();
+                    ExpireDisplay();
                 }
                 _canvas?.Invalidate();
             }
@@ -845,18 +777,18 @@ namespace hopperdraw
                 float minY = (float)Math.Min(_windowSelectStart.Y, pt.Y);
                 float maxY = (float)Math.Max(_windowSelectStart.Y, pt.Y);
                 RectangleF rect = new RectangleF(minX, minY, maxX - minX, maxY - minY);
-                _annotation.SelectShapesInRectangle(rect, _additiveSelection);
+                SelectShapesInRectangle(rect, _additiveSelection);
                 _isWindowSelecting = false;
-                _annotation.ExpireDisplay();
+                ExpireDisplay();
                 _canvas?.Invalidate();
             }
             else if (_clickStartPt.IsValid)
             {
                 if (!_additiveSelection && _ghObjectInitialPositions.Count == 0 && !_isWindowSelecting)
                 {
-                    _annotation.ClearSelection();
+                    ClearSelection();
                 }
-                _annotation.ExpireDisplay();
+                ExpireDisplay();
                 _canvas?.Invalidate();
             }
 
@@ -892,7 +824,7 @@ namespace hopperdraw
 
         private void Canvas_KeyDown(object sender, KeyEventArgs e)
         {
-            if (!_isActivated || _annotation == null)
+            if (!_isActivated)
                 return;
 
             bool ctrlPressed = (Control.ModifierKeys & Keys.Control) == Keys.Control;
@@ -901,26 +833,26 @@ namespace hopperdraw
             {
                 if (e.KeyCode == Keys.A)
                 {
-                    _annotation.SelectedShapeIndices.Clear();
-                    for (int i = 0; i < _annotation.Shapes.Count; i++)
+                    SelectedShapeIndices.Clear();
+                    for (int i = 0; i < Shapes.Count; i++)
                     {
-                        _annotation.SelectedShapeIndices.Add(i);
+                        SelectedShapeIndices.Add(i);
                     }
-                    _annotation.ExpireDisplay();
+                    ExpireDisplay();
                     _canvas?.Invalidate();
                     e.SuppressKeyPress = true;
                     return;
                 }
                 else if (e.KeyCode == Keys.D1 || e.KeyCode == Keys.NumPad1)
                 {
-                    if (_annotation.HasSelection)
+                    if (HasSelection)
                     {
-                        foreach (var idx in _annotation.SelectedShapeIndices)
+                        foreach (var idx in SelectedShapeIndices)
                         {
-                            _annotation.Shapes[idx].ThicknessMultiplier = 0.5f;
+                            Shapes[idx].ThicknessMultiplier = 0.5f;
                         }
                         MarkDocumentModified();
-                        _annotation.ExpireDisplay();
+                        ExpireDisplay();
                         _canvas?.Invalidate();
                     }
                     else if (!_isDrawing)
@@ -932,14 +864,14 @@ namespace hopperdraw
                 }
                 else if (e.KeyCode == Keys.D2 || e.KeyCode == Keys.NumPad2)
                 {
-                    if (_annotation.HasSelection)
+                    if (HasSelection)
                     {
-                        foreach (var idx in _annotation.SelectedShapeIndices)
+                        foreach (var idx in SelectedShapeIndices)
                         {
-                            _annotation.Shapes[idx].ThicknessMultiplier = 2.0f;
+                            Shapes[idx].ThicknessMultiplier = 2.0f;
                         }
                         MarkDocumentModified();
-                        _annotation.ExpireDisplay();
+                        ExpireDisplay();
                         _canvas?.Invalidate();
                     }
                     else if (!_isDrawing)
@@ -951,14 +883,14 @@ namespace hopperdraw
                 }
                 else if (e.KeyCode == Keys.D3 || e.KeyCode == Keys.NumPad3)
                 {
-                    if (_annotation.HasSelection)
+                    if (HasSelection)
                     {
-                        foreach (var idx in _annotation.SelectedShapeIndices)
+                        foreach (var idx in SelectedShapeIndices)
                         {
-                            _annotation.Shapes[idx].ThicknessMultiplier = 1.0f;
+                            Shapes[idx].ThicknessMultiplier = 1.0f;
                         }
                         MarkDocumentModified();
-                        _annotation.ExpireDisplay();
+                        ExpireDisplay();
                         _canvas?.Invalidate();
                     }
                     else
@@ -970,20 +902,20 @@ namespace hopperdraw
                 }
                 else if (e.KeyCode == Keys.D)
                 {
-                    if (_annotation.HasSelection && !_isDrawing)
+                    if (HasSelection && !_isDrawing)
                     {
                         var newIndices = new List<int>();
-                        foreach (var idx in _annotation.SelectedShapeIndices)
+                        foreach (var idx in SelectedShapeIndices)
                         {
-                            var clone = _annotation.Shapes[idx].Clone();
+                            var clone = Shapes[idx].Clone();
                             clone.Move(30, 30);
-                            _annotation.Shapes.Add(clone);
-                            newIndices.Add(_annotation.Shapes.Count - 1);
+                            Shapes.Add(clone);
+                            newIndices.Add(Shapes.Count - 1);
                         }
                         MarkDocumentModified();
-                        _annotation.SelectedShapeIndices.Clear();
-                        _annotation.SelectedShapeIndices.AddRange(newIndices);
-                        _annotation.ExpireDisplay();
+                        SelectedShapeIndices.Clear();
+                        SelectedShapeIndices.AddRange(newIndices);
+                        ExpireDisplay();
                         _canvas?.Invalidate();
                         e.SuppressKeyPress = true;
                         return;
@@ -991,16 +923,16 @@ namespace hopperdraw
                 }
                 else if (e.KeyCode == Keys.B)
                 {
-                    if (_annotation.HasSelection)
+                    if (HasSelection)
                     {
-                        foreach (var idx in _annotation.SelectedShapeIndices)
+                        foreach (var idx in SelectedShapeIndices)
                         {
-                            int currentType = (int)_annotation.Shapes[idx].LineType;
+                            int currentType = (int)Shapes[idx].LineType;
                             int nextType = (currentType + 1) % 5;
-                            _annotation.Shapes[idx].LineType = (System.Drawing.Drawing2D.DashStyle)nextType;
+                            Shapes[idx].LineType = (System.Drawing.Drawing2D.DashStyle)nextType;
                         }
                         MarkDocumentModified();
-                        _annotation.ExpireDisplay();
+                        ExpireDisplay();
                         _canvas?.Invalidate();
                     }
                     else if (!_isDrawing)
@@ -1017,21 +949,21 @@ namespace hopperdraw
                     bool shiftPressed = (Control.ModifierKeys & Keys.Shift) == Keys.Shift;
                     if (ctrlPressed && shiftPressed)
                     {
-                        if (!_isDrawing && _annotation.HasSelection)
+                        if (!_isDrawing && HasSelection)
                         {
-                            _annotation.UngroupSelectedGroups();
+                            UngroupSelectedGroups();
                             MarkDocumentModified();
-                            _annotation.ExpireDisplay();
+                            ExpireDisplay();
                             _canvas?.Invalidate();
                         }
                     }
                     else if (ctrlPressed)
                     {
-                        if (!_isDrawing && _annotation.SelectedShapeIndices.Count > 0)
+                        if (!_isDrawing && SelectedShapeIndices.Count > 0)
                         {
-                            _annotation.GroupSelectedShapes();
+                            GroupSelectedShapes();
                             MarkDocumentModified();
-                            _annotation.ExpireDisplay();
+                            ExpireDisplay();
                             _canvas?.Invalidate();
                         }
                     }
@@ -1049,21 +981,21 @@ namespace hopperdraw
                         var polyShape = new PolylineShape(new List<Point3d>(_currentPoints), false);
                         polyShape.ThicknessMultiplier = _currentThicknessMultiplier;
                         polyShape.OverrideColor = _pendingColorOverride;
-                        _annotation.Shapes.Add(polyShape);
+                        Shapes.Add(polyShape);
                     }
                     else if (_drawMode == 3)
                     {
                         var curveShape = new CurveShape(new List<Point3d>(_currentPoints), false);
                         curveShape.ThicknessMultiplier = _currentThicknessMultiplier;
                         curveShape.OverrideColor = _pendingColorOverride;
-                        _annotation.Shapes.Add(curveShape);
+                        Shapes.Add(curveShape);
                     }
                     MarkDocumentModified();
                     _currentPoints.Clear();
                     _isDrawing = false;
                     _pendingColorOverride = null;
                     _currentThicknessMultiplier = 1.0f;
-                    _annotation.ExpireDisplay();
+                    ExpireDisplay();
                     e.SuppressKeyPress = true;
                 }
             }
@@ -1074,13 +1006,13 @@ namespace hopperdraw
                     var polyShape = new PolylineShape(new List<Point3d>(_currentPoints), false);
                     polyShape.ThicknessMultiplier = _currentThicknessMultiplier;
                     polyShape.OverrideColor = _pendingColorOverride;
-                    _annotation.Shapes.Add(polyShape);
+                    Shapes.Add(polyShape);
                     MarkDocumentModified();
                     _currentPoints.Clear();
                     _isDrawing = false;
                     _pendingColorOverride = null;
                     _currentThicknessMultiplier = 1.0f;
-                    _annotation.ExpireDisplay();
+                    ExpireDisplay();
                     e.SuppressKeyPress = true;
                 }
                 else if (_drawMode == 3 && _currentPoints.Count >= 2)
@@ -1088,13 +1020,13 @@ namespace hopperdraw
                     var curveShape = new CurveShape(new List<Point3d>(_currentPoints), false);
                     curveShape.ThicknessMultiplier = _currentThicknessMultiplier;
                     curveShape.OverrideColor = _pendingColorOverride;
-                    _annotation.Shapes.Add(curveShape);
+                    Shapes.Add(curveShape);
                     MarkDocumentModified();
                     _currentPoints.Clear();
                     _isDrawing = false;
                     _pendingColorOverride = null;
                     _currentThicknessMultiplier = 1.0f;
-                    _annotation.ExpireDisplay();
+                    ExpireDisplay();
                     e.SuppressKeyPress = true;
                 }
                 else if (_currentPoints.Count > 0 || _isDrawing)
@@ -1102,13 +1034,13 @@ namespace hopperdraw
                     _currentPoints.Clear();
                     _isDrawing = false;
                     _pendingColorOverride = null;
-                    _annotation.ExpireDisplay();
+                    ExpireDisplay();
                     e.SuppressKeyPress = true;
                 }
-                else if (_annotation.HasSelection)
+                else if (HasSelection)
                 {
-                    _annotation.ClearSelection();
-                    _annotation.ExpireDisplay();
+                    ClearSelection();
+                    ExpireDisplay();
                     _canvas?.Invalidate();
                     e.SuppressKeyPress = true;
                 }
@@ -1116,7 +1048,7 @@ namespace hopperdraw
 
             if (e.KeyCode == Keys.Delete)
             {
-                if (_annotation.HasSelection)
+                if (HasSelection)
                 {
                     DeleteSelectedShapes();
                     e.SuppressKeyPress = true;
@@ -1128,28 +1060,26 @@ namespace hopperdraw
 
         private void DeleteSelectedShapes()
         {
-            if (_annotation.HasSelection)
+            if (HasSelection)
             {
-                var indicesToRemove = _annotation.SelectedShapeIndices.OrderByDescending(i => i).ToList();
+                var indicesToRemove = SelectedShapeIndices.OrderByDescending(i => i).ToList();
                 foreach (var idx in indicesToRemove)
                 {
-                    _annotation.Shapes.RemoveAt(idx);
+                    Shapes.RemoveAt(idx);
                 }
                 MarkDocumentModified();
-                _annotation.ClearSelection();
-                _annotation.ExpireDisplay();
+                ClearSelection();
+                ExpireDisplay();
                 _canvas?.Invalidate();
             }
         }
 
         public void ClearAll()
         {
-            if (_annotation == null) return;
-
-            _annotation.Shapes.Clear();
+            Shapes.Clear();
             MarkDocumentModified();
             _currentPoints.Clear();
-            _annotation.ExpireDisplay();
+            ExpireDisplay();
             _canvas?.Invalidate();
         }
 
@@ -1162,18 +1092,18 @@ namespace hopperdraw
 
         private void ShowColorPickerForSelected()
         {
-            if (_annotation == null || !_annotation.HasSelection)
+            if (!HasSelection)
                 return;
 
-            var firstShape = _annotation.Shapes[_annotation.SelectedShapeIndices[0]];
+            var firstShape = Shapes[SelectedShapeIndices[0]];
             using (var dialog = new ColorDialog())
             {
                 dialog.Color = firstShape.OverrideColor ?? _borderColor;
                 if (dialog.ShowDialog() == DialogResult.OK)
                 {
-                    foreach (var idx in _annotation.SelectedShapeIndices)
+                    foreach (var idx in SelectedShapeIndices)
                     {
-                        _annotation.Shapes[idx].OverrideColor = dialog.Color;
+                        Shapes[idx].OverrideColor = dialog.Color;
                     }
                     MarkDocumentModified();
                     _canvas?.Invalidate();
@@ -1262,7 +1192,7 @@ namespace hopperdraw
 
         private void GhDragSyncTimer_Tick(object sender, EventArgs e)
         {
-            if (!_annotation.HasSelection || _ghObjectInitialPositions.Count == 0)
+            if (!HasSelection || _ghObjectInitialPositions.Count == 0)
             {
                 _ghDragSyncTimer?.Stop();
                 return;
@@ -1304,9 +1234,9 @@ namespace hopperdraw
                 float avgDeltaX = totalDeltaX / movedCount;
                 float avgDeltaY = totalDeltaY / movedCount;
 
-                foreach (var idx in _annotation.SelectedShapeIndices)
+                foreach (var idx in SelectedShapeIndices)
                 {
-                    _annotation.Shapes[idx].Move(avgDeltaX, avgDeltaY);
+                    Shapes[idx].Move(avgDeltaX, avgDeltaY);
                 }
 
                 var updatedPositions = new Dictionary<IGH_DocumentObject, PointF>();
@@ -1316,7 +1246,7 @@ namespace hopperdraw
                 }
                 _ghObjectInitialPositions = updatedPositions;
 
-                _annotation.ExpireDisplay();
+                ExpireDisplay();
                 _canvas?.Invalidate();
             }
         }
@@ -1324,13 +1254,6 @@ namespace hopperdraw
         public override void RemovedFromDocument(GH_Document document)
         {
             UnregisterCanvasEvents();
-
-            if (_annotation != null && document != null && _annotation is IGH_DocumentObject docObj)
-            {
-                document.RemoveObject(docObj, false);
-                _annotation = null;
-            }
-
             base.RemovedFromDocument(document);
         }
 
@@ -1339,7 +1262,109 @@ namespace hopperdraw
             m_attributes = new HopperDrawUIAttributes(this);
         }
 
-        internal HopperDrawAnnotation Annotation => _annotation;
+        public override bool Write(GH_IWriter writer)
+        {
+#if DEBUG
+            System.Diagnostics.Debug.WriteLine($"[HopperDraw Write] Called. Shapes.Count={Shapes.Count}, Color={BorderColor}, Thickness={LineThickness}, DrawOrder={DrawOrder}");
+#endif
+            bool result = base.Write(writer);
+            if (!result) return false;
+
+            writer.SetInt32("ShapeCount", Shapes.Count);
+            writer.SetInt32("Color", BorderColor.ToArgb());
+            writer.SetDouble("Thickness", LineThickness);
+            writer.SetInt32("DrawOrder", DrawOrder);
+            writer.SetInt32("Visible", Visible ? 1 : 0);
+            for (int i = 0; i < Shapes.Count; i++)
+            {
+#if DEBUG
+                System.Diagnostics.Debug.WriteLine($"[HopperDraw Write] Writing shape {i} of type {Shapes[i].GetType().Name}");
+#endif
+                Shapes[i].Write(writer, i);
+            }
+            return true;
+        }
+
+        public override bool Read(GH_IReader reader)
+        {
+#if DEBUG
+            System.Diagnostics.Debug.WriteLine($"[HopperDraw Read] Called. reader={reader == null}");
+#endif
+            try
+            {
+                bool result = base.Read(reader);
+#if DEBUG
+                System.Diagnostics.Debug.WriteLine($"[HopperDraw Read] base.Read returned {result}");
+#endif
+                if (!result) return false;
+
+                Shapes.Clear();
+                int count = reader.GetInt32("ShapeCount");
+#if DEBUG
+                System.Diagnostics.Debug.WriteLine($"[HopperDraw Read] ShapeCount={count}");
+#endif
+                BorderColor = Color.FromArgb(reader.GetInt32("Color"));
+                LineThickness = (float)reader.GetDouble("Thickness");
+                DrawOrder = reader.GetInt32("DrawOrder");
+                Visible = reader.GetInt32("Visible") == 1;
+#if DEBUG
+                System.Diagnostics.Debug.WriteLine($"[HopperDraw Read] Color={BorderColor}, Thickness={LineThickness}, DrawOrder={DrawOrder}");
+#endif
+                for (int i = 0; i < count; i++)
+                {
+#if DEBUG
+                    System.Diagnostics.Debug.WriteLine($"[HopperDraw Read] About to read Type{i}");
+#endif
+                    int type = reader.GetInt32($"Type{i}");
+#if DEBUG
+                    System.Diagnostics.Debug.WriteLine($"[HopperDraw Read] Reading shape {i} of type {type}");
+#endif
+                    DrawShape shape;
+                    switch (type)
+                    {
+                        case 0:
+                            shape = new LineShape();
+                            break;
+                        case 1:
+                            shape = new PolylineShape();
+                            break;
+                        case 2:
+                            shape = new FrameShape();
+                            break;
+                        case 3:
+                            shape = new CurveShape();
+                            break;
+                        case 4:
+                            shape = new DrawShapeGroup();
+                            break;
+                        default:
+                            shape = new LineShape();
+                            break;
+                    }
+#if DEBUG
+                    System.Diagnostics.Debug.WriteLine($"[HopperDraw Read] Calling shape.Read for shape {i}");
+#endif
+                    shape.Read(reader, i);
+#if DEBUG
+                    System.Diagnostics.Debug.WriteLine($"[HopperDraw Read] Adding shape {i} to list");
+#endif
+                    Shapes.Add(shape);
+                }
+#if DEBUG
+                System.Diagnostics.Debug.WriteLine($"[HopperDraw Read] Done. Shapes.Count={Shapes.Count}");
+#endif
+                return true;
+            }
+            catch (Exception ex)
+            {
+#if DEBUG
+                System.Diagnostics.Debug.WriteLine($"[HopperDraw Read] EXCEPTION: {ex.GetType().Name}: {ex.Message}");
+                System.Diagnostics.Debug.WriteLine($"[HopperDraw Read] StackTrace: {ex.StackTrace}");
+#endif
+                return false;
+            }
+        }
+
         public bool IsActivated => _isActivated;
         public Point3d DrawStart => _drawStart;
         public Point3d DrawEnd => _drawEnd;
@@ -1351,5 +1376,702 @@ namespace hopperdraw
         public Point3d FrameFirstCorner => _frameFirstCorner;
         public float CurrentThicknessMultiplier => _currentThicknessMultiplier;
         public Color? PendingColorOverride => _pendingColorOverride;
+
+        public bool HasSelection => SelectedShapeIndices.Count > 0;
+
+        internal static int GetNextId() => _shapeIdCounter++;
+
+        public (int shapeIndex, int pointIndex) HitTest(PointF point)
+        {
+            for (int i = 0; i < Shapes.Count; i++)
+            {
+                var (hit, ptIdx) = Shapes[i].HitTest(point, HitTolerance, LineThickness);
+                if (hit) return (i, ptIdx);
+            }
+            return (-1, -1);
+        }
+
+        public void SelectShapesInRectangle(RectangleF rect, bool additive = false)
+        {
+            if (!additive)
+            {
+                SelectedShapeIndices.Clear();
+            }
+            for (int i = 0; i < Shapes.Count; i++)
+            {
+                if (additive && SelectedShapeIndices.Contains(i))
+                    continue;
+                    
+                var pts = Shapes[i].GetPoints();
+                bool inside = false;
+                foreach (var pt in pts)
+                {
+                    if (rect.Contains(pt))
+                    {
+                        inside = true;
+                        break;
+                    }
+                }
+                if (inside)
+                {
+                    SelectedShapeIndices.Add(i);
+                }
+            }
+        }
+
+        public void ClearSelection()
+        {
+            SelectedShapeIndices.Clear();
+            SelectedPointIndex = -1;
+            HoveredShapeIndex = -1;
+            HoveredPointIndex = -1;
+        }
+
+        public DrawShapeGroup GroupSelectedShapes()
+        {
+            if (SelectedShapeIndices.Count < 1) return null;
+
+            var sortedIndices = SelectedShapeIndices.OrderBy(i => i).ToList();
+            var group = new DrawShapeGroup();
+
+            for (int i = sortedIndices.Count - 1; i >= 0; i--)
+            {
+                var shape = Shapes[sortedIndices[i]];
+                Shapes.RemoveAt(sortedIndices[i]);
+                group.Children.Add(shape);
+            }
+
+            Shapes.Add(group);
+            int groupIndex = Shapes.Count - 1;
+
+            SelectedShapeIndices.Clear();
+            SelectedShapeIndices.Add(groupIndex);
+
+            return group;
+        }
+
+        public void UngroupSelectedGroups()
+        {
+            var indicesToRemove = SelectedShapeIndices
+                .Where(i => i >= 0 && i < Shapes.Count && Shapes[i] is DrawShapeGroup)
+                .OrderByDescending(i => i)
+                .ToList();
+
+            if (indicesToRemove.Count == 0) return;
+
+            var newSelections = new List<int>();
+
+            foreach (var idx in indicesToRemove)
+            {
+                if (Shapes[idx] is DrawShapeGroup group)
+                {
+                    int insertPos = idx;
+                    for (int i = 0; i < group.Children.Count; i++)
+                    {
+                        Shapes.Insert(insertPos + i, group.Children[i]);
+                        newSelections.Add(insertPos + i);
+                    }
+                    Shapes.RemoveAt(insertPos + group.Children.Count);
+                }
+            }
+
+            SelectedShapeIndices.Clear();
+            SelectedShapeIndices.AddRange(newSelections);
+        }
+
+        public void ExpireDisplay()
+        {
+            var doc = OnPingDocument();
+            if (doc != null)
+                doc.ScheduleSolution(5, d => this.ExpirePreview(false));
+        }
+    }
+
+    public abstract class DrawShape
+    {
+        public int Id { get; set; }
+        public float ThicknessMultiplier { get; set; } = 1.0f;
+        public Color? OverrideColor { get; set; }
+        public DashStyle LineType { get; set; } = DashStyle.Solid;
+
+        public abstract void Render(Graphics g, Pen pen, float thickness);
+        public abstract (bool hit, int pointIndex) HitTest(PointF pt, float tolerance, float thickness);
+        public abstract PointF[] GetPoints();
+        public abstract void Move(double dx, double dy);
+        public abstract void MovePoint(int pointIndex, Point3d newPos);
+        public abstract void Write(GH_IWriter writer, int index);
+        public abstract void Read(GH_IReader reader, int index);
+        public abstract DrawShape Clone();
+
+        protected void WriteCommonProperties(GH_IWriter writer, int index, int type)
+        {
+            writer.SetInt32($"Type{index}", type);
+            writer.SetDouble($"ThickMult{index}", ThicknessMultiplier);
+            writer.SetInt32($"Color{index}", OverrideColor.HasValue ? OverrideColor.Value.ToArgb() : 0);
+            writer.SetInt32($"LineType{index}", (int)LineType);
+        }
+
+        protected void ReadCommonProperties(GH_IReader reader, int index)
+        {
+            ThicknessMultiplier = (float)reader.GetDouble($"ThickMult{index}");
+            int colorArgb = reader.GetInt32($"Color{index}");
+            if (colorArgb != 0)
+            {
+                OverrideColor = Color.FromArgb(colorArgb);
+            }
+            if (reader.GetInt32($"LineType{index}") is int lineType && lineType >= 0 && lineType <= 3)
+            {
+                LineType = (DashStyle)lineType;
+            }
+        }
+    }
+
+    public class LineShape : DrawShape
+    {
+        public Point3d Start { get; set; }
+        public Point3d End { get; set; }
+
+        public LineShape() { Start = Point3d.Unset; End = Point3d.Unset; }
+        public LineShape(Point3d start, Point3d end) { Start = start; End = end; }
+
+        public override void Render(Graphics g, Pen pen, float thickness)
+        {
+            if (!Start.IsValid || !End.IsValid) return;
+            g.DrawLine(pen, (float)Start.X, (float)Start.Y, (float)End.X, (float)End.Y);
+        }
+
+        public override (bool hit, int pointIndex) HitTest(PointF pt, float tolerance, float thickness)
+        {
+            if (GeometryUtilities.Distance(pt, new PointF((float)Start.X, (float)Start.Y)) <= tolerance)
+                return (true, 0);
+            if (GeometryUtilities.Distance(pt, new PointF((float)End.X, (float)End.Y)) <= tolerance)
+                return (true, 1);
+            if (GeometryUtilities.DistanceToSegment(pt, new PointF((float)Start.X, (float)Start.Y), new PointF((float)End.X, (float)End.Y)) <= thickness / 2 + tolerance)
+                return (true, -1);
+            return (false, -1);
+        }
+
+        public override PointF[] GetPoints() => new PointF[] { new PointF((float)Start.X, (float)Start.Y), new PointF((float)End.X, (float)End.Y) };
+
+        public override void Move(double dx, double dy)
+        {
+            Start = new Point3d(Start.X + dx, Start.Y + dy, 0);
+            End = new Point3d(End.X + dx, End.Y + dy, 0);
+        }
+
+        public override void MovePoint(int pointIndex, Point3d newPos)
+        {
+            if (pointIndex == 0) Start = newPos;
+            else if (pointIndex == 1) End = newPos;
+        }
+
+        public override void Write(GH_IWriter writer, int index)
+        {
+            writer.SetDouble($"StartX{index}", Start.X);
+            writer.SetDouble($"StartY{index}", Start.Y);
+            writer.SetDouble($"StartZ{index}", Start.Z);
+            writer.SetDouble($"EndX{index}", End.X);
+            writer.SetDouble($"EndY{index}", End.Y);
+            writer.SetDouble($"EndZ{index}", End.Z);
+            WriteCommonProperties(writer, index, 0);
+        }
+
+        public override void Read(GH_IReader reader, int index)
+        {
+            double sx = reader.GetDouble($"StartX{index}");
+            double sy = reader.GetDouble($"StartY{index}");
+            double sz = reader.GetDouble($"StartZ{index}");
+            double ex = reader.GetDouble($"EndX{index}");
+            double ey = reader.GetDouble($"EndY{index}");
+            double ez = reader.GetDouble($"EndZ{index}");
+            Start = new Point3d(sx, sy, sz);
+            End = new Point3d(ex, ey, ez);
+            ReadCommonProperties(reader, index);
+        }
+
+        public override DrawShape Clone()
+        {
+            return new LineShape(Start, End)
+            {
+                ThicknessMultiplier = ThicknessMultiplier,
+                OverrideColor = OverrideColor,
+                LineType = LineType,
+                Id = HopperDraw.GetNextId()
+            };
+        }
+    }
+
+    public class PolylineShape : DrawShape
+    {
+        public List<Point3d> Points { get; set; } = new List<Point3d>();
+        public bool Closed { get; set; } = false;
+
+        public PolylineShape() { }
+        public PolylineShape(List<Point3d> points, bool closed = false) { Points = points; Closed = closed; }
+
+        public override void Render(Graphics g, Pen pen, float thickness)
+        {
+            if (Points.Count < 2) return;
+            var pts = Points.Select(p => new PointF((float)p.X, (float)p.Y)).ToArray();
+            if (Closed && pts.Length > 2)
+            {
+                g.DrawPolygon(pen, pts);
+            }
+            else
+            {
+                g.DrawLines(pen, pts);
+            }
+        }
+
+        public override (bool hit, int pointIndex) HitTest(PointF pt, float tolerance, float thickness)
+        {
+            for (int i = 0; i < Points.Count; i++)
+            {
+                if (GeometryUtilities.Distance(pt, new PointF((float)Points[i].X, (float)Points[i].Y)) <= tolerance)
+                    return (true, i);
+            }
+            for (int i = 0; i < Points.Count - 1; i++)
+            {
+                if (GeometryUtilities.DistanceToSegment(pt, new PointF((float)Points[i].X, (float)Points[i].Y), new PointF((float)Points[i + 1].X, (float)Points[i + 1].Y)) <= thickness / 2 + tolerance)
+                    return (true, -1);
+            }
+            if (Closed && Points.Count > 2)
+            {
+                if (GeometryUtilities.DistanceToSegment(pt, new PointF((float)Points[Points.Count - 1].X, (float)Points[Points.Count - 1].Y), new PointF((float)Points[0].X, (float)Points[0].Y)) <= thickness / 2 + tolerance)
+                    return (true, -1);
+            }
+            return (false, -1);
+        }
+
+        public override PointF[] GetPoints() => Points.Select(p => new PointF((float)p.X, (float)p.Y)).ToArray();
+
+        public override void Move(double dx, double dy)
+        {
+            for (int i = 0; i < Points.Count; i++)
+                Points[i] = new Point3d(Points[i].X + dx, Points[i].Y + dy, 0);
+        }
+
+        public override void MovePoint(int pointIndex, Point3d newPos)
+        {
+            if (pointIndex >= 0 && pointIndex < Points.Count)
+                Points[pointIndex] = newPos;
+        }
+
+        public override void Write(GH_IWriter writer, int index)
+        {
+            writer.SetInt32($"PointCount{index}", Points.Count);
+            writer.SetBoolean($"Closed{index}", Closed);
+            for (int i = 0; i < Points.Count; i++)
+            {
+                writer.SetDouble($"Pt{i}X{index}", Points[i].X);
+                writer.SetDouble($"Pt{i}Y{index}", Points[i].Y);
+                writer.SetDouble($"Pt{i}Z{index}", Points[i].Z);
+            }
+            WriteCommonProperties(writer, index, 1);
+        }
+
+        public override void Read(GH_IReader reader, int index)
+        {
+            int count = reader.GetInt32($"PointCount{index}");
+            Closed = reader.GetBoolean($"Closed{index}");
+            Points.Clear();
+            for (int i = 0; i < count; i++)
+            {
+                double px = reader.GetDouble($"Pt{i}X{index}");
+                double py = reader.GetDouble($"Pt{i}Y{index}");
+                double pz = reader.GetDouble($"Pt{i}Z{index}");
+                Points.Add(new Point3d(px, py, pz));
+            }
+            ReadCommonProperties(reader, index);
+        }
+
+        public override DrawShape Clone()
+        {
+            return new PolylineShape(new List<Point3d>(Points), Closed)
+            {
+                ThicknessMultiplier = ThicknessMultiplier,
+                OverrideColor = OverrideColor,
+                LineType = LineType,
+                Id = HopperDraw.GetNextId()
+            };
+        }
+    }
+
+    public class CurveShape : DrawShape
+    {
+        public List<Point3d> Points { get; set; } = new List<Point3d>();
+        public bool Closed { get; set; } = false;
+        private const float Tension = 0.5f;
+
+        public CurveShape() { }
+        public CurveShape(List<Point3d> points, bool closed = false) { Points = points; Closed = closed; }
+
+        public override void Render(Graphics g, Pen pen, float thickness)
+        {
+            if (Points.Count < 2) return;
+            var pts = Points.Select(p => new PointF((float)p.X, (float)p.Y)).ToArray();
+            if (Closed && pts.Length > 2)
+            {
+                g.DrawClosedCurve(pen, pts, Tension, System.Drawing.Drawing2D.FillMode.Winding);
+            }
+            else
+            {
+                g.DrawCurve(pen, pts, Tension);
+            }
+        }
+
+        public override (bool hit, int pointIndex) HitTest(PointF pt, float tolerance, float thickness)
+        {
+            for (int i = 0; i < Points.Count; i++)
+            {
+                if (GeometryUtilities.Distance(pt, new PointF((float)Points[i].X, (float)Points[i].Y)) <= tolerance)
+                    return (true, i);
+            }
+
+            var curvePoints = SampleCurve(20);
+            for (int i = 0; i < curvePoints.Count - 1; i++)
+            {
+                if (GeometryUtilities.DistanceToSegment(pt, curvePoints[i], curvePoints[i + 1]) <= thickness / 2 + tolerance)
+                    return (true, -1);
+            }
+            return (false, -1);
+        }
+
+        public override PointF[] GetPoints() => Points.Select(p => new PointF((float)p.X, (float)p.Y)).ToArray();
+
+        public override void Move(double dx, double dy)
+        {
+            for (int i = 0; i < Points.Count; i++)
+                Points[i] = new Point3d(Points[i].X + dx, Points[i].Y + dy, 0);
+        }
+
+        public override void MovePoint(int pointIndex, Point3d newPos)
+        {
+            if (pointIndex >= 0 && pointIndex < Points.Count)
+                Points[pointIndex] = newPos;
+        }
+
+        public override void Write(GH_IWriter writer, int index)
+        {
+            writer.SetInt32($"PointCount{index}", Points.Count);
+            writer.SetBoolean($"Closed{index}", Closed);
+            for (int i = 0; i < Points.Count; i++)
+            {
+                writer.SetDouble($"Pt{i}X{index}", Points[i].X);
+                writer.SetDouble($"Pt{i}Y{index}", Points[i].Y);
+                writer.SetDouble($"Pt{i}Z{index}", Points[i].Z);
+            }
+            WriteCommonProperties(writer, index, 3);
+        }
+
+        public override void Read(GH_IReader reader, int index)
+        {
+            int count = reader.GetInt32($"PointCount{index}");
+            Closed = reader.GetBoolean($"Closed{index}");
+            Points.Clear();
+            for (int i = 0; i < count; i++)
+            {
+                double px = reader.GetDouble($"Pt{i}X{index}");
+                double py = reader.GetDouble($"Pt{i}Y{index}");
+                double pz = reader.GetDouble($"Pt{i}Z{index}");
+                Points.Add(new Point3d(px, py, pz));
+            }
+            ReadCommonProperties(reader, index);
+        }
+
+        private List<PointF> SampleCurve(int segmentsPerSpan)
+        {
+            var result = new List<PointF>();
+            if (Points.Count < 2) return result;
+
+            var pts = Points.Select(p => new PointF((float)p.X, (float)p.Y)).ToArray();
+
+            if (Closed && pts.Length > 2)
+            {
+                int totalSegments = pts.Length * segmentsPerSpan;
+                for (int i = 0; i < totalSegments; i++)
+                {
+                    float t = (float)i / totalSegments;
+                    int idx = (int)(t * pts.Length);
+                    float localT = (t * pts.Length) - idx;
+                    int i0 = idx;
+                    int i1 = (idx + 1) % pts.Length;
+                    int i2 = (idx + 2) % pts.Length;
+                    int i3 = (idx + 3) % pts.Length;
+
+                    if (i1 >= pts.Length) i1 -= pts.Length;
+                    if (i2 >= pts.Length) i2 -= pts.Length;
+                    if (i3 >= pts.Length) i3 -= pts.Length;
+
+                    var p = CatmullRom(pts[i0], pts[i1], pts[i2], pts[i3], localT);
+                    result.Add(p);
+                }
+            }
+            else
+            {
+                int totalSegments = (pts.Length - 1) * segmentsPerSpan;
+                for (int i = 0; i < totalSegments; i++)
+                {
+                    float t = (float)i / totalSegments;
+                    int span = (int)(t * (pts.Length - 1));
+                    if (span >= pts.Length - 1) span = pts.Length - 2;
+                    float localT = (t * (pts.Length - 1)) - span;
+
+                    int i0 = Math.Max(0, span - 1);
+                    int i1 = span;
+                    int i2 = Math.Min(pts.Length - 1, span + 1);
+                    int i3 = Math.Min(pts.Length - 1, span + 2);
+
+                    var p = CatmullRom(pts[i0], pts[i1], pts[i2], pts[i3], localT);
+                    result.Add(p);
+                }
+                result.Add(pts[pts.Length - 1]);
+            }
+
+            return result;
+        }
+
+        private PointF CatmullRom(PointF p0, PointF p1, PointF p2, PointF p3, float t)
+        {
+            float t2 = t * t;
+            float t3 = t2 * t;
+            return new PointF(
+                0.5f * ((2 * p1.X) + (-p0.X + p2.X) * t + (2 * p0.X - 5 * p1.X + 4 * p2.X - p3.X) * t2 + (-p0.X + 3 * p1.X - 3 * p2.X + p3.X) * t3),
+                0.5f * ((2 * p1.Y) + (-p0.Y + p2.Y) * t + (2 * p0.Y - 5 * p1.Y + 4 * p2.Y - p3.Y) * t2 + (-p0.Y + 3 * p1.Y - 3 * p2.Y + p3.Y) * t3)
+            );
+        }
+
+        public override DrawShape Clone()
+        {
+            return new CurveShape(new List<Point3d>(Points), Closed)
+            {
+                ThicknessMultiplier = ThicknessMultiplier,
+                OverrideColor = OverrideColor,
+                LineType = LineType,
+                Id = HopperDraw.GetNextId()
+            };
+        }
+    }
+
+    public class FrameShape : DrawShape
+    {
+        public Point3d TopLeft { get; set; }
+        public Point3d TopRight { get; set; }
+        public Point3d BottomRight { get; set; }
+        public Point3d BottomLeft { get; set; }
+
+        public FrameShape() { }
+        public FrameShape(Point3d topLeft, Point3d topRight, Point3d bottomRight, Point3d bottomLeft)
+        {
+            TopLeft = topLeft; TopRight = topRight; BottomRight = bottomRight; BottomLeft = bottomLeft;
+        }
+
+        public override void Render(Graphics g, Pen pen, float thickness)
+        {
+            var points = new PointF[]
+            {
+                new PointF((float)TopLeft.X, (float)TopLeft.Y),
+                new PointF((float)TopRight.X, (float)TopRight.Y),
+                new PointF((float)BottomRight.X, (float)BottomRight.Y),
+                new PointF((float)BottomLeft.X, (float)BottomLeft.Y),
+                new PointF((float)TopLeft.X, (float)TopLeft.Y)
+            };
+            g.DrawPolygon(pen, points);
+        }
+
+        public override (bool hit, int pointIndex) HitTest(PointF pt, float tolerance, float thickness)
+        {
+            var corners = new PointF[] { new PointF((float)TopLeft.X, (float)TopLeft.Y), new PointF((float)TopRight.X, (float)TopRight.Y), new PointF((float)BottomRight.X, (float)BottomRight.Y), new PointF((float)BottomLeft.X, (float)BottomLeft.Y) };
+            for (int i = 0; i < 4; i++)
+                if (GeometryUtilities.Distance(pt, corners[i]) <= tolerance) return (true, i);
+            if (GeometryUtilities.DistanceToSegment(pt, corners[0], corners[1]) <= thickness / 2 + tolerance) return (true, -1);
+            if (GeometryUtilities.DistanceToSegment(pt, corners[1], corners[2]) <= thickness / 2 + tolerance) return (true, -1);
+            if (GeometryUtilities.DistanceToSegment(pt, corners[2], corners[3]) <= thickness / 2 + tolerance) return (true, -1);
+            if (GeometryUtilities.DistanceToSegment(pt, corners[3], corners[0]) <= thickness / 2 + tolerance) return (true, -1);
+            return (false, -1);
+        }
+
+        public override PointF[] GetPoints() => new PointF[] { new PointF((float)TopLeft.X, (float)TopLeft.Y), new PointF((float)TopRight.X, (float)TopRight.Y), new PointF((float)BottomRight.X, (float)BottomRight.Y), new PointF((float)BottomLeft.X, (float)BottomLeft.Y) };
+
+        public override void Move(double dx, double dy)
+        {
+            TopLeft = new Point3d(TopLeft.X + dx, TopLeft.Y + dy, 0);
+            TopRight = new Point3d(TopRight.X + dx, TopRight.Y + dy, 0);
+            BottomRight = new Point3d(BottomRight.X + dx, BottomRight.Y + dy, 0);
+            BottomLeft = new Point3d(BottomLeft.X + dx, BottomLeft.Y + dy, 0);
+        }
+
+        public override void MovePoint(int pointIndex, Point3d newPos)
+        {
+            switch (pointIndex)
+            {
+                case 0: TopLeft = newPos; break;
+                case 1: TopRight = newPos; break;
+                case 2: BottomRight = newPos; break;
+                case 3: BottomLeft = newPos; break;
+            }
+        }
+
+        public override void Write(GH_IWriter writer, int index)
+        {
+            writer.SetDouble($"TLX{index}", TopLeft.X);
+            writer.SetDouble($"TLY{index}", TopLeft.Y);
+            writer.SetDouble($"TLZ{index}", TopLeft.Z);
+            writer.SetDouble($"TRX{index}", TopRight.X);
+            writer.SetDouble($"TRY{index}", TopRight.Y);
+            writer.SetDouble($"TRZ{index}", TopRight.Z);
+            writer.SetDouble($"BRX{index}", BottomRight.X);
+            writer.SetDouble($"BRY{index}", BottomRight.Y);
+            writer.SetDouble($"BRZ{index}", BottomRight.Z);
+            writer.SetDouble($"BLX{index}", BottomLeft.X);
+            writer.SetDouble($"BLY{index}", BottomLeft.Y);
+            writer.SetDouble($"BLZ{index}", BottomLeft.Z);
+            WriteCommonProperties(writer, index, 2);
+        }
+
+        public override void Read(GH_IReader reader, int index)
+        {
+            TopLeft = new Point3d(reader.GetDouble($"TLX{index}"), reader.GetDouble($"TLY{index}"), reader.GetDouble($"TLZ{index}"));
+            TopRight = new Point3d(reader.GetDouble($"TRX{index}"), reader.GetDouble($"TRY{index}"), reader.GetDouble($"TRZ{index}"));
+            BottomRight = new Point3d(reader.GetDouble($"BRX{index}"), reader.GetDouble($"BRY{index}"), reader.GetDouble($"BRZ{index}"));
+            BottomLeft = new Point3d(reader.GetDouble($"BLX{index}"), reader.GetDouble($"BLY{index}"), reader.GetDouble($"BLZ{index}"));
+            ReadCommonProperties(reader, index);
+        }
+
+        public override DrawShape Clone()
+        {
+            return new FrameShape(TopLeft, TopRight, BottomRight, BottomLeft)
+            {
+                ThicknessMultiplier = ThicknessMultiplier,
+                OverrideColor = OverrideColor,
+                LineType = LineType,
+                Id = HopperDraw.GetNextId()
+            };
+        }
+    }
+
+    public class DrawShapeGroup : DrawShape
+    {
+        public List<DrawShape> Children { get; set; } = new List<DrawShape>();
+
+        public override void Render(Graphics g, Pen pen, float thickness)
+        {
+            foreach (var child in Children)
+            {
+                child.Render(g, pen, thickness);
+            }
+        }
+
+        public override (bool hit, int pointIndex) HitTest(PointF pt, float tolerance, float thickness)
+        {
+            foreach (var child in Children)
+            {
+                var (hit, ptIdx) = child.HitTest(pt, tolerance, thickness);
+                if (hit) return (true, -1);
+            }
+            return (false, -1);
+        }
+
+        public override PointF[] GetPoints()
+        {
+            if (Children.Count == 0) return new PointF[0];
+
+            double minX = double.MaxValue, minY = double.MaxValue, maxX = double.MinValue, maxY = double.MinValue;
+            foreach (var child in Children)
+            {
+                foreach (var p in child.GetPoints())
+                {
+                    minX = Math.Min(minX, p.X);
+                    minY = Math.Min(minY, p.Y);
+                    maxX = Math.Max(maxX, p.X);
+                    maxY = Math.Max(maxY, p.Y);
+                }
+            }
+            return new PointF[]
+            {
+                new PointF((float)minX, (float)minY),
+                new PointF((float)maxX, (float)minY),
+                new PointF((float)maxX, (float)maxY),
+                new PointF((float)minX, (float)maxY)
+            };
+        }
+
+        internal RectangleF GetBoundingBox()
+        {
+            if (Children.Count == 0) return RectangleF.Empty;
+
+            double minX = double.MaxValue, minY = double.MaxValue, maxX = double.MinValue, maxY = double.MinValue;
+            foreach (var child in Children)
+            {
+                foreach (var p in child.GetPoints())
+                {
+                    minX = Math.Min(minX, p.X);
+                    minY = Math.Min(minY, p.Y);
+                    maxX = Math.Max(maxX, p.X);
+                    maxY = Math.Max(maxY, p.Y);
+                }
+            }
+            return new RectangleF((float)minX, (float)minY, (float)(maxX - minX), (float)(maxY - minY));
+        }
+
+        public override void Move(double dx, double dy)
+        {
+            foreach (var child in Children)
+            {
+                child.Move(dx, dy);
+            }
+        }
+
+        public override void MovePoint(int pointIndex, Point3d newPos)
+        {
+        }
+
+        public override void Write(GH_IWriter writer, int index)
+        {
+            writer.SetInt32($"GroupChildCount{index}", Children.Count);
+            for (int i = 0; i < Children.Count; i++)
+            {
+                Children[i].Write(writer, 1000 * index + i);
+            }
+            WriteCommonProperties(writer, index, 4);
+        }
+
+        public override void Read(GH_IReader reader, int index)
+        {
+            int childCount = reader.GetInt32($"GroupChildCount{index}");
+            Children.Clear();
+            for (int i = 0; i < childCount; i++)
+            {
+                int childIndex = 1000 * index + i;
+                int type = reader.GetInt32($"Type{childIndex}");
+                DrawShape child;
+                switch (type)
+                {
+                    case 0: child = new LineShape(); break;
+                    case 1: child = new PolylineShape(); break;
+                    case 2: child = new FrameShape(); break;
+                    case 3: child = new CurveShape(); break;
+                    default: child = new LineShape(); break;
+                }
+                child.Read(reader, childIndex);
+                Children.Add(child);
+            }
+            ReadCommonProperties(reader, index);
+        }
+
+        public override DrawShape Clone()
+        {
+            var group = new DrawShapeGroup();
+            foreach (var child in Children)
+            {
+                var clonedChild = child.Clone();
+                clonedChild.ThicknessMultiplier = ThicknessMultiplier;
+                clonedChild.OverrideColor = OverrideColor;
+                clonedChild.LineType = LineType;
+                group.Children.Add(clonedChild);
+            }
+            group.Id = HopperDraw.GetNextId();
+            return group;
+        }
     }
 }

@@ -68,11 +68,10 @@ namespace hopperdraw
                 }
             }
 
-            if (!owner.Locked && owner.IsActivated && owner.Annotation != null && owner.Annotation.Visible)
+            if (!owner.Locked && owner.IsActivated && owner.Visible)
             {
-                var annotation = owner.Annotation;
-                float effectiveThickness = annotation.LineThickness * owner.CurrentThicknessMultiplier;
-                Color effectiveColor = owner.PendingColorOverride ?? annotation.BorderColor;
+                float effectiveThickness = owner.LineThickness * owner.CurrentThicknessMultiplier;
+                Color effectiveColor = owner.PendingColorOverride ?? owner.BorderColor;
 
                 using (var pen = new Pen(effectiveColor, effectiveThickness))
                 {
@@ -224,6 +223,94 @@ namespace hopperdraw
 
                         var points = new PointF[] { topLeft, topRight, bottomRight, bottomLeft, topLeft };
                         graphics.DrawPolygon(pen, points);
+                    }
+                }
+            }
+
+            if (!owner.Locked && owner.Visible)
+            {
+                foreach (var shape in owner.Shapes)
+                {
+                    float effectiveThickness = owner.LineThickness * shape.ThicknessMultiplier;
+                    Color effectiveColor = shape.OverrideColor ?? owner.BorderColor;
+                    using (var pen = new Pen(effectiveColor, effectiveThickness))
+                    {
+                        pen.DashStyle = shape.LineType;
+                        shape.Render(graphics, pen, effectiveThickness);
+                    }
+                }
+
+                if (owner.HasSelection)
+                {
+                    foreach (var shapeIdx in owner.SelectedShapeIndices)
+                    {
+                        if (shapeIdx >= 0 && shapeIdx < owner.Shapes.Count)
+                        {
+                            var selectedShape = owner.Shapes[shapeIdx];
+                            float selectedThickness = owner.LineThickness * selectedShape.ThicknessMultiplier;
+                            RenderSelectionHandles(graphics, selectedShape, -1, selectedThickness);
+                        }
+                    }
+                }
+
+                if (owner.HoveredShapeIndex >= 0 && owner.HoveredShapeIndex < owner.Shapes.Count)
+                {
+                    var hoveredShape = owner.Shapes[owner.HoveredShapeIndex];
+                    float hoveredThickness = owner.LineThickness * hoveredShape.ThicknessMultiplier;
+                    RenderHoverHandles(graphics, hoveredShape, owner.HoveredPointIndex, hoveredThickness);
+                }
+            }
+        }
+
+        private void RenderSelectionHandles(Graphics g, DrawShape shape, int selectedPointIndex, float thickness)
+        {
+            if (shape is DrawShapeGroup group)
+            {
+                var bbox = group.GetBoundingBox();
+                using (var selPen = new Pen(Color.FromArgb(200, 0, 120, 215), 1))
+                {
+                    selPen.DashStyle = System.Drawing.Drawing2D.DashStyle.Dash;
+                    selPen.DashPattern = new float[] { 5, 5 };
+                    g.DrawRectangle(selPen, bbox.X, bbox.Y, bbox.Width, bbox.Height);
+                }
+                return;
+            }
+
+            var points = shape.GetPoints();
+            using (var handleBrush = new SolidBrush(Color.White))
+            using (var handlePen = new Pen(Color.FromArgb(200, 0, 120, 215), 2))
+            {
+                for (int i = 0; i < points.Length; i++)
+                {
+                    var pt = points[i];
+                    g.FillRectangle(handleBrush, pt.X - 4, pt.Y - 4, 8, 8);
+                    g.DrawRectangle(handlePen, (int)pt.X - 4, (int)pt.Y - 4, 8, 8);
+                }
+            }
+            using (var selPen = new Pen(Color.FromArgb(200, 0, 120, 215), 1))
+            {
+                selPen.DashStyle = System.Drawing.Drawing2D.DashStyle.Dash;
+                if (points.Length > 1)
+                {
+                    if (shape is FrameShape || shape is PolylineShape poly && poly.Closed)
+                        g.DrawPolygon(selPen, points);
+                    else
+                        g.DrawLines(selPen, points);
+                }
+            }
+        }
+
+        private void RenderHoverHandles(Graphics g, DrawShape shape, int hoveredPointIndex, float thickness)
+        {
+            var points = shape.GetPoints();
+            using (var hoverBrush = new SolidBrush(Color.FromArgb(100, 0, 120, 215)))
+            {
+                for (int i = 0; i < points.Length; i++)
+                {
+                    if (i == hoveredPointIndex)
+                    {
+                        var pt = points[i];
+                        g.FillRectangle(hoverBrush, pt.X - 4, pt.Y - 4, 8, 8);
                     }
                 }
             }
