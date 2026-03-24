@@ -2,6 +2,8 @@ using Grasshopper;
 using Grasshopper.Kernel;
 using System;
 using System.Drawing;
+using System.IO;
+using System.Reflection;
 
 namespace hopperdraw
 {
@@ -9,7 +11,25 @@ namespace hopperdraw
     {
         public override string Name => "hopperdraw";
 
-        public override Bitmap Icon => null;
+        public override Bitmap Icon
+        {
+            get
+            {
+                try
+                {
+                    var assembly = Assembly.GetExecutingAssembly();
+                    var stream = assembly.GetManifestResourceStream("hopperborder.icon.png");
+                    if (stream != null)
+                    {
+                        return new Bitmap(stream);
+                    }
+                }
+                catch
+                {
+                }
+                return null;
+            }
+        }
 
         public override string Description => "Canvas drawing plugin for Grasshopper";
 

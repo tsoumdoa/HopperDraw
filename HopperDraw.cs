@@ -78,12 +78,32 @@ namespace hopperdraw
         private const float HitTolerance = 15f;
 
         public HopperDraw()
-            : base("Hopper Draw", "HDraw", "Draw and manage canvas borders", "Params", "Util")
+            : base("Hopper Draw", "HopperDraw", "Draw and manage canvas borders", "Params", "Util")
         {
             CreateAttributes();
         }
 
         public override Guid ComponentGuid => new Guid("D2E3F4A5-B6C7-8901-2345-67890ABCDEF0");
+
+        protected override Bitmap Icon
+        {
+            get
+            {
+                try
+                {
+                    var assembly = System.Reflection.Assembly.GetExecutingAssembly();
+                    var stream = assembly.GetManifestResourceStream("hopperborder.icon.png");
+                    if (stream != null)
+                    {
+                        return new Bitmap(stream);
+                    }
+                }
+                catch
+                {
+                }
+                return null;
+            }
+        }
 
         protected override void RegisterInputParams(GH_Component.GH_InputParamManager pManager)
         {
