@@ -113,11 +113,32 @@ Set a custom color for the next shape:
 **Preview:**
 - Preview shows the selected color override
 
+## Line Type
+
+Control line dash style:
+
+| Shortcut | Effect |
+|----------|--------|
+| Ctrl + B | Cycle to next line type |
+
+**Line Types:**
+- 0: Solid (default)
+- 1: Dash
+- 2: Dot
+- 3: DashDot
+- 4: DashDotDot
+
+**Behavior:**
+- Applies to the **next shape** to be drawn when no selection exists
+- When shapes are selected, cycles line type on **all selected shapes**
+- Preview shows the effective line type while drawing
+
 ## Shape Properties
 
 Each shape stores its own:
 - **ThicknessMultiplier** - Affects how thick the shape renders (0.5x, 1x, 2x, 3x)
 - **OverrideColor** - Optional custom color (null = use component default)
+- **LineType** - Dash style (Solid, Dash, Dot, DashDot, DashDotDot)
 
 ## Persistence
 
@@ -135,6 +156,7 @@ Shapes are serialized with the Grasshopper file:
 | DrawMode | Integer | 0 | Drawing mode (0=Line, 1=Polyline, 2=Frame, 3=Curve) |
 | Color | Color | Black | Default border color. Right-click during drawing for per-shape override |
 | Thickness | Number | 8.0 | Base line thickness. Use Ctrl+1/2/3 for multipliers |
+| LineType | Integer | 0 | Line style (0=Solid, 1=Dash, 2=Dot, 3=DashDot, 4=DashDotDot) |
 | DrawOrder | Integer | 1 | 0=Below components, 1=Above components |
 
 ## Keyboard Shortcuts
@@ -150,6 +172,7 @@ Shapes are serialized with the Grasshopper file:
 | Ctrl + 1 | Set 0.5x thickness multiplier |
 | Ctrl + 2 | Set 2x thickness multiplier |
 | Ctrl + 3 | Set 3x thickness multiplier |
+| Ctrl + B | Cycle line type (Solid → Dash → Dot → DashDot → DashDotDot) |
 | Right Click (during drawing) | Open color picker for next shape |
 | Right Click (on selected) | Open color picker for selected shape(s) |
 | Enter | Complete polyline/curve |
@@ -177,6 +200,7 @@ Shapes can be selected and manipulated:
 - Drag handles to resize/move shapes
 - **Ctrl + 0**: Reset thickness to 1.0x (default)
 - **Ctrl + 1/2/3**: Change thickness of selected shapes (0.5x, 2x, 3x)
+- **Ctrl + B**: Cycle line type of selected shapes
 - **Right-click on selected**: Change color of selected shapes
 - **Escape**: Clear selection (or cancel drawing)
 - **Delete**: Remove all selected shapes
@@ -186,7 +210,7 @@ Shapes can be selected and manipulated:
 1. **Window Selection**: Click and drag on empty canvas to create a selection window
 2. **Additive Selection**: Hold Ctrl while window selecting to add to existing selection
 3. **Multi-Drag**: Click on any selected shape and drag to move all selected shapes together
-4. **Bulk Operations**: Ctrl+1/2/3 and right-click color change apply to ALL selected shapes
+4. **Bulk Operations**: Ctrl+1/2/3, Ctrl+B, and right-click color change apply to ALL selected shapes
 
 ## Limitations
 
