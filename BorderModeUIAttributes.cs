@@ -76,6 +76,7 @@ namespace hopperborder
 
                 using (var pen = new Pen(effectiveColor, effectiveThickness))
                 {
+                    pen.DashStyle = owner.CurrentLineType;
                     if (owner.DrawMode == 0 && owner.IsDrawing && owner.DrawStart.IsValid && owner.DrawEnd.IsValid)
                     {
                         Point3d end = owner.DrawEnd;

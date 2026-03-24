@@ -9,6 +9,7 @@ using Rhino.Geometry;
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.Drawing.Drawing2D;
 using System.Linq;
 using GH_IO.Serialization;
 
@@ -21,6 +22,7 @@ namespace hopperborder
         public int Id { get; set; }
         public float ThicknessMultiplier { get; set; } = 1.0f;
         public Color? OverrideColor { get; set; }
+        public DashStyle LineType { get; set; } = DashStyle.Solid;
 
         public abstract void Render(Graphics g, Pen pen, float thickness);
         public abstract (bool hit, int pointIndex) HitTest(PointF pt, float tolerance, float thickness);
@@ -82,6 +84,7 @@ namespace hopperborder
             writer.SetInt32($"Type{index}", 0);
             writer.SetDouble($"ThickMult{index}", ThicknessMultiplier);
             writer.SetInt32($"Color{index}", OverrideColor.HasValue ? OverrideColor.Value.ToArgb() : 0);
+            writer.SetInt32($"LineType{index}", (int)LineType);
         }
 
         public override void Read(GH_IReader reader, int index)
@@ -99,6 +102,10 @@ namespace hopperborder
             if (colorArgb != 0)
             {
                 OverrideColor = Color.FromArgb(colorArgb);
+            }
+            if (reader.GetInt32($"LineType{index}") is int lineType && lineType >= 0 && lineType <= 3)
+            {
+                LineType = (DashStyle)lineType;
             }
         }
 
@@ -120,6 +127,7 @@ namespace hopperborder
             {
                 ThicknessMultiplier = ThicknessMultiplier,
                 OverrideColor = OverrideColor,
+                LineType = LineType,
                 Id = BorderAnnotation.GetNextId()
             };
         }
@@ -194,6 +202,7 @@ namespace hopperborder
             writer.SetInt32($"Type{index}", 1);
             writer.SetDouble($"ThickMult{index}", ThicknessMultiplier);
             writer.SetInt32($"Color{index}", OverrideColor.HasValue ? OverrideColor.Value.ToArgb() : 0);
+            writer.SetInt32($"LineType{index}", (int)LineType);
         }
 
         public override void Read(GH_IReader reader, int index)
@@ -213,6 +222,10 @@ namespace hopperborder
             if (colorArgb != 0)
             {
                 OverrideColor = Color.FromArgb(colorArgb);
+            }
+            if (reader.GetInt32($"LineType{index}") is int lineType && lineType >= 0 && lineType <= 3)
+            {
+                LineType = (DashStyle)lineType;
             }
         }
 
@@ -234,6 +247,7 @@ namespace hopperborder
             {
                 ThicknessMultiplier = ThicknessMultiplier,
                 OverrideColor = OverrideColor,
+                LineType = LineType,
                 Id = BorderAnnotation.GetNextId()
             };
         }
@@ -306,6 +320,7 @@ namespace hopperborder
             writer.SetInt32($"Type{index}", 3);
             writer.SetDouble($"ThickMult{index}", ThicknessMultiplier);
             writer.SetInt32($"Color{index}", OverrideColor.HasValue ? OverrideColor.Value.ToArgb() : 0);
+            writer.SetInt32($"LineType{index}", (int)LineType);
         }
 
         public override void Read(GH_IReader reader, int index)
@@ -325,6 +340,10 @@ namespace hopperborder
             if (colorArgb != 0)
             {
                 OverrideColor = Color.FromArgb(colorArgb);
+            }
+            if (reader.GetInt32($"LineType{index}") is int lineType && lineType >= 0 && lineType <= 3)
+            {
+                LineType = (DashStyle)lineType;
             }
         }
 
@@ -408,6 +427,7 @@ namespace hopperborder
             {
                 ThicknessMultiplier = ThicknessMultiplier,
                 OverrideColor = OverrideColor,
+                LineType = LineType,
                 Id = BorderAnnotation.GetNextId()
             };
         }
@@ -489,6 +509,7 @@ namespace hopperborder
             writer.SetInt32($"Type{index}", 2);
             writer.SetDouble($"ThickMult{index}", ThicknessMultiplier);
             writer.SetInt32($"Color{index}", OverrideColor.HasValue ? OverrideColor.Value.ToArgb() : 0);
+            writer.SetInt32($"LineType{index}", (int)LineType);
         }
 
         public override void Read(GH_IReader reader, int index)
@@ -502,6 +523,10 @@ namespace hopperborder
             if (colorArgb != 0)
             {
                 OverrideColor = Color.FromArgb(colorArgb);
+            }
+            if (reader.GetInt32($"LineType{index}") is int lineType && lineType >= 0 && lineType <= 3)
+            {
+                LineType = (DashStyle)lineType;
             }
         }
 
@@ -525,6 +550,7 @@ namespace hopperborder
             {
                 ThicknessMultiplier = ThicknessMultiplier,
                 OverrideColor = OverrideColor,
+                LineType = LineType,
                 Id = BorderAnnotation.GetNextId()
             };
         }
@@ -763,6 +789,7 @@ namespace hopperborder
                 Color effectiveColor = shape.OverrideColor ?? annotation.BorderColor;
                 using (var pen = new Pen(effectiveColor, effectiveThickness))
                 {
+                    pen.DashStyle = shape.LineType;
                     shape.Render(graphics, pen, effectiveThickness);
                 }
             }

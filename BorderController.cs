@@ -45,6 +45,9 @@ namespace hopperborder
         private Point3d _frameFirstCorner;
         private float _currentThicknessMultiplier = 1.0f;
         private Color? _pendingColorOverride;
+        private System.Drawing.Drawing2D.DashStyle _currentLineType = System.Drawing.Drawing2D.DashStyle.Solid;
+
+        public System.Drawing.Drawing2D.DashStyle CurrentLineType => _currentLineType;
 
         private List<Point3d> _currentPoints = new List<Point3d>();
 
@@ -74,6 +77,7 @@ namespace hopperborder
             pManager.AddColourParameter("Color", "C", "Default border color. Right-click during drawing to set per-shape color override", GH_ParamAccess.item, Color.Black);
             pManager.AddNumberParameter("Thickness", "T", "Base thickness. Use Ctrl+1 (0.5x), Ctrl+2 (2x), Ctrl+3 (1x default) to modify", GH_ParamAccess.item, 8.0);
             pManager.AddIntegerParameter("DrawOrder", "O", "0=Below components, 1=Above components", GH_ParamAccess.item, 1);
+            pManager.AddIntegerParameter("LineType", "L", "Line type: 0=Solid, 1=Dash, 2=Dot, 3=DashDot. Use Ctrl+B to cycle on selected shapes", GH_ParamAccess.item, 0);
         }
 
         protected override void AfterSolveInstance()
@@ -92,6 +96,15 @@ namespace hopperborder
             {
                 drawOrderParam.AddNamedValue("Below", 0);
                 drawOrderParam.AddNamedValue("Above", 1);
+            }
+
+            var lineTypeParam = Params.Input[6] as Param_Integer;
+            if (lineTypeParam != null)
+            {
+                lineTypeParam.AddNamedValue("Solid", 0);
+                lineTypeParam.AddNamedValue("Dash", 1);
+                lineTypeParam.AddNamedValue("Dot", 2);
+                lineTypeParam.AddNamedValue("DashDot", 3);
             }
         }
 
@@ -120,9 +133,13 @@ namespace hopperborder
             int drawOrder = 0;
             DA.GetData(5, ref drawOrder);
 
+            int lineType = 0;
+            DA.GetData(6, ref lineType);
+
             _borderColor = color;
             _lineThickness = (float)thickness;
             _drawMode = drawMode;
+            _currentLineType = (System.Drawing.Drawing2D.DashStyle)lineType;
 
             if (_drawMode != 1 && _drawMode != 3)
             {
@@ -931,6 +948,29 @@ namespace hopperborder
                         e.SuppressKeyPress = true;
                         return;
                     }
+                }
+                else if (e.KeyCode == Keys.B)
+                {
+                    if (_annotation.HasSelection)
+                    {
+                        foreach (var idx in _annotation.SelectedShapeIndices)
+                        {
+                            int currentType = (int)_annotation.Shapes[idx].LineType;
+                            int nextType = (currentType + 1) % 4;
+                            _annotation.Shapes[idx].LineType = (System.Drawing.Drawing2D.DashStyle)nextType;
+                        }
+                        MarkDocumentModified();
+                        _annotation.ExpireDisplay();
+                        _canvas?.Invalidate();
+                    }
+                    else if (!_isDrawing)
+                    {
+                        int currentType = (int)_currentLineType;
+                        int nextType = (currentType + 1) % 4;
+                        _currentLineType = (System.Drawing.Drawing2D.DashStyle)nextType;
+                    }
+                    e.SuppressKeyPress = true;
+                    return;
                 }
             }
 
