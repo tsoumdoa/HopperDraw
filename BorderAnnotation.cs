@@ -556,6 +556,143 @@ namespace hopperborder
         }
     }
 
+    public class DrawShapeGroup : DrawShape
+    {
+        public List<DrawShape> Children { get; set; } = new List<DrawShape>();
+
+        public override void Render(Graphics g, Pen pen, float thickness)
+        {
+            foreach (var child in Children)
+            {
+                child.Render(g, pen, thickness);
+            }
+        }
+
+        public override (bool hit, int pointIndex) HitTest(PointF pt, float tolerance, float thickness)
+        {
+            foreach (var child in Children)
+            {
+                var (hit, ptIdx) = child.HitTest(pt, tolerance, thickness);
+                if (hit) return (true, -1);
+            }
+            return (false, -1);
+        }
+
+        public override PointF[] GetPoints()
+        {
+            if (Children.Count == 0) return new PointF[0];
+
+            double minX = double.MaxValue, minY = double.MaxValue, maxX = double.MinValue, maxY = double.MinValue;
+            foreach (var child in Children)
+            {
+                foreach (var p in child.GetPoints())
+                {
+                    minX = Math.Min(minX, p.X);
+                    minY = Math.Min(minY, p.Y);
+                    maxX = Math.Max(maxX, p.X);
+                    maxY = Math.Max(maxY, p.Y);
+                }
+            }
+            return new PointF[]
+            {
+                new PointF((float)minX, (float)minY),
+                new PointF((float)maxX, (float)minY),
+                new PointF((float)maxX, (float)maxY),
+                new PointF((float)minX, (float)maxY)
+            };
+        }
+
+        public RectangleF GetBoundingBox()
+        {
+            if (Children.Count == 0) return RectangleF.Empty;
+
+            double minX = double.MaxValue, minY = double.MaxValue, maxX = double.MinValue, maxY = double.MinValue;
+            foreach (var child in Children)
+            {
+                foreach (var p in child.GetPoints())
+                {
+                    minX = Math.Min(minX, p.X);
+                    minY = Math.Min(minY, p.Y);
+                    maxX = Math.Max(maxX, p.X);
+                    maxY = Math.Max(maxY, p.Y);
+                }
+            }
+            return new RectangleF((float)minX, (float)minY, (float)(maxX - minX), (float)(maxY - minY));
+        }
+
+        public override void Move(double dx, double dy)
+        {
+            foreach (var child in Children)
+            {
+                child.Move(dx, dy);
+            }
+        }
+
+        public override void MovePoint(int pointIndex, Point3d newPos)
+        {
+        }
+
+        public override void Write(GH_IWriter writer, int index)
+        {
+            writer.SetInt32($"GroupChildCount{index}", Children.Count);
+            for (int i = 0; i < Children.Count; i++)
+            {
+                Children[i].Write(writer, 1000 * index + i);
+            }
+            writer.SetInt32($"Type{index}", 4);
+            writer.SetDouble($"ThickMult{index}", ThicknessMultiplier);
+            writer.SetInt32($"Color{index}", OverrideColor.HasValue ? OverrideColor.Value.ToArgb() : 0);
+            writer.SetInt32($"LineType{index}", (int)LineType);
+        }
+
+        public override void Read(GH_IReader reader, int index)
+        {
+            int childCount = reader.GetInt32($"GroupChildCount{index}");
+            Children.Clear();
+            for (int i = 0; i < childCount; i++)
+            {
+                int childIndex = 1000 * index + i;
+                int type = reader.GetInt32($"Type{childIndex}");
+                DrawShape child;
+                switch (type)
+                {
+                    case 0: child = new LineShape(); break;
+                    case 1: child = new PolylineShape(); break;
+                    case 2: child = new FrameShape(); break;
+                    case 3: child = new CurveShape(); break;
+                    default: child = new LineShape(); break;
+                }
+                child.Read(reader, childIndex);
+                Children.Add(child);
+            }
+            ThicknessMultiplier = (float)reader.GetDouble($"ThickMult{index}");
+            int colorArgb = reader.GetInt32($"Color{index}");
+            if (colorArgb != 0)
+            {
+                OverrideColor = Color.FromArgb(colorArgb);
+            }
+            if (reader.GetInt32($"LineType{index}") is int lineType && lineType >= 0 && lineType <= 3)
+            {
+                LineType = (DashStyle)lineType;
+            }
+        }
+
+        public override DrawShape Clone()
+        {
+            var group = new DrawShapeGroup();
+            foreach (var child in Children)
+            {
+                var clonedChild = child.Clone();
+                clonedChild.ThicknessMultiplier = ThicknessMultiplier;
+                clonedChild.OverrideColor = OverrideColor;
+                clonedChild.LineType = LineType;
+                group.Children.Add(clonedChild);
+            }
+            group.Id = BorderAnnotation.GetNextId();
+            return group;
+        }
+    }
+
     public class BorderAnnotation : GH_Component
     {
         private static int _shapeIdCounter = 1;
@@ -670,6 +807,65 @@ namespace hopperborder
             HoveredPointIndex = -1;
         }
 
+        public DrawShapeGroup GroupSelectedShapes()
+        {
+            if (SelectedShapeIndices.Count < 1) return null;
+
+            var sortedIndices = SelectedShapeIndices.OrderBy(i => i).ToList();
+            var group = new DrawShapeGroup();
+
+            for (int i = sortedIndices.Count - 1; i >= 0; i--)
+            {
+                var shape = Shapes[sortedIndices[i]];
+                Shapes.RemoveAt(sortedIndices[i]);
+                group.Children.Add(shape);
+            }
+
+            Shapes.Add(group);
+            int groupIndex = Shapes.Count - 1;
+
+            SelectedShapeIndices.Clear();
+            SelectedShapeIndices.Add(groupIndex);
+
+            return group;
+        }
+
+        public void UngroupSelectedGroups()
+        {
+            var indicesToRemove = SelectedShapeIndices
+                .Where(i => i >= 0 && i < Shapes.Count && Shapes[i] is DrawShapeGroup)
+                .OrderByDescending(i => i)
+                .ToList();
+
+            if (indicesToRemove.Count == 0) return;
+
+            var newSelections = new List<int>();
+
+            foreach (var idx in indicesToRemove)
+            {
+                if (Shapes[idx] is DrawShapeGroup group)
+                {
+                    int insertPos = idx;
+                    for (int i = 0; i < group.Children.Count; i++)
+                    {
+                        Shapes.Insert(insertPos + i, group.Children[i]);
+                        newSelections.Add(insertPos + i);
+                    }
+                    Shapes.RemoveAt(insertPos + group.Children.Count);
+                }
+            }
+
+            SelectedShapeIndices.Clear();
+            SelectedShapeIndices.AddRange(newSelections);
+        }
+
+        public DrawShapeGroup GetGroupAtIndex(int index)
+        {
+            if (index >= 0 && index < Shapes.Count && Shapes[index] is DrawShapeGroup group)
+                return group;
+            return null;
+        }
+
         public void ExpireDisplay()
         {
             var doc = OnPingDocument();
@@ -734,6 +930,9 @@ namespace hopperborder
                             break;
                         case 3:
                             shape = new CurveShape();
+                            break;
+                        case 4:
+                            shape = new DrawShapeGroup();
                             break;
                         default:
                             shape = new LineShape();
@@ -817,6 +1016,18 @@ namespace hopperborder
 
         private void RenderSelectionHandles(Graphics g, DrawShape shape, int selectedPointIndex, float thickness)
         {
+            if (shape is DrawShapeGroup group)
+            {
+                var bbox = group.GetBoundingBox();
+                using (var selPen = new Pen(Color.FromArgb(200, 0, 120, 215), 1))
+                {
+                    selPen.DashStyle = System.Drawing.Drawing2D.DashStyle.Dash;
+                    selPen.DashPattern = new float[] { 5, 5 };
+                    g.DrawRectangle(selPen, bbox.X, bbox.Y, bbox.Width, bbox.Height);
+                }
+                return;
+            }
+
             var points = shape.GetPoints();
             using (var handleBrush = new SolidBrush(Color.White))
             using (var handlePen = new Pen(Color.FromArgb(200, 0, 120, 215), 2))

@@ -972,6 +972,32 @@ namespace hopperborder
                     e.SuppressKeyPress = true;
                     return;
                 }
+                else if (e.KeyCode == Keys.G)
+                {
+                    bool shiftPressed = (Control.ModifierKeys & Keys.Shift) == Keys.Shift;
+                    if (ctrlPressed && shiftPressed)
+                    {
+                        if (!_isDrawing && _annotation.HasSelection)
+                        {
+                            _annotation.UngroupSelectedGroups();
+                            MarkDocumentModified();
+                            _annotation.ExpireDisplay();
+                            _canvas?.Invalidate();
+                        }
+                    }
+                    else if (ctrlPressed)
+                    {
+                        if (!_isDrawing && _annotation.SelectedShapeIndices.Count > 0)
+                        {
+                            _annotation.GroupSelectedShapes();
+                            MarkDocumentModified();
+                            _annotation.ExpireDisplay();
+                            _canvas?.Invalidate();
+                        }
+                    }
+                    e.SuppressKeyPress = true;
+                    return;
+                }
             }
 
             if (e.KeyCode == Keys.Enter)
