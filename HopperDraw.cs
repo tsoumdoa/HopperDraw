@@ -78,7 +78,7 @@ namespace hopperdraw
         private const float HitTolerance = 15f;
 
         public HopperDraw()
-            : base("Hopper Draw", "HopperDraw", "Draw and manage canvas borders", "Params", "Util")
+            : base("Hopper Draw", "HopperDraw", "Draw and manage canvas borders. Ctr+left click to start drawing.", "Params", "Util")
         {
             CreateAttributes();
         }
