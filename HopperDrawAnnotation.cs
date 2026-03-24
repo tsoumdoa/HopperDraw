@@ -13,7 +13,7 @@ using System.Drawing.Drawing2D;
 using System.Linq;
 using GH_IO.Serialization;
 
-namespace hopperborder
+namespace hopperdraw
 {
     public abstract class DrawShape
     {
@@ -124,7 +124,7 @@ namespace hopperborder
                 ThicknessMultiplier = ThicknessMultiplier,
                 OverrideColor = OverrideColor,
                 LineType = LineType,
-                Id = BorderAnnotation.GetNextId()
+                Id = HopperDrawAnnotation.GetNextId()
             };
         }
     }
@@ -220,7 +220,7 @@ namespace hopperborder
                 ThicknessMultiplier = ThicknessMultiplier,
                 OverrideColor = OverrideColor,
                 LineType = LineType,
-                Id = BorderAnnotation.GetNextId()
+                Id = HopperDrawAnnotation.GetNextId()
             };
         }
     }
@@ -376,7 +376,7 @@ namespace hopperborder
                 ThicknessMultiplier = ThicknessMultiplier,
                 OverrideColor = OverrideColor,
                 LineType = LineType,
-                Id = BorderAnnotation.GetNextId()
+                Id = HopperDrawAnnotation.GetNextId()
             };
         }
     }
@@ -473,7 +473,7 @@ namespace hopperborder
                 ThicknessMultiplier = ThicknessMultiplier,
                 OverrideColor = OverrideColor,
                 LineType = LineType,
-                Id = BorderAnnotation.GetNextId()
+                Id = HopperDrawAnnotation.GetNextId()
             };
         }
     }
@@ -598,12 +598,12 @@ namespace hopperborder
                 clonedChild.LineType = LineType;
                 group.Children.Add(clonedChild);
             }
-            group.Id = BorderAnnotation.GetNextId();
+            group.Id = HopperDrawAnnotation.GetNextId();
             return group;
         }
     }
 
-    public class BorderAnnotation : GH_Component
+    public class HopperDrawAnnotation : GH_Component
     {
         private static int _shapeIdCounter = 1;
 
@@ -613,8 +613,8 @@ namespace hopperborder
         public int DrawOrder { get; set; } = 1;
         public bool Visible { get; set; } = true;
 
-        private BorderController _controller;
-        public BorderController Controller
+        private HopperDraw _controller;
+        public HopperDraw Controller
         {
             get => _controller;
             set
@@ -639,16 +639,16 @@ namespace hopperborder
         private const float HandleSize = 8f;
         private const float HitTolerance = 15f;
 
-        public BorderAnnotation() : base("Canvas Border", "Border", "Canvas border annotation", "Draw", "Annotation")
+        public HopperDrawAnnotation() : base("Canvas Border", "CBorder", "Canvas border annotation", "Draw", "Annotation")
         {
             CreateAttributes();
         }
 
-        public override Guid ComponentGuid => new Guid("B1C2D3E4-F5A6-7890-1234-567890ABCDEF");
+        public override Guid ComponentGuid => new Guid("E4F5A6B7-C8D9-0123-4567-890ABCDEF012");
 
         public override void CreateAttributes()
         {
-            m_attributes = new BorderAnnotationAttributes(this);
+            m_attributes = new HopperDrawAnnotationAttributes(this);
         }
 
         public (int shapeIndex, int pointIndex) HitTest(PointF point)
@@ -763,7 +763,7 @@ namespace hopperborder
         public override bool Write(GH_IWriter writer)
         {
 #if DEBUG
-            System.Diagnostics.Debug.WriteLine($"[BorderAnnotation Write] Called. Shapes.Count={Shapes.Count}, Color={BorderColor}, Thickness={LineThickness}, DrawOrder={DrawOrder}");
+            System.Diagnostics.Debug.WriteLine($"[HopperDrawAnnotation Write] Called. Shapes.Count={Shapes.Count}, Color={BorderColor}, Thickness={LineThickness}, DrawOrder={DrawOrder}");
 #endif
             bool result = base.Write(writer);
             if (!result) return false;
@@ -775,7 +775,7 @@ namespace hopperborder
             for (int i = 0; i < Shapes.Count; i++)
             {
 #if DEBUG
-                System.Diagnostics.Debug.WriteLine($"[BorderAnnotation Write] Writing shape {i} of type {Shapes[i].GetType().Name}");
+                System.Diagnostics.Debug.WriteLine($"[HopperDrawAnnotation Write] Writing shape {i} of type {Shapes[i].GetType().Name}");
 #endif
                 Shapes[i].Write(writer, i);
             }
@@ -785,35 +785,35 @@ namespace hopperborder
         public override bool Read(GH_IReader reader)
         {
 #if DEBUG
-            System.Diagnostics.Debug.WriteLine($"[BorderAnnotation Read] Called. reader={reader == null}");
+            System.Diagnostics.Debug.WriteLine($"[HopperDrawAnnotation Read] Called. reader={reader == null}");
 #endif
             try
             {
                 bool result = base.Read(reader);
 #if DEBUG
-                System.Diagnostics.Debug.WriteLine($"[BorderAnnotation Read] base.Read returned {result}");
+                System.Diagnostics.Debug.WriteLine($"[HopperDrawAnnotation Read] base.Read returned {result}");
 #endif
                 if (!result) return false;
 
                 Shapes.Clear();
                 int count = reader.GetInt32("ShapeCount");
 #if DEBUG
-                System.Diagnostics.Debug.WriteLine($"[BorderAnnotation Read] ShapeCount={count}");
+                System.Diagnostics.Debug.WriteLine($"[HopperDrawAnnotation Read] ShapeCount={count}");
 #endif
                 BorderColor = Color.FromArgb(reader.GetInt32("Color"));
                 LineThickness = (float)reader.GetDouble("Thickness");
                 DrawOrder = reader.GetInt32("DrawOrder");
 #if DEBUG
-                System.Diagnostics.Debug.WriteLine($"[BorderAnnotation Read] Color={BorderColor}, Thickness={LineThickness}, DrawOrder={DrawOrder}");
+                System.Diagnostics.Debug.WriteLine($"[HopperDrawAnnotation Read] Color={BorderColor}, Thickness={LineThickness}, DrawOrder={DrawOrder}");
 #endif
                 for (int i = 0; i < count; i++)
                 {
 #if DEBUG
-                    System.Diagnostics.Debug.WriteLine($"[BorderAnnotation Read] About to read Type{i}");
+                    System.Diagnostics.Debug.WriteLine($"[HopperDrawAnnotation Read] About to read Type{i}");
 #endif
                     int type = reader.GetInt32($"Type{i}");
 #if DEBUG
-                    System.Diagnostics.Debug.WriteLine($"[BorderAnnotation Read] Reading shape {i} of type {type}");
+                    System.Diagnostics.Debug.WriteLine($"[HopperDrawAnnotation Read] Reading shape {i} of type {type}");
 #endif
                     DrawShape shape;
                     switch (type)
@@ -838,37 +838,37 @@ namespace hopperborder
                             break;
                     }
 #if DEBUG
-                    System.Diagnostics.Debug.WriteLine($"[BorderAnnotation Read] Calling shape.Read for shape {i}");
+                    System.Diagnostics.Debug.WriteLine($"[HopperDrawAnnotation Read] Calling shape.Read for shape {i}");
 #endif
                     shape.Read(reader, i);
 #if DEBUG
-                    System.Diagnostics.Debug.WriteLine($"[BorderAnnotation Read] Adding shape {i} to list");
+                    System.Diagnostics.Debug.WriteLine($"[HopperDrawAnnotation Read] Adding shape {i} to list");
 #endif
                     Shapes.Add(shape);
                 }
 #if DEBUG
-                System.Diagnostics.Debug.WriteLine($"[BorderAnnotation Read] Done. Shapes.Count={Shapes.Count}");
+                System.Diagnostics.Debug.WriteLine($"[HopperDrawAnnotation Read] Done. Shapes.Count={Shapes.Count}");
 #endif
                 return true;
             }
             catch (Exception ex)
             {
 #if DEBUG
-                System.Diagnostics.Debug.WriteLine($"[BorderAnnotation Read] EXCEPTION: {ex.GetType().Name}: {ex.Message}");
-                System.Diagnostics.Debug.WriteLine($"[BorderAnnotation Read] StackTrace: {ex.StackTrace}");
+                System.Diagnostics.Debug.WriteLine($"[HopperDrawAnnotation Read] EXCEPTION: {ex.GetType().Name}: {ex.Message}");
+                System.Diagnostics.Debug.WriteLine($"[HopperDrawAnnotation Read] StackTrace: {ex.StackTrace}");
 #endif
                 return false;
             }
         }
     }
 
-    public class BorderAnnotationAttributes : GH_ComponentAttributes
+    public class HopperDrawAnnotationAttributes : GH_ComponentAttributes
     {
-        public BorderAnnotationAttributes(BorderAnnotation owner) : base(owner) { }
+        public HopperDrawAnnotationAttributes(HopperDrawAnnotation owner) : base(owner) { }
 
         protected override void Render(GH_Canvas canvas, Graphics graphics, GH_CanvasChannel channel)
         {
-            var annotation = (BorderAnnotation)Owner;
+            var annotation = (HopperDrawAnnotation)Owner;
 
             bool shouldRenderInThisChannel = 
                 (annotation.DrawOrder == 0 && channel == GH_CanvasChannel.Objects) ||

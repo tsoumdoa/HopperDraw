@@ -13,9 +13,9 @@ using System.Drawing;
 using System.Linq;
 using System.Windows.Forms;
 
-namespace hopperborder
+namespace hopperdraw
 {
-    public class BorderController : GH_Component
+    public class HopperDraw : GH_Component
     {
         private bool _isActivated;
 
@@ -36,7 +36,7 @@ namespace hopperborder
         private GH_Canvas _canvas;
         private bool _eventsRegistered;
 
-        internal BorderAnnotation _annotation;
+        internal HopperDrawAnnotation _annotation;
 
         private float _lineThickness = 8f;
         private Color _borderColor = Color.Black;
@@ -61,13 +61,13 @@ namespace hopperborder
         private System.Windows.Forms.Timer _ghDragSyncTimer;
         private Dictionary<IGH_DocumentObject, PointF> _ghObjectInitialPositions = new Dictionary<IGH_DocumentObject, PointF>();
 
-        public BorderController()
-            : base("Border Controller", "Border", "Draw and manage canvas borders", "Draw", "Primitive")
+        public HopperDraw()
+            : base("Hopper Draw", "HDraw", "Draw and manage canvas borders", "Draw", "Primitive")
         {
             CreateAttributes();
         }
 
-        public override Guid ComponentGuid => new Guid("C1D2E3F4-A5B6-7890-1234-567890ABCDEF");
+        public override Guid ComponentGuid => new Guid("D2E3F4A5-B6C7-8901-2345-67890ABCDEF0");
 
         protected override void RegisterInputParams(GH_Component.GH_InputParamManager pManager)
         {
@@ -116,7 +116,7 @@ namespace hopperborder
         protected override void SolveInstance(IGH_DataAccess DA)
         {
 #if DEBUG
-            System.Diagnostics.Debug.WriteLine($"[BorderController SolveInstance] Called. _isActivated={_isActivated}");
+            System.Diagnostics.Debug.WriteLine($"[HopperDraw SolveInstance] Called. _isActivated={_isActivated}");
 #endif
             bool active = true;
             if (!DA.GetData(0, ref active)) return;
@@ -154,8 +154,13 @@ namespace hopperborder
 
             if (_isActivated && !wasActivated)
             {
+                if (AnotherHopperDrawExists())
+                {
+                    AddRuntimeMessage(GH_RuntimeMessageLevel.Error, "Only one Hopper Draw is allowed per document.");
+                    return;
+                }
 #if DEBUG
-                System.Diagnostics.Debug.WriteLine($"[BorderController SolveInstance] Activating!");
+                System.Diagnostics.Debug.WriteLine($"[HopperDraw SolveInstance] Activating!");
 #endif
                 EnsureAnnotation();
                 RegisterCanvasEvents();
@@ -168,7 +173,7 @@ namespace hopperborder
             if (_annotation != null)
             {
 #if DEBUG
-                System.Diagnostics.Debug.WriteLine($"[BorderController SolveInstance] Updating annotation. Shapes count = {_annotation.Shapes.Count}");
+                System.Diagnostics.Debug.WriteLine($"[HopperDraw SolveInstance] Updating annotation. Shapes count = {_annotation.Shapes.Count}");
 #endif
                 _annotation.Visible = show && !this.Locked;
                 _annotation.BorderColor = _borderColor;
@@ -178,7 +183,7 @@ namespace hopperborder
             else
             {
 #if DEBUG
-                System.Diagnostics.Debug.WriteLine($"[BorderController SolveInstance] _annotation is null!");
+                System.Diagnostics.Debug.WriteLine($"[HopperDraw SolveInstance] _annotation is null!");
 #endif
             }
 
@@ -198,6 +203,21 @@ namespace hopperborder
             }
         }
 
+        private bool AnotherHopperDrawExists()
+        {
+            var doc = OnPingDocument();
+            if (doc == null) return false;
+
+            foreach (var obj in doc.Objects)
+            {
+                if (obj is HopperDraw existing && existing != this)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
         private void EnsureAnnotation()
         {
             var doc = OnPingDocument();
@@ -213,10 +233,10 @@ namespace hopperborder
 #if DEBUG
                     System.Diagnostics.Debug.WriteLine($"[EnsureAnnotation] Checking object: {obj?.GetType().Name} - {obj?.ComponentGuid}");
 #endif
-                    if (obj is BorderAnnotation existing)
+                    if (obj is HopperDrawAnnotation existing)
                     {
 #if DEBUG
-                        System.Diagnostics.Debug.WriteLine($"[EnsureAnnotation] Found existing BorderAnnotation!");
+                        System.Diagnostics.Debug.WriteLine($"[EnsureAnnotation] Found existing HopperDrawAnnotation!");
 #endif
                         _annotation = existing;
                         _annotation.Controller = this;
@@ -239,7 +259,7 @@ namespace hopperborder
 #if DEBUG
             System.Diagnostics.Debug.WriteLine($"[EnsureAnnotation] Creating NEW annotation.");
 #endif
-            _annotation = new BorderAnnotation();
+            _annotation = new HopperDrawAnnotation();
             _annotation.Controller = this;
             _annotation.BorderColor = _borderColor;
             _annotation.LineThickness = _lineThickness;
@@ -1316,10 +1336,10 @@ namespace hopperborder
 
         public override void CreateAttributes()
         {
-            m_attributes = new BorderModeUIAttributes(this);
+            m_attributes = new HopperDrawUIAttributes(this);
         }
 
-        internal BorderAnnotation Annotation => _annotation;
+        internal HopperDrawAnnotation Annotation => _annotation;
         public bool IsActivated => _isActivated;
         public Point3d DrawStart => _drawStart;
         public Point3d DrawEnd => _drawEnd;

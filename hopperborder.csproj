@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 	
   <PropertyGroup>
     <!-- Select the framework(s) you wish to target.
@@ -17,9 +17,9 @@
   <PropertyGroup>
     <!-- Specifies information for Assembly and Yak -->
     <Version>1.0</Version>
-    <Title>hopperborder</Title>
-    <Company>hopperborder Authors</Company>
-    <Description>Description of hopperborder</Description>
+    <Title>HopperDraw</Title>
+    <Company>HopperDraw Authors</Company>
+    <Description>Canvas drawing plugin for Grasshopper</Description>
   </PropertyGroup>
   
   <ItemGroup>

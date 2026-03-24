@@ -2,7 +2,7 @@ using System;
 using System.Drawing;
 using Rhino.Geometry;
 
-namespace hopperborder
+namespace hopperdraw
 {
     public static class GeometryUtilities
     {

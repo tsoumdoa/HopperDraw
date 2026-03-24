@@ -11,13 +11,13 @@ using System.Drawing;
 using System.Linq;
 using System.Windows.Forms;
 
-namespace hopperborder
+namespace hopperdraw
 {
-    public class BorderModeUIAttributes : GH_ComponentAttributes
+    public class HopperDrawUIAttributes : GH_ComponentAttributes
     {
         private Point3d _previewPoint = Point3d.Unset;
 
-        public BorderModeUIAttributes(BorderController owner) : base(owner)
+        public HopperDrawUIAttributes(HopperDraw owner) : base(owner)
         {
         }
 
@@ -38,7 +38,7 @@ namespace hopperborder
             if (channel != GH_CanvasChannel.Objects)
                 return;
 
-            var owner = (BorderController)Owner;
+            var owner = (HopperDraw)Owner;
             var modeNames = new[] { "Line", "Polyline", "Frame", "Curve" };
             var modeText = owner.DrawMode >= 0 && owner.DrawMode < modeNames.Length ? modeNames[owner.DrawMode] : "Unknown";
 
