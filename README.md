@@ -6,6 +6,10 @@ A Grasshopper plugin for drawing visual border/separator lines on the Grasshoppe
 
 HopperBorder allows users to draw thick visual lines, polylines, curves, and frames on the Grasshopper canvas. These borders are persistent and independent of the source components, helping to visually separate and organize complex definitions.
 
+## Framework targets
+
+The project builds `net8.0-windows` for Rhino 8 running .NET 8, `net7.0-windows` and `net7.0` for earlier Rhino 8 runtimes, and `net48` for Rhino's .NET Framework runtime. The .NET 8 target compiles successfully, but live loading in Rhino has not been verified in this repository.
+
 ## How It Works
 
 ### Architecture
