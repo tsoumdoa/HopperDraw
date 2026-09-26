@@ -242,6 +242,7 @@ namespace hopperdraw
                 _canvas.MouseMove += Canvas_MouseMove;
                 _canvas.MouseUp += Canvas_MouseUp;
                 _canvas.KeyDown += Canvas_KeyDown;
+                _canvas.DocumentChanged += Canvas_DocumentChanged;
                 _eventsRegistered = true;
 
                 _ghDragSyncTimer = new System.Windows.Forms.Timer();
@@ -260,6 +261,7 @@ namespace hopperdraw
                 _canvas.MouseMove -= Canvas_MouseMove;
                 _canvas.MouseUp -= Canvas_MouseUp;
                 _canvas.KeyDown -= Canvas_KeyDown;
+                _canvas.DocumentChanged -= Canvas_DocumentChanged;
             }
             _eventsRegistered = false;
             _canvas = null;
@@ -271,6 +273,15 @@ namespace hopperdraw
                 _ghDragSyncTimer.Dispose();
                 _ghDragSyncTimer = null;
             }
+        }
+
+        private void Canvas_DocumentChanged(object sender, GH_CanvasDocumentChangedEventArgs e)
+        {
+            if (!ReferenceEquals(sender, _canvas) ||
+                !ReferenceEquals(e.OldDocument, OnPingDocument())) return;
+
+            CancelDrawing();
+            _canvas?.Invalidate();
         }
 
         private bool CanHandleCanvasEvent(object sender)
@@ -335,6 +346,12 @@ namespace hopperdraw
             _isWindowSelecting = false;
             _isDragging = false;
             _isMultiDragging = false;
+            _isFrameDragging = false;
+            _dragShapeIndex = -1;
+            _dragPointIndex = -1;
+            _ghDragSyncTimer?.Stop();
+            _ghObjectInitialPositions.Clear();
+            ClearCapturedGHObjects();
         }
 
         private void ResetNextShapeOverrides()
