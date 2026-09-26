@@ -20,6 +20,8 @@ namespace hopperdraw
     public class HopperDraw : GH_Component
     {
         private bool _isActivated;
+        private bool _acceptDrawingMouseUp;
+        private static HopperDraw _capturingOwner;
 
         private Point3d _drawStart;
         private Point3d _drawEnd;
@@ -46,6 +48,8 @@ namespace hopperdraw
         private float _currentThicknessMultiplier = 1.0f;
         private Color? _pendingColorOverride;
         private System.Drawing.Drawing2D.DashStyle _currentLineType = System.Drawing.Drawing2D.DashStyle.Solid;
+        private System.Drawing.Drawing2D.DashStyle _baseLineType = System.Drawing.Drawing2D.DashStyle.Solid;
+        private bool _hasPendingLineTypeOverride;
 
         public System.Drawing.Drawing2D.DashStyle CurrentLineType => _currentLineType;
 
@@ -56,7 +60,7 @@ namespace hopperdraw
         private bool _additiveSelection = false;
         private Point3d _multiDragStart;
         private bool _isMultiDragging = false;
-        private Point3d _clickStartPt;
+        private Point3d _clickStartPt = Point3d.Unset;
         private List<IGH_DocumentObject> _selectedGHObjects = new List<IGH_DocumentObject>();
         private System.Windows.Forms.Timer _ghDragSyncTimer;
         private Dictionary<IGH_DocumentObject, PointF> _ghObjectInitialPositions = new Dictionary<IGH_DocumentObject, PointF>();
@@ -78,7 +82,7 @@ namespace hopperdraw
         private const float HitTolerance = 15f;
 
         public HopperDraw()
-            : base("Hopper Draw", "HopperDraw", "Draw and manage canvas borders. Ctr+left click to start drawing.", "Params", "Util")
+            : base("Hopper Draw", "HopperDraw", "Draw on empty canvas with Ctrl+Alt+Shift+left click. Edit shapes from the component menu.", "Params", "Util")
         {
             CreateAttributes();
         }
@@ -110,9 +114,9 @@ namespace hopperdraw
             pManager.AddBooleanParameter("Active", "A", "Enable border drawing", GH_ParamAccess.item, true);
             pManager.AddBooleanParameter("Show", "S", "Display borders on canvas", GH_ParamAccess.item, true);
             pManager.AddIntegerParameter("DrawMode", "M", "Drawing mode: 0=Line, 1=Polyline, 2=Frame, 3=Curve", GH_ParamAccess.item, 0);
-            pManager.AddColourParameter("Color", "C", "Default border color. Right-click during drawing to set per-shape color override", GH_ParamAccess.item, Color.Black);
-            pManager.AddNumberParameter("Thickness", "T", "Base thickness. Use Ctrl+1 (0.5x), Ctrl+2 (2x), Ctrl+3 (1x default) to modify", GH_ParamAccess.item, 8.0);
-            pManager.AddIntegerParameter("LineType", "L", "Line type: 0=Solid, 1=Dash, 2=Dot, 3=DashDot. Use Ctrl+B to cycle on selected shapes", GH_ParamAccess.item, 0);
+            pManager.AddColourParameter("Color", "C", "Default border color. Use the component menu for per-shape color overrides", GH_ParamAccess.item, Color.Black);
+            pManager.AddNumberParameter("Thickness", "T", "Base thickness. Use the component menu for per-shape thickness", GH_ParamAccess.item, 8.0);
+            pManager.AddIntegerParameter("LineType", "L", "Line type: 0=Solid, 1=Dash, 2=Dot, 3=DashDot. Use the component menu for per-shape line type", GH_ParamAccess.item, 0);
             pManager.AddIntegerParameter("DrawOrder", "O", "0=Below components, 1=Above components", GH_ParamAccess.item, 1);
         }
 
@@ -177,33 +181,39 @@ namespace hopperdraw
 
             _borderColor = color;
             _lineThickness = (float)thickness;
+            if (_drawMode != drawMode && _isDrawing) CancelDrawing();
             _drawMode = drawMode;
-            _currentLineType = (System.Drawing.Drawing2D.DashStyle)lineType;
+            _baseLineType = (System.Drawing.Drawing2D.DashStyle)lineType;
+            if (!_hasPendingLineTypeOverride) _currentLineType = _baseLineType;
 
             if (_drawMode != 1 && _drawMode != 3)
             {
                 _currentPoints.Clear();
             }
 
-            bool wasActivated = _isActivated;
             _isActivated = active;
 
-            if (_isActivated && !wasActivated)
+            if (_isActivated)
             {
-#if DEBUG
-                System.Diagnostics.Debug.WriteLine($"[HopperDraw SolveInstance] Activating!");
-#endif
-                RegisterCanvasEvents();
+                if (_eventsRegistered && !ReferenceEquals(_canvas, Grasshopper.Instances.ActiveCanvas))
+                {
+                    UnregisterCanvasEvents();
+                    CancelDrawing();
+                }
+                if (!_eventsRegistered) RegisterCanvasEvents();
             }
-            else if (!_isActivated && wasActivated)
+            else
             {
                 UnregisterCanvasEvents();
+                CancelDrawing();
+                ClearSelection();
             }
 
 #if DEBUG
             System.Diagnostics.Debug.WriteLine($"[HopperDraw SolveInstance] Updating. Shapes count = {Shapes.Count}");
 #endif
             Visible = show && !this.Locked;
+            if (!Visible && _isDrawing) CancelDrawing();
             BorderColor = _borderColor;
             LineThickness = _lineThickness;
             DrawOrder = drawOrder;
@@ -232,12 +242,13 @@ namespace hopperdraw
                 _canvas.MouseMove += Canvas_MouseMove;
                 _canvas.MouseUp += Canvas_MouseUp;
                 _canvas.KeyDown += Canvas_KeyDown;
+                _canvas.DocumentChanged += Canvas_DocumentChanged;
                 _eventsRegistered = true;
-            }
 
-            _ghDragSyncTimer = new System.Windows.Forms.Timer();
-            _ghDragSyncTimer.Interval = 16;
-            _ghDragSyncTimer.Tick += GhDragSyncTimer_Tick;
+                _ghDragSyncTimer = new System.Windows.Forms.Timer();
+                _ghDragSyncTimer.Interval = 16;
+                _ghDragSyncTimer.Tick += GhDragSyncTimer_Tick;
+            }
         }
 
         private void UnregisterCanvasEvents()
@@ -250,8 +261,10 @@ namespace hopperdraw
                 _canvas.MouseMove -= Canvas_MouseMove;
                 _canvas.MouseUp -= Canvas_MouseUp;
                 _canvas.KeyDown -= Canvas_KeyDown;
+                _canvas.DocumentChanged -= Canvas_DocumentChanged;
             }
             _eventsRegistered = false;
+            _canvas = null;
 
             if (_ghDragSyncTimer != null)
             {
@@ -260,6 +273,93 @@ namespace hopperdraw
                 _ghDragSyncTimer.Dispose();
                 _ghDragSyncTimer = null;
             }
+        }
+
+        private void Canvas_DocumentChanged(object sender, GH_CanvasDocumentChangedEventArgs e)
+        {
+            if (!ReferenceEquals(sender, _canvas) ||
+                !ReferenceEquals(e.OldDocument, OnPingDocument())) return;
+
+            CancelDrawing();
+            _canvas?.Invalidate();
+        }
+
+        private bool CanHandleCanvasEvent(object sender)
+        {
+            return _isActivated && !Locked && Visible &&
+                   ReferenceEquals(sender, _canvas) &&
+                   ReferenceEquals(_canvas?.Document, OnPingDocument()) &&
+                   IsInputOwner();
+        }
+
+        private bool IsInputOwner()
+        {
+            if (_capturingOwner != null && ReferenceEquals(_capturingOwner.OnPingDocument(), _canvas?.Document))
+            {
+                if (!_capturingOwner._isActivated || _capturingOwner.Locked ||
+                    !_capturingOwner.Visible || !_capturingOwner._isDrawing)
+                    _capturingOwner.CancelDrawing();
+                else
+                    return ReferenceEquals(_capturingOwner, this);
+            }
+            var controllers = _canvas?.Document?.Objects.OfType<HopperDraw>()
+                .Where(controller => controller._isActivated && !controller.Locked && controller.Visible)
+                .ToList();
+            if (controllers == null || controllers.Count == 0) return false;
+            var selected = controllers.FirstOrDefault(controller => controller.Attributes?.Selected == true);
+            var editing = controllers.FirstOrDefault(controller => controller.HasSelection);
+            return ReferenceEquals(selected ?? editing ?? controllers[0], this);
+        }
+
+        private bool IsOverGrasshopperObject(Point3d point)
+        {
+            if (_canvas?.Document == null) return false;
+            var location = new PointF((float)point.X, (float)point.Y);
+            foreach (var obj in _canvas.Document.Objects)
+            {
+                if (obj?.Attributes == null) continue;
+                var bounds = obj.Attributes.Bounds;
+                if (obj is Grasshopper.Kernel.Special.GH_Group)
+                {
+                    if (bounds.Contains(location) &&
+                        (location.X - bounds.Left < 12 || bounds.Right - location.X < 12 ||
+                         location.Y - bounds.Top < 20 || bounds.Bottom - location.Y < 12))
+                        return true;
+                    continue;
+                }
+                bounds.Inflate(12f, 12f);
+                if (bounds.Contains(location))
+                    return true;
+            }
+            return false;
+        }
+
+        private void CancelDrawing()
+        {
+            if (ReferenceEquals(_capturingOwner, this)) _capturingOwner = null;
+            _currentPoints.Clear();
+            _isDrawing = false;
+            _frameCornerCount = 0;
+            _acceptDrawingMouseUp = false;
+            ResetNextShapeOverrides();
+            _clickStartPt = Point3d.Unset;
+            _isWindowSelecting = false;
+            _isDragging = false;
+            _isMultiDragging = false;
+            _isFrameDragging = false;
+            _dragShapeIndex = -1;
+            _dragPointIndex = -1;
+            _ghDragSyncTimer?.Stop();
+            _ghObjectInitialPositions.Clear();
+            ClearCapturedGHObjects();
+        }
+
+        private void ResetNextShapeOverrides()
+        {
+            _pendingColorOverride = null;
+            _currentThicknessMultiplier = 1.0f;
+            _hasPendingLineTypeOverride = false;
+            _currentLineType = _baseLineType;
         }
 
         private Point3d ScreenToCanvas(System.Drawing.Point screenPoint)
@@ -274,32 +374,25 @@ namespace hopperdraw
 
         private void Canvas_MouseDown(object sender, MouseEventArgs e)
         {
-            if (!_isActivated)
+            if (!CanHandleCanvasEvent(sender))
                 return;
-
-            if (e.Button == MouseButtons.Right)
-            {
-                if (_isDrawing)
-                {
-                    ShowColorPickerForDrawing();
-                }
-                else if (HasSelection)
-                {
-                    ShowColorPickerForSelected();
-                }
-                return;
-            }
 
             if (e.Button != MouseButtons.Left)
                 return;
 
+            _acceptDrawingMouseUp = false;
             var pt = ScreenToCanvas(e.Location);
+            if (IsOverGrasshopperObject(pt)) return;
+
+            var modifiers = Control.ModifierKeys & (Keys.Control | Keys.Alt | Keys.Shift);
+            bool startShortcut = modifiers == (Keys.Control | Keys.Alt | Keys.Shift);
+            if (_isDrawing && (modifiers & (Keys.Control | Keys.Alt)) != Keys.None) return;
+            if (!_isDrawing && (modifiers & (Keys.Control | Keys.Alt)) != Keys.None && !startShortcut) return;
 
             var timeSinceLastClick = DateTime.Now - _lastClickTime;
             bool isDoubleClick = (timeSinceLastClick.TotalMilliseconds < 500) &&
                                 (_lastClickPosition.DistanceTo(pt) < 10);
 
-            bool ctrlPressed = (Control.ModifierKeys & Keys.Control) == Keys.Control;
             bool shiftPressed = (Control.ModifierKeys & Keys.Shift) == Keys.Shift;
 
             if (_drawMode == 0)
@@ -310,20 +403,22 @@ namespace hopperdraw
                     var lineShape = new LineShape(_drawStart, endPt);
                     lineShape.ThicknessMultiplier = _currentThicknessMultiplier;
                     lineShape.OverrideColor = _pendingColorOverride;
+                    lineShape.LineType = _currentLineType;
                     Shapes.Add(lineShape);
                     MarkDocumentModified();
                     _isDrawing = false;
-                    _pendingColorOverride = null;
-                    _currentThicknessMultiplier = 1.0f;
+                    _capturingOwner = null;
+                    ResetNextShapeOverrides();
                     ExpireDisplay();
                     _canvas?.Invalidate();
                     return;
                 }
-                else if (ctrlPressed)
+                else if (startShortcut)
                 {
                     _drawStart = pt;
                     _drawEnd = pt;
                     _isDrawing = true;
+                    _capturingOwner = this;
                     _lastClickTime = DateTime.Now;
                     _lastClickPosition = pt;
                     ExpireDisplay();
@@ -335,10 +430,12 @@ namespace hopperdraw
             {
                 if (!_isDrawing || _currentPoints.Count == 0)
                 {
-                    if (ctrlPressed)
+                    if (startShortcut)
                     {
                         _currentPoints.Add(pt);
                         _isDrawing = true;
+                        _capturingOwner = this;
+                        _acceptDrawingMouseUp = true;
                         _lastClickTime = DateTime.Now;
                         _lastClickPosition = pt;
                         ExpireDisplay();
@@ -351,12 +448,13 @@ namespace hopperdraw
                     var polyShape = new PolylineShape(new List<Point3d>(_currentPoints), true);
                     polyShape.ThicknessMultiplier = _currentThicknessMultiplier;
                     polyShape.OverrideColor = _pendingColorOverride;
+                    polyShape.LineType = _currentLineType;
                     Shapes.Add(polyShape);
                     MarkDocumentModified();
                     _currentPoints.Clear();
                     _isDrawing = false;
-                    _pendingColorOverride = null;
-                    _currentThicknessMultiplier = 1.0f;
+                    _capturingOwner = null;
+                    ResetNextShapeOverrides();
                     _lastClickTime = DateTime.Now;
                     _lastClickPosition = pt;
                     ExpireDisplay();
@@ -368,10 +466,12 @@ namespace hopperdraw
             {
                 if (!_isDrawing || _currentPoints.Count == 0)
                 {
-                    if (ctrlPressed)
+                    if (startShortcut)
                     {
                         _currentPoints.Add(pt);
                         _isDrawing = true;
+                        _capturingOwner = this;
+                        _acceptDrawingMouseUp = true;
                         _lastClickTime = DateTime.Now;
                         _lastClickPosition = pt;
                         ExpireDisplay();
@@ -384,12 +484,13 @@ namespace hopperdraw
                     var curveShape = new CurveShape(new List<Point3d>(_currentPoints), true);
                     curveShape.ThicknessMultiplier = _currentThicknessMultiplier;
                     curveShape.OverrideColor = _pendingColorOverride;
+                    curveShape.LineType = _currentLineType;
                     Shapes.Add(curveShape);
                     MarkDocumentModified();
                     _currentPoints.Clear();
                     _isDrawing = false;
-                    _pendingColorOverride = null;
-                    _currentThicknessMultiplier = 1.0f;
+                    _capturingOwner = null;
+                    ResetNextShapeOverrides();
                     _lastClickTime = DateTime.Now;
                     _lastClickPosition = pt;
                     ExpireDisplay();
@@ -414,6 +515,7 @@ namespace hopperdraw
                     }
                     _frameCornerCount = 0;
                     _isDrawing = false;
+                    _capturingOwner = null;
                     CreateFrame(_frameFirstCorner, finalPt);
                     _lastClickTime = DateTime.Now;
                     _lastClickPosition = pt;
@@ -421,11 +523,12 @@ namespace hopperdraw
                     _canvas?.Invalidate();
                     return;
                 }
-                else if (ctrlPressed)
+                else if (startShortcut)
                 {
                     _frameFirstCorner = pt;
                     _frameCornerCount = 1;
                     _isDrawing = true;
+                    _capturingOwner = this;
                     _lastClickTime = DateTime.Now;
                     _lastClickPosition = pt;
                     ExpireDisplay();
@@ -436,6 +539,7 @@ namespace hopperdraw
 
             if ((_drawMode == 1 || _drawMode == 3) && _isDrawing)
             {
+                _acceptDrawingMouseUp = true;
                 _lastClickTime = DateTime.Now;
                 _lastClickPosition = pt;
                 return;
@@ -446,7 +550,6 @@ namespace hopperdraw
             if (shapeIdx >= 0)
             {
                 bool isAlreadySelected = SelectedShapeIndices.Contains(shapeIdx);
-                bool hasSelectedGH = HasSelectedGHObjects();
                 bool multipleShapesSelected = SelectedShapeIndices.Count > 1;
                 
                 if (shiftPressed)
@@ -531,7 +634,7 @@ namespace hopperdraw
                     CaptureGHObjectsAndStartSync(pt);
                 }
                 _clickStartPt = pt;
-                _additiveSelection = ctrlPressed;
+                _additiveSelection = shiftPressed;
             }
 
             ExpireDisplay();
@@ -548,16 +651,16 @@ namespace hopperdraw
             var frameShape = new FrameShape(topLeft, topRight, bottomRight, bottomLeft);
             frameShape.ThicknessMultiplier = _currentThicknessMultiplier;
             frameShape.OverrideColor = _pendingColorOverride;
+            frameShape.LineType = _currentLineType;
             Shapes.Add(frameShape);
             MarkDocumentModified();
-            _pendingColorOverride = null;
-            _currentThicknessMultiplier = 1.0f;
+            ResetNextShapeOverrides();
             ExpireDisplay();
         }
 
         private void Canvas_MouseMove(object sender, MouseEventArgs e)
         {
-            if (!_isActivated)
+            if (!CanHandleCanvasEvent(sender))
                 return;
 
             var pt = ScreenToCanvas(e.Location);
@@ -709,12 +812,14 @@ namespace hopperdraw
 
         private void Canvas_MouseUp(object sender, MouseEventArgs e)
         {
-            if (!_isActivated)
+            if (!CanHandleCanvasEvent(sender) || e.Button != MouseButtons.Left)
                 return;
 
             bool shiftPressed = (Control.ModifierKeys & Keys.Shift) == Keys.Shift;
 
-            if (_isDrawing && (_drawMode == 1 || _drawMode == 3))
+            if (_acceptDrawingMouseUp && _isDrawing && (_drawMode == 1 || _drawMode == 3) &&
+                !IsOverGrasshopperObject(ScreenToCanvas(e.Location)) &&
+                (Control.ModifierKeys & (Keys.Control | Keys.Alt)) == Keys.None)
             {
                 var pt = ScreenToCanvas(e.Location);
                 Point3d endPt = pt;
@@ -756,6 +861,7 @@ namespace hopperdraw
                 _canvas?.Invalidate();
             }
 
+            _acceptDrawingMouseUp = false;
             bool wasDragging = _isDragging || _isMultiDragging;
             _isDragging = false;
             _isMultiDragging = false;
@@ -788,163 +894,19 @@ namespace hopperdraw
 
         private void Canvas_KeyDown(object sender, KeyEventArgs e)
         {
-            if (!_isActivated)
+            if (!CanHandleCanvasEvent(sender) || e.Modifiers != Keys.None)
                 return;
-
-            bool ctrlPressed = (Control.ModifierKeys & Keys.Control) == Keys.Control;
-
-            if (ctrlPressed)
-            {
-                if (e.KeyCode == Keys.A)
-                {
-                    SelectedShapeIndices.Clear();
-                    for (int i = 0; i < Shapes.Count; i++)
-                    {
-                        SelectedShapeIndices.Add(i);
-                    }
-                    ExpireDisplay();
-                    _canvas?.Invalidate();
-                    e.SuppressKeyPress = true;
-                    return;
-                }
-                else if (e.KeyCode == Keys.D1 || e.KeyCode == Keys.NumPad1)
-                {
-                    if (HasSelection)
-                    {
-                        foreach (var idx in SelectedShapeIndices)
-                        {
-                            Shapes[idx].ThicknessMultiplier = 0.5f;
-                        }
-                        MarkDocumentModified();
-                        ExpireDisplay();
-                        _canvas?.Invalidate();
-                    }
-                    else if (!_isDrawing)
-                    {
-                        _currentThicknessMultiplier = 0.5f;
-                    }
-                    e.SuppressKeyPress = true;
-                    return;
-                }
-                else if (e.KeyCode == Keys.D2 || e.KeyCode == Keys.NumPad2)
-                {
-                    if (HasSelection)
-                    {
-                        foreach (var idx in SelectedShapeIndices)
-                        {
-                            Shapes[idx].ThicknessMultiplier = 2.0f;
-                        }
-                        MarkDocumentModified();
-                        ExpireDisplay();
-                        _canvas?.Invalidate();
-                    }
-                    else if (!_isDrawing)
-                    {
-                        _currentThicknessMultiplier = 2.0f;
-                    }
-                    e.SuppressKeyPress = true;
-                    return;
-                }
-                else if (e.KeyCode == Keys.D3 || e.KeyCode == Keys.NumPad3)
-                {
-                    if (HasSelection)
-                    {
-                        foreach (var idx in SelectedShapeIndices)
-                        {
-                            Shapes[idx].ThicknessMultiplier = 1.0f;
-                        }
-                        MarkDocumentModified();
-                        ExpireDisplay();
-                        _canvas?.Invalidate();
-                    }
-                    else
-                    {
-                        _currentThicknessMultiplier = 1.0f;
-                    }
-                    e.SuppressKeyPress = true;
-                    return;
-                }
-                else if (e.KeyCode == Keys.D)
-                {
-                    if (HasSelection && !_isDrawing)
-                    {
-                        var newIndices = new List<int>();
-                        foreach (var idx in SelectedShapeIndices)
-                        {
-                            var clone = Shapes[idx].Clone();
-                            clone.Move(30, 30);
-                            Shapes.Add(clone);
-                            newIndices.Add(Shapes.Count - 1);
-                        }
-                        MarkDocumentModified();
-                        SelectedShapeIndices.Clear();
-                        SelectedShapeIndices.AddRange(newIndices);
-                        ExpireDisplay();
-                        _canvas?.Invalidate();
-                        e.SuppressKeyPress = true;
-                        return;
-                    }
-                }
-                else if (e.KeyCode == Keys.B)
-                {
-                    if (HasSelection)
-                    {
-                        foreach (var idx in SelectedShapeIndices)
-                        {
-                            int currentType = (int)Shapes[idx].LineType;
-                            int nextType = (currentType + 1) % 5;
-                            Shapes[idx].LineType = (System.Drawing.Drawing2D.DashStyle)nextType;
-                        }
-                        MarkDocumentModified();
-                        ExpireDisplay();
-                        _canvas?.Invalidate();
-                    }
-                    else if (!_isDrawing)
-                    {
-                        int currentType = (int)_currentLineType;
-                        int nextType = (currentType + 1) % 5;
-                        _currentLineType = (System.Drawing.Drawing2D.DashStyle)nextType;
-                    }
-                    e.SuppressKeyPress = true;
-                    return;
-                }
-                else if (e.KeyCode == Keys.G)
-                {
-                    bool shiftPressed = (Control.ModifierKeys & Keys.Shift) == Keys.Shift;
-                    if (ctrlPressed && shiftPressed)
-                    {
-                        if (!_isDrawing && HasSelection)
-                        {
-                            UngroupSelectedGroups();
-                            MarkDocumentModified();
-                            ExpireDisplay();
-                            _canvas?.Invalidate();
-                        }
-                    }
-                    else if (ctrlPressed)
-                    {
-                        if (!_isDrawing && SelectedShapeIndices.Count > 0)
-                        {
-                            GroupSelectedShapes();
-                            MarkDocumentModified();
-                            ExpireDisplay();
-                            _canvas?.Invalidate();
-                        }
-                    }
-                    e.SuppressKeyPress = true;
-                    return;
-                }
-            }
 
             if (e.KeyCode == Keys.Enter)
             {
-                if (_currentPoints.Count >= 2)
+                if (_isDrawing && _currentPoints.Count >= 2 && (_drawMode == 1 || _drawMode == 3))
                 {
                     if (_drawMode == 1)
                     {
                         var polyShape = new PolylineShape(new List<Point3d>(_currentPoints), false);
                         polyShape.ThicknessMultiplier = _currentThicknessMultiplier;
                         polyShape.OverrideColor = _pendingColorOverride;
+                        polyShape.LineType = _currentLineType;
                         Shapes.Add(polyShape);
                     }
                     else if (_drawMode == 3)
@@ -952,56 +914,27 @@ namespace hopperdraw
                         var curveShape = new CurveShape(new List<Point3d>(_currentPoints), false);
                         curveShape.ThicknessMultiplier = _currentThicknessMultiplier;
                         curveShape.OverrideColor = _pendingColorOverride;
+                        curveShape.LineType = _currentLineType;
                         Shapes.Add(curveShape);
                     }
                     MarkDocumentModified();
                     _currentPoints.Clear();
                     _isDrawing = false;
-                    _pendingColorOverride = null;
-                    _currentThicknessMultiplier = 1.0f;
+                    _capturingOwner = null;
+                    ResetNextShapeOverrides();
                     ExpireDisplay();
                     e.SuppressKeyPress = true;
                 }
             }
             else if (e.KeyCode == Keys.Escape)
             {
-                if (_drawMode == 1 && _currentPoints.Count >= 2)
+                if (_isDrawing)
                 {
-                    var polyShape = new PolylineShape(new List<Point3d>(_currentPoints), false);
-                    polyShape.ThicknessMultiplier = _currentThicknessMultiplier;
-                    polyShape.OverrideColor = _pendingColorOverride;
-                    Shapes.Add(polyShape);
-                    MarkDocumentModified();
-                    _currentPoints.Clear();
-                    _isDrawing = false;
-                    _pendingColorOverride = null;
-                    _currentThicknessMultiplier = 1.0f;
+                    CancelDrawing();
                     ExpireDisplay();
                     e.SuppressKeyPress = true;
                 }
-                else if (_drawMode == 3 && _currentPoints.Count >= 2)
-                {
-                    var curveShape = new CurveShape(new List<Point3d>(_currentPoints), false);
-                    curveShape.ThicknessMultiplier = _currentThicknessMultiplier;
-                    curveShape.OverrideColor = _pendingColorOverride;
-                    Shapes.Add(curveShape);
-                    MarkDocumentModified();
-                    _currentPoints.Clear();
-                    _isDrawing = false;
-                    _pendingColorOverride = null;
-                    _currentThicknessMultiplier = 1.0f;
-                    ExpireDisplay();
-                    e.SuppressKeyPress = true;
-                }
-                else if (_currentPoints.Count > 0 || _isDrawing)
-                {
-                    _currentPoints.Clear();
-                    _isDrawing = false;
-                    _pendingColorOverride = null;
-                    ExpireDisplay();
-                    e.SuppressKeyPress = true;
-                }
-                else if (HasSelection)
+                else if (HasSelection && !HasSelectedGHObjects())
                 {
                     ClearSelection();
                     ExpireDisplay();
@@ -1012,7 +945,7 @@ namespace hopperdraw
 
             if (e.KeyCode == Keys.Delete)
             {
-                if (HasSelection)
+                if (HasSelection && !HasSelectedGHObjects())
                 {
                     DeleteSelectedShapes();
                     e.SuppressKeyPress = true;
@@ -1042,16 +975,100 @@ namespace hopperdraw
         {
             Shapes.Clear();
             MarkDocumentModified();
-            _currentPoints.Clear();
+            CancelDrawing();
+            ClearSelection();
             ExpireDisplay();
             _canvas?.Invalidate();
         }
 
         public override bool AppendMenuItems(ToolStripDropDown menu)
         {
-            Menu_AppendItem(menu, "Clear All", (s, e) => ClearAll());
+            base.AppendMenuItems(menu);
+            menu.Items.Add(new ToolStripSeparator());
+            menu.Items.Add(new ToolStripMenuItem("Select all HopperDraw shapes", null, (s, e) =>
+            {
+                SelectedShapeIndices.Clear();
+                for (int i = 0; i < Shapes.Count; i++) SelectedShapeIndices.Add(i);
+                ExpireDisplay();
+                _canvas?.Invalidate();
+            }) { Enabled = Shapes.Count > 0 });
 
-            return base.AppendMenuItems(menu);
+            var thicknessMenu = new ToolStripMenuItem("Shape thickness");
+            thicknessMenu.DropDownItems.Add("0.5x", null, (s, e) => SetThicknessMultiplier(0.5f));
+            thicknessMenu.DropDownItems.Add("1x", null, (s, e) => SetThicknessMultiplier(1.0f));
+            thicknessMenu.DropDownItems.Add("2x", null, (s, e) => SetThicknessMultiplier(2.0f));
+            thicknessMenu.DropDownItems.Add("3x", null, (s, e) => SetThicknessMultiplier(3.0f));
+            menu.Items.Add(thicknessMenu);
+            menu.Items.Add(new ToolStripMenuItem("Cycle line type", null, (s, e) => CycleLineType()));
+            menu.Items.Add(new ToolStripMenuItem("Set next shape color", null, (s, e) => ShowColorPickerForDrawing()));
+            menu.Items.Add(new ToolStripMenuItem("Set selected shape color", null, (s, e) => ShowColorPickerForSelected()) { Enabled = HasSelection });
+            menu.Items.Add(new ToolStripMenuItem("Duplicate selected shapes", null, (s, e) => DuplicateSelectedShapes()) { Enabled = HasSelection });
+            menu.Items.Add(new ToolStripMenuItem("Group selected shapes", null, (s, e) =>
+            {
+                GroupSelectedShapes();
+                MarkDocumentModified();
+                ExpireDisplay();
+                _canvas?.Invalidate();
+            }) { Enabled = SelectedShapeIndices.Count > 1 });
+            menu.Items.Add(new ToolStripMenuItem("Ungroup selected shapes", null, (s, e) =>
+            {
+                UngroupSelectedGroups();
+                MarkDocumentModified();
+                ExpireDisplay();
+                _canvas?.Invalidate();
+            }) { Enabled = SelectedShapeIndices.Any(idx => idx >= 0 && idx < Shapes.Count && Shapes[idx] is DrawShapeGroup) });
+            menu.Items.Add(new ToolStripMenuItem("Clear all HopperDraw shapes", null, (s, e) => ClearAll()) { Enabled = Shapes.Count > 0 });
+            return true;
+        }
+
+        private void SetThicknessMultiplier(float multiplier)
+        {
+            if (HasSelection)
+            {
+                foreach (var idx in SelectedShapeIndices) Shapes[idx].ThicknessMultiplier = multiplier;
+                MarkDocumentModified();
+            }
+            else
+            {
+                _currentThicknessMultiplier = multiplier;
+            }
+            ExpireDisplay();
+            _canvas?.Invalidate();
+        }
+
+        private void CycleLineType()
+        {
+            if (HasSelection)
+            {
+                foreach (var idx in SelectedShapeIndices)
+                    Shapes[idx].LineType = (DashStyle)(((int)Shapes[idx].LineType + 1) % 5);
+                MarkDocumentModified();
+            }
+            else
+            {
+                _currentLineType = (DashStyle)(((int)_currentLineType + 1) % 5);
+                _hasPendingLineTypeOverride = true;
+            }
+            ExpireDisplay();
+            _canvas?.Invalidate();
+        }
+
+        private void DuplicateSelectedShapes()
+        {
+            if (!HasSelection) return;
+            var newIndices = new List<int>();
+            foreach (var idx in SelectedShapeIndices)
+            {
+                var clone = Shapes[idx].Clone();
+                clone.Move(30, 30);
+                Shapes.Add(clone);
+                newIndices.Add(Shapes.Count - 1);
+            }
+            SelectedShapeIndices.Clear();
+            SelectedShapeIndices.AddRange(newIndices);
+            MarkDocumentModified();
+            ExpireDisplay();
+            _canvas?.Invalidate();
         }
 
         private void ShowColorPickerForSelected()
@@ -1206,6 +1223,7 @@ namespace hopperdraw
         public override void RemovedFromDocument(GH_Document document)
         {
             UnregisterCanvasEvents();
+            CancelDrawing();
             base.RemovedFromDocument(document);
         }
 
