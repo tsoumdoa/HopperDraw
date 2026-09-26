@@ -55,16 +55,18 @@ With DrawOrder = 0:
 
 ## Drawing Modes
 
+Start a shape with **Ctrl + Alt + Shift + left click** on empty canvas. The shortcut must match exactly. HopperDraw ignores clicks on Grasshopper objects, so selection and wiring gestures continue to work normally. If a document contains multiple HopperDraw components, select the component whose shapes you want to edit or draw; otherwise the first active component owns canvas input.
+
 ### Line Mode (DrawMode = 0)
 
-1. Press **Ctrl + Left Click** to start drawing
+1. Press **Ctrl + Alt + Shift + left click** on empty canvas to start drawing
 2. Move cursor to desired endpoint
 3. **Left Click** to complete the line
 4. Line snaps to 45° angles when **Shift** is held
 
 ### Polyline Mode (DrawMode = 1)
 
-1. Press **Ctrl + Left Click** to add the first point
+1. Press **Ctrl + Alt + Shift + left click** on empty canvas to add the first point
 2. Continue clicking to add more points
 3. **Double Click** or press **Enter** to complete
 4. Press **Escape** to cancel
@@ -72,14 +74,14 @@ With DrawOrder = 0:
 
 ### Frame Mode (DrawMode = 2)
 
-1. Press **Ctrl + Left Click** to set first corner
+1. Press **Ctrl + Alt + Shift + left click** on empty canvas to set the first corner
 2. Move cursor to see frame preview
 3. **Left Click** to set second corner and complete
 4. **Shift** constrains to square frame (equal width/height)
 
 ### Curve Mode (DrawMode = 3)
 
-1. Press **Ctrl + Left Click** to add the first point
+1. Press **Ctrl + Alt + Shift + left click** on empty canvas to add the first point
 2. Continue clicking to add more control points
 3. Preview shows the actual curve shape including cursor position
 4. **Double Click** or press **Enter** to complete
@@ -87,17 +89,11 @@ With DrawOrder = 0:
 
 ## Thickness Override
 
-Control line thickness with keyboard shortcuts:
-
-| Shortcut | Effect |
-|----------|--------|
-| Ctrl + 1 | Set thickness to 0.5x (half) |
-| Ctrl + 2 | Set thickness to 2x (double) |
-| Ctrl + 3 | Set thickness to 3x (triple) |
+Use **Shape thickness** in the HopperDraw component's right-click menu to choose 0.5x, 1x, 2x, or 3x.
 
 **Behavior:**
 - Multiplier applies to the **base thickness** set by the input parameter
-- Only affects the **next shape** to be drawn
+- Affects all selected HopperDraw shapes, or the next shape when none is selected
 - Automatically resets to 1.0x (base thickness) after each shape is completed
 - Preview shows the effective thickness while drawing
 
@@ -105,7 +101,7 @@ Control line thickness with keyboard shortcuts:
 
 Set a custom color for the next shape:
 
-1. **Right Click** (during drawing mode) to open color picker
+1. Choose **Set next shape color** from the HopperDraw component's right-click menu
 2. Select a color and click OK
 3. The next shape will use this color instead of the default
 4. Color override applies to only one shape, then clears
@@ -115,11 +111,7 @@ Set a custom color for the next shape:
 
 ## Line Type
 
-Control line dash style:
-
-| Shortcut | Effect |
-|----------|--------|
-| Ctrl + B | Cycle to next line type |
+Use **Cycle line type** in the HopperDraw component's right-click menu.
 
 **Line Types:**
 - 0: Solid (default)
@@ -154,39 +146,29 @@ Shapes are serialized with the Grasshopper file:
 | Active | Boolean | True | Enable/disable border drawing |
 | Show | Boolean | True | Show/hide borders on canvas |
 | DrawMode | Integer | 0 | Drawing mode (0=Line, 1=Polyline, 2=Frame, 3=Curve) |
-| Color | Color | Black | Default border color. Right-click during drawing for per-shape override |
-| Thickness | Number | 8.0 | Base line thickness. Use Ctrl+1/2/3 for multipliers |
+| Color | Color | Black | Default border color. Use the component menu for per-shape overrides |
+| Thickness | Number | 8.0 | Base line thickness. Use the component menu for multipliers |
 | LineType | Integer | 0 | Line style (0=Solid, 1=Dash, 2=Dot, 3=DashDot, 4=DashDotDot) |
 | DrawOrder | Integer | 1 | 0=Below components, 1=Above components |
 
-## Keyboard Shortcuts
+## Canvas Shortcuts
 
 | Shortcut | Action |
 |----------|--------|
-| Ctrl + A | Select all shapes |
-| Ctrl + Left Click | Start drawing (all modes) |
+| Ctrl + Alt + Shift + left click on empty canvas | Start drawing (all modes) |
 | Left Click | Add point / Complete shape |
 | Double Click | Complete polyline/curve |
 | Shift + Drag | Constrain angle (45° snap) |
-| Ctrl + 0 | Reset thickness to 1.0x (default) |
-| Ctrl + 1 | Set 0.5x thickness multiplier |
-| Ctrl + 2 | Set 2x thickness multiplier |
-| Ctrl + 3 | Set 3x thickness multiplier |
-| Ctrl + B | Cycle line type (Solid → Dash → Dot → DashDot → DashDotDot) |
-| Right Click (during drawing) | Open color picker for next shape |
-| Right Click (on selected) | Open color picker for selected shape(s) |
 | Enter | Complete polyline/curve |
-| Escape | Complete or cancel drawing |
-| Delete | Delete selected shape(s) |
+| Escape | Cancel drawing, or clear HopperDraw selection |
+| Delete | Delete selected HopperDraw shapes when no Grasshopper objects are selected |
 
-## Right-Click Menu
+## HopperDraw Component Menu
 
-- **Draw Mode** submenu:
-  - Line
-  - Polyline
-  - Frame
-  - Curve
-- **Clear All** - Removes all drawn shapes
+- **Select all HopperDraw shapes**
+- **Shape thickness**, **Cycle line type**, and **Set next shape color** change the next shape when none is selected, or selected shapes where applicable
+- **Set selected shape color**, **Duplicate selected shapes**, **Group selected shapes**, and **Ungroup selected shapes**
+- **Clear all HopperDraw shapes** removes all drawn shapes
 
 ## Selection and Editing
 
@@ -194,29 +176,25 @@ Shapes can be selected and manipulated:
 - **Click** on a shape to select it
 - **Click on empty canvas**: Clear selection
 - **Window select**: Click and drag on empty canvas to select multiple shapes
-- **Ctrl + Window select**: Add shapes to current selection
+- **Shift + Window select**: Add shapes to current selection
 - **Click on selected shape**: Start multi-drag to move all selected shapes
 - Selected shapes show white handles at control points
 - Drag handles to resize/move shapes
-- **Ctrl + 0**: Reset thickness to 1.0x (default)
-- **Ctrl + 1/2/3**: Change thickness of selected shapes (0.5x, 2x, 3x)
-- **Ctrl + B**: Cycle line type of selected shapes
-- **Right-click on selected**: Change color of selected shapes
+- Use the HopperDraw component menu to change thickness, line type, and color of selected shapes
 - **Escape**: Clear selection (or cancel drawing)
 - **Delete**: Remove all selected shapes
 
 ### Multi-Selection Features
 
 1. **Window Selection**: Click and drag on empty canvas to create a selection window
-2. **Additive Selection**: Hold Ctrl while window selecting to add to existing selection
+2. **Additive Selection**: Hold Shift while window selecting to add to existing selection
 3. **Multi-Drag**: Click on any selected shape and drag to move all selected shapes together
-4. **Bulk Operations**: Ctrl+1/2/3, Ctrl+B, and right-click color change apply to ALL selected shapes
+4. **Bulk Operations**: Component menu thickness, line type, and color changes apply to all selected shapes
 
 ## Limitations
 
 - Drawn elements cannot be used to drag GH components behind them
 - Selection boundary does not include drawn elements
-- Ctrl+A (select all) creates a selection bounding box that incorrectly includes objects far up in the top-left
 
 ## Technical Notes
 
