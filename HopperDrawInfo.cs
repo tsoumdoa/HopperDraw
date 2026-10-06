@@ -31,7 +31,7 @@ namespace hopperdraw
             }
         }
 
-        public override string Description => "Canvas drawing plugin for Grasshopper. Ctr+left click to start drawing.";
+        public override string Description => "Canvas drawing plugin for Grasshopper. Press D twice to enter drawing mode; Escape exits.";
 
         public override Guid Id => new Guid("3e405a88-6607-40ab-bb81-added3ce85ce");
 
