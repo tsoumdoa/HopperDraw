@@ -22,6 +22,15 @@ namespace hopperdraw
             return Distance(pt, new PointF(a.X + t * dx, a.Y + t * dy));
         }
 
+        public static Point3d SnapOrthogonal(Point3d start, Point3d end)
+        {
+            double dx = end.X - start.X;
+            double dy = end.Y - start.Y;
+            return Math.Abs(dx) >= Math.Abs(dy)
+                ? new Point3d(end.X, start.Y, 0)
+                : new Point3d(start.X, end.Y, 0);
+        }
+
         public static Point3d SnapAngle(Point3d start, Point3d end)
         {
             double dx = end.X - start.X;

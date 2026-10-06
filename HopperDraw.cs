@@ -20,6 +20,9 @@ namespace hopperdraw
     public class HopperDraw : GH_Component
     {
         private bool _isActivated;
+        private bool _drawingModeEnabled;
+        private bool _dKeyDown;
+        private DateTime _lastDKeyTime = DateTime.MinValue;
         private bool _acceptDrawingMouseUp;
         private static HopperDraw _capturingOwner;
 
@@ -82,7 +85,7 @@ namespace hopperdraw
         private const float HitTolerance = 15f;
 
         public HopperDraw()
-            : base("Hopper Draw", "HopperDraw", "Draw on empty canvas with Ctrl+Alt+Shift+left click. Edit shapes from the component menu.", "Params", "Util")
+            : base("Hopper Draw", "HopperDraw", "Press D twice to enter drawing mode, then click empty canvas. Hold Shift for orthogonal snapping. Press Escape to exit.", "Params", "Util")
         {
             CreateAttributes();
         }
@@ -181,7 +184,7 @@ namespace hopperdraw
 
             _borderColor = color;
             _lineThickness = (float)thickness;
-            if (_drawMode != drawMode && _isDrawing) CancelDrawing();
+            if (_drawMode != drawMode && (_isDrawing || _drawingModeEnabled)) CancelDrawing();
             _drawMode = drawMode;
             _baseLineType = (System.Drawing.Drawing2D.DashStyle)lineType;
             if (!_hasPendingLineTypeOverride) _currentLineType = _baseLineType;
@@ -213,7 +216,7 @@ namespace hopperdraw
             System.Diagnostics.Debug.WriteLine($"[HopperDraw SolveInstance] Updating. Shapes count = {Shapes.Count}");
 #endif
             Visible = show && !this.Locked;
-            if (!Visible && _isDrawing) CancelDrawing();
+            if (!Visible && (_isDrawing || _drawingModeEnabled)) CancelDrawing();
             BorderColor = _borderColor;
             LineThickness = _lineThickness;
             DrawOrder = drawOrder;
@@ -242,6 +245,9 @@ namespace hopperdraw
                 _canvas.MouseMove += Canvas_MouseMove;
                 _canvas.MouseUp += Canvas_MouseUp;
                 _canvas.KeyDown += Canvas_KeyDown;
+                _canvas.KeyUp += Canvas_KeyUp;
+                _canvas.KeyPress += Canvas_KeyPress;
+                _canvas.LostFocus += Canvas_LostFocus;
                 _canvas.DocumentChanged += Canvas_DocumentChanged;
                 _eventsRegistered = true;
 
@@ -261,6 +267,9 @@ namespace hopperdraw
                 _canvas.MouseMove -= Canvas_MouseMove;
                 _canvas.MouseUp -= Canvas_MouseUp;
                 _canvas.KeyDown -= Canvas_KeyDown;
+                _canvas.KeyUp -= Canvas_KeyUp;
+                _canvas.KeyPress -= Canvas_KeyPress;
+                _canvas.LostFocus -= Canvas_LostFocus;
                 _canvas.DocumentChanged -= Canvas_DocumentChanged;
             }
             _eventsRegistered = false;
@@ -297,7 +306,7 @@ namespace hopperdraw
             if (_capturingOwner != null && ReferenceEquals(_capturingOwner.OnPingDocument(), _canvas?.Document))
             {
                 if (!_capturingOwner._isActivated || _capturingOwner.Locked ||
-                    !_capturingOwner.Visible || !_capturingOwner._isDrawing)
+                    !_capturingOwner.Visible || !_capturingOwner._drawingModeEnabled)
                     _capturingOwner.CancelDrawing();
                 else
                     return ReferenceEquals(_capturingOwner, this);
@@ -337,6 +346,8 @@ namespace hopperdraw
         private void CancelDrawing()
         {
             if (ReferenceEquals(_capturingOwner, this)) _capturingOwner = null;
+            _drawingModeEnabled = false;
+            ResetDrawingKeyGesture();
             _currentPoints.Clear();
             _isDrawing = false;
             _frameCornerCount = 0;
@@ -352,6 +363,56 @@ namespace hopperdraw
             _ghDragSyncTimer?.Stop();
             _ghObjectInitialPositions.Clear();
             ClearCapturedGHObjects();
+        }
+
+        internal void EnterDrawingMode()
+        {
+            if (!_isActivated || Locked || !Visible || _canvas?.Document == null ||
+                !ReferenceEquals(_canvas.Document, OnPingDocument()) ||
+                _drawMode < 0 || _drawMode > 3) return;
+
+            if (_capturingOwner != null && !ReferenceEquals(_capturingOwner, this))
+                _capturingOwner.CancelDrawing();
+            if (_drawingModeEnabled) return;
+            ClearSelection();
+            _clickStartPt = Point3d.Unset;
+            _isDragging = false;
+            _isMultiDragging = false;
+            _isWindowSelecting = false;
+            _ghDragSyncTimer?.Stop();
+            _ghObjectInitialPositions.Clear();
+            ClearCapturedGHObjects();
+            _lastClickTime = DateTime.MinValue;
+            _lastClickPosition = Point3d.Unset;
+            _drawingModeEnabled = true;
+            _capturingOwner = this;
+            _canvas.Focus();
+            _canvas.Invalidate();
+        }
+
+        private void ResetDrawingKeyGesture()
+        {
+            _dKeyDown = false;
+            _lastDKeyTime = DateTime.MinValue;
+        }
+
+        private void Canvas_LostFocus(object sender, EventArgs e)
+        {
+            ResetDrawingKeyGesture();
+        }
+
+        private void Canvas_KeyUp(object sender, KeyEventArgs e)
+        {
+            if (e.KeyCode == Keys.D) _dKeyDown = false;
+            if (CanHandleCanvasEvent(sender) && e.KeyCode == Keys.ShiftKey)
+                _canvas?.Invalidate();
+        }
+
+        private void Canvas_KeyPress(object sender, KeyPressEventArgs e)
+        {
+            if (CanHandleCanvasEvent(sender) && Control.ModifierKeys == Keys.None &&
+                char.ToUpperInvariant(e.KeyChar) == 'D')
+                e.Handled = true;
         }
 
         private void ResetNextShapeOverrides()
@@ -385,9 +446,8 @@ namespace hopperdraw
             if (IsOverGrasshopperObject(pt)) return;
 
             var modifiers = Control.ModifierKeys & (Keys.Control | Keys.Alt | Keys.Shift);
-            bool startShortcut = modifiers == (Keys.Control | Keys.Alt | Keys.Shift);
-            if (_isDrawing && (modifiers & (Keys.Control | Keys.Alt)) != Keys.None) return;
-            if (!_isDrawing && (modifiers & (Keys.Control | Keys.Alt)) != Keys.None && !startShortcut) return;
+            if ((modifiers & (Keys.Control | Keys.Alt)) != Keys.None) return;
+            bool startDrawing = _drawingModeEnabled && !_isDrawing;
 
             var timeSinceLastClick = DateTime.Now - _lastClickTime;
             bool isDoubleClick = (timeSinceLastClick.TotalMilliseconds < 500) &&
@@ -399,7 +459,7 @@ namespace hopperdraw
             {
                 if (_isDrawing)
                 {
-                    Point3d endPt = shiftPressed ? GeometryUtilities.SnapAngle(_drawStart, pt) : pt;
+                    Point3d endPt = shiftPressed ? GeometryUtilities.SnapOrthogonal(_drawStart, pt) : pt;
                     var lineShape = new LineShape(_drawStart, endPt);
                     lineShape.ThicknessMultiplier = _currentThicknessMultiplier;
                     lineShape.OverrideColor = _pendingColorOverride;
@@ -407,13 +467,12 @@ namespace hopperdraw
                     Shapes.Add(lineShape);
                     MarkDocumentModified();
                     _isDrawing = false;
-                    _capturingOwner = null;
                     ResetNextShapeOverrides();
                     ExpireDisplay();
                     _canvas?.Invalidate();
                     return;
                 }
-                else if (startShortcut)
+                else if (startDrawing)
                 {
                     _drawStart = pt;
                     _drawEnd = pt;
@@ -430,7 +489,7 @@ namespace hopperdraw
             {
                 if (!_isDrawing || _currentPoints.Count == 0)
                 {
-                    if (startShortcut)
+                    if (startDrawing)
                     {
                         _currentPoints.Add(pt);
                         _isDrawing = true;
@@ -453,7 +512,6 @@ namespace hopperdraw
                     MarkDocumentModified();
                     _currentPoints.Clear();
                     _isDrawing = false;
-                    _capturingOwner = null;
                     ResetNextShapeOverrides();
                     _lastClickTime = DateTime.Now;
                     _lastClickPosition = pt;
@@ -466,7 +524,7 @@ namespace hopperdraw
             {
                 if (!_isDrawing || _currentPoints.Count == 0)
                 {
-                    if (startShortcut)
+                    if (startDrawing)
                     {
                         _currentPoints.Add(pt);
                         _isDrawing = true;
@@ -489,7 +547,6 @@ namespace hopperdraw
                     MarkDocumentModified();
                     _currentPoints.Clear();
                     _isDrawing = false;
-                    _capturingOwner = null;
                     ResetNextShapeOverrides();
                     _lastClickTime = DateTime.Now;
                     _lastClickPosition = pt;
@@ -515,7 +572,6 @@ namespace hopperdraw
                     }
                     _frameCornerCount = 0;
                     _isDrawing = false;
-                    _capturingOwner = null;
                     CreateFrame(_frameFirstCorner, finalPt);
                     _lastClickTime = DateTime.Now;
                     _lastClickPosition = pt;
@@ -523,7 +579,7 @@ namespace hopperdraw
                     _canvas?.Invalidate();
                     return;
                 }
-                else if (startShortcut)
+                else if (startDrawing)
                 {
                     _frameFirstCorner = pt;
                     _frameCornerCount = 1;
@@ -827,7 +883,7 @@ namespace hopperdraw
                 if (shiftPressed && _currentPoints.Count > 0)
                 {
                     var lastPt = _currentPoints[_currentPoints.Count - 1];
-                    endPt = GeometryUtilities.SnapAngle(lastPt, endPt);
+                    endPt = GeometryUtilities.SnapOrthogonal(lastPt, endPt);
                 }
 
                 double dist = endPt.DistanceTo(_currentPoints[_currentPoints.Count - 1]);
@@ -894,8 +950,37 @@ namespace hopperdraw
 
         private void Canvas_KeyDown(object sender, KeyEventArgs e)
         {
-            if (!CanHandleCanvasEvent(sender) || e.Modifiers != Keys.None)
+            if (!CanHandleCanvasEvent(sender))
                 return;
+
+            if (e.KeyCode == Keys.Escape && _drawingModeEnabled)
+            {
+                CancelDrawing();
+                ExpireDisplay();
+                _canvas?.Invalidate();
+                e.SuppressKeyPress = true;
+                return;
+            }
+            if (e.Modifiers != Keys.None)
+            {
+                _lastDKeyTime = DateTime.MinValue;
+                if (e.KeyCode == Keys.ShiftKey) _canvas?.Invalidate();
+                return;
+            }
+
+            if (e.KeyCode == Keys.D)
+            {
+                e.Handled = true; // Keep KeyUp so auto-repeat cannot trigger drawing mode.
+                if (_dKeyDown) return; // Holding D must not count as two presses.
+                _dKeyDown = true;
+                var now = DateTime.UtcNow;
+                bool doublePress = _lastDKeyTime != DateTime.MinValue &&
+                    (now - _lastDKeyTime).TotalMilliseconds <= SystemInformation.DoubleClickTime;
+                _lastDKeyTime = doublePress ? DateTime.MinValue : now;
+                if (doublePress) EnterDrawingMode();
+                return;
+            }
+            _lastDKeyTime = DateTime.MinValue;
 
             if (e.KeyCode == Keys.Enter)
             {
@@ -920,7 +1005,6 @@ namespace hopperdraw
                     MarkDocumentModified();
                     _currentPoints.Clear();
                     _isDrawing = false;
-                    _capturingOwner = null;
                     ResetNextShapeOverrides();
                     ExpireDisplay();
                     e.SuppressKeyPress = true;
@@ -928,13 +1012,7 @@ namespace hopperdraw
             }
             else if (e.KeyCode == Keys.Escape)
             {
-                if (_isDrawing)
-                {
-                    CancelDrawing();
-                    ExpireDisplay();
-                    e.SuppressKeyPress = true;
-                }
-                else if (HasSelection && !HasSelectedGHObjects())
+                if (HasSelection && !HasSelectedGHObjects())
                 {
                     ClearSelection();
                     ExpireDisplay();
@@ -984,6 +1062,12 @@ namespace hopperdraw
         public override bool AppendMenuItems(ToolStripDropDown menu)
         {
             base.AppendMenuItems(menu);
+            menu.Items.Add(new ToolStripSeparator());
+            menu.Items.Add(new ToolStripMenuItem("Exit drawing mode", null, (s, e) =>
+            {
+                CancelDrawing();
+                _canvas?.Invalidate();
+            }) { Enabled = _drawingModeEnabled });
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add(new ToolStripMenuItem("Select all HopperDraw shapes", null, (s, e) =>
             {
@@ -1268,6 +1352,7 @@ namespace hopperdraw
 #endif
                 if (!result) return false;
 
+                CancelDrawing();
                 Shapes.Clear();
                 int count = reader.GetInt32("ShapeCount");
 #if DEBUG
@@ -1339,6 +1424,7 @@ namespace hopperdraw
         public Point3d DrawStart => _drawStart;
         public Point3d DrawEnd => _drawEnd;
         public bool IsDrawing => _isDrawing;
+        public bool DrawingModeEnabled => _drawingModeEnabled;
         public bool ShiftPressed => (Control.ModifierKeys & Keys.Shift) == Keys.Shift;
         public bool CtrlPressed => (Control.ModifierKeys & Keys.Control) == Keys.Control;
         public int DrawMode => _drawMode;

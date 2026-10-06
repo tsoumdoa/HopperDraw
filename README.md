@@ -59,37 +59,39 @@ With DrawOrder = 0:
 
 ## Drawing Modes
 
-Start a shape with **Ctrl + Alt + Shift + left click** on empty canvas. The shortcut must match exactly. HopperDraw ignores clicks on Grasshopper objects, so selection and wiring gestures continue to work normally. If a document contains multiple HopperDraw components, select the component whose shapes you want to edit or draw; otherwise the first active component owns canvas input.
+With the Grasshopper canvas focused, press the **D key twice quickly** to enter drawing mode, then **left click on empty canvas** to start a shape. The two presses must be within your system's double-click interval; holding D does not activate the mode. The component footer turns blue and shows the shape type followed by **ON**. Drawing mode stays on after each completed shape so you can draw several shapes without reactivating it. Press **Escape** once to exit the mode and discard any unfinished shape; completed shapes remain. Drawing mode always starts off when reopening a file.
+
+**Ctrl + Shift** and other Ctrl/Alt clicks are ignored by HopperDraw so you can grab Grasshopper wires, even while drawing mode is on. HopperDraw also ignores clicks on Grasshopper objects. If a document contains multiple HopperDraw components, select the component you want to use before pressing D twice; otherwise the component with selected shapes, or the first active component, owns canvas input. That component keeps ownership until you exit drawing mode.
 
 ### Line Mode (DrawMode = 0)
 
-1. Press **Ctrl + Alt + Shift + left click** on empty canvas to start drawing
+1. Press **D twice** to enter drawing mode, then **left click** on empty canvas to start drawing
 2. Move cursor to desired endpoint
 3. **Left Click** to complete the line
-4. Line snaps to 45° angles when **Shift** is held
+4. Line snaps horizontally or vertically when **Shift** is held
 
 ### Polyline Mode (DrawMode = 1)
 
-1. Press **Ctrl + Alt + Shift + left click** on empty canvas to add the first point
+1. Press **D twice** to enter drawing mode, then **left click** on empty canvas to add the first point
 2. Continue clicking to add more points
 3. **Double Click** or press **Enter** to complete
-4. Press **Escape** to cancel
-5. **Shift** constrains angle while adding points
+4. Press **Escape** to cancel and exit drawing mode
+5. **Shift** snaps horizontally or vertically while adding points
 
 ### Frame Mode (DrawMode = 2)
 
-1. Press **Ctrl + Alt + Shift + left click** on empty canvas to set the first corner
+1. Press **D twice** to enter drawing mode, then **left click** on empty canvas to set the first corner
 2. Move cursor to see frame preview
 3. **Left Click** to set second corner and complete
 4. **Shift** constrains to square frame (equal width/height)
 
 ### Curve Mode (DrawMode = 3)
 
-1. Press **Ctrl + Alt + Shift + left click** on empty canvas to add the first point
+1. Press **D twice** to enter drawing mode, then **left click** on empty canvas to add the first point
 2. Continue clicking to add more control points
 3. Preview shows the actual curve shape including cursor position
 4. **Double Click** or press **Enter** to complete
-5. **Shift** constrains angle while adding points
+5. **Shift** snaps horizontally or vertically while adding points
 
 ## Thickness Override
 
@@ -159,16 +161,18 @@ Shapes are serialized with the Grasshopper file:
 
 | Shortcut | Action |
 |----------|--------|
-| Ctrl + Alt + Shift + left click on empty canvas | Start drawing (all modes) |
-| Left Click | Add point / Complete shape |
+| D key twice quickly | Enter drawing mode (all shape types) |
+| Left Click in drawing mode | Start shape / Add point / Complete shape |
 | Double Click | Complete polyline/curve |
-| Shift + Drag | Constrain angle (45° snap) |
+| Shift while drawing | Snap horizontally or vertically; make frames square |
+| Ctrl + Shift + click | Grasshopper wire grabbing; ignored by HopperDraw |
 | Enter | Complete polyline/curve |
-| Escape | Cancel drawing, or clear HopperDraw selection |
+| Escape | Exit drawing mode and discard unfinished shape, or clear HopperDraw selection when mode is off |
 | Delete | Delete selected HopperDraw shapes when no Grasshopper objects are selected |
 
 ## HopperDraw Component Menu
 
+- **Exit drawing mode** exits and discards an unfinished shape, just like Escape
 - **Select all HopperDraw shapes**
 - **Shape thickness**, **Cycle line type**, and **Set next shape color** change the next shape when none is selected, or selected shapes where applicable
 - **Set selected shape color**, **Duplicate selected shapes**, **Group selected shapes**, and **Ungroup selected shapes**
