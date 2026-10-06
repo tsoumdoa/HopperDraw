@@ -23,6 +23,7 @@
   </PropertyGroup>
   
   <ItemGroup>
+    <Compile Remove="Tests/**/*.cs" />
     <None Remove="nul" />
     <EmbeddedResource Include="icon.png" />
   </ItemGroup>

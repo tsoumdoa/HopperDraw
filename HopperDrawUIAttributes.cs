@@ -41,13 +41,14 @@ namespace hopperdraw
             var owner = (HopperDraw)Owner;
             var modeNames = new[] { "Line", "Polyline", "Frame", "Curve" };
             var modeText = owner.DrawMode >= 0 && owner.DrawMode < modeNames.Length ? modeNames[owner.DrawMode] : "Unknown";
+            if (owner.DrawingModeEnabled) modeText += " ON";
 
             var footer = new RectangleF(Bounds.X + 4, Bounds.Bottom - 22, Bounds.Width - 8, 18);
 
             using (var capsule = GH_Capsule.CreateTextCapsule(
                 footer,
                 footer,
-                GH_Palette.Black,
+                owner.DrawingModeEnabled ? GH_Palette.Blue : GH_Palette.Black,
                 modeText,
                 2,
                 0
@@ -83,7 +84,7 @@ namespace hopperdraw
                         bool shiftPressed = (Control.ModifierKeys & Keys.Shift) == Keys.Shift;
                         if (shiftPressed)
                         {
-                            end = GeometryUtilities.SnapAngle(owner.DrawStart, owner.DrawEnd);
+                            end = GeometryUtilities.SnapOrthogonal(owner.DrawStart, owner.DrawEnd);
                         }
 
                         graphics.DrawLine(pen,
@@ -108,7 +109,7 @@ namespace hopperdraw
                             bool shiftPressed = (Control.ModifierKeys & Keys.Shift) == Keys.Shift;
                             if (shiftPressed)
                             {
-                                endPt = GeometryUtilities.SnapAngle(lastPt, _previewPoint);
+                                endPt = GeometryUtilities.SnapOrthogonal(lastPt, _previewPoint);
                             }
 
                             graphics.DrawLine(pen,
@@ -134,7 +135,7 @@ namespace hopperdraw
                             bool shiftPressed = (Control.ModifierKeys & Keys.Shift) == Keys.Shift;
                             if (shiftPressed)
                             {
-                                endPt = GeometryUtilities.SnapAngle(lastPt, _previewPoint);
+                                endPt = GeometryUtilities.SnapOrthogonal(lastPt, _previewPoint);
                             }
 
                             var previewPoints = new List<PointF>();
