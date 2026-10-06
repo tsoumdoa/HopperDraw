@@ -61,7 +61,7 @@ With DrawOrder = 0:
 
 With the Grasshopper canvas focused, press the **D key twice quickly** to enter drawing mode, then **left click on empty canvas** to start a shape. The two presses must be within your system's double-click interval; holding D does not activate the mode. The component footer turns blue and shows the shape type followed by **ON**. Drawing mode stays on after each completed shape so you can draw several shapes without reactivating it. Press **Escape** once to exit the mode and discard any unfinished shape; completed shapes remain. Drawing mode always starts off when reopening a file.
 
-**Ctrl + Shift** and other Ctrl/Alt clicks are ignored by HopperDraw so you can grab Grasshopper wires, even while drawing mode is on. HopperDraw also ignores clicks on Grasshopper objects. If a document contains multiple HopperDraw components, select the component you want to use before pressing D twice; otherwise the component with selected shapes, or the first active component, owns canvas input. That component keeps ownership until you exit drawing mode.
+**Ctrl + Shift** and other Ctrl/Alt clicks are ignored by HopperDraw so you can grab Grasshopper wires, even while drawing mode is on. HopperDraw also ignores clicks on Grasshopper objects. Double-clicking empty canvas in drawing mode completes polylines/curves without opening Grasshopper's component search; exit drawing mode to use empty-canvas double-click search. If a document contains multiple HopperDraw components, select the component you want to use before pressing D twice; otherwise the component with selected shapes, or the first active component, owns canvas input. That component keeps ownership until you exit drawing mode. Mouse clicks, other keys, and focus changes reset a pending double-D gesture.
 
 ### Line Mode (DrawMode = 0)
 
@@ -205,6 +205,10 @@ Shapes can be selected and manipulated:
 - Selection boundary does not include drawn elements
 
 ## Technical Notes
+
+### Regression Checks
+
+On Windows, run `dotnet run --project Tests/InputRegression/InputRegression.csproj`. The harness checks the production gesture helper, shape completion, cancellation, snapping, handled-key behavior, and component-search validation without launching Rhino. Live keyboard/mouse integration in Rhino remains a separate manual check.
 
 ### Why Use GH_CanvasChannel.Overlay?
 

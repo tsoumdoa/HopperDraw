@@ -21,8 +21,7 @@ namespace hopperdraw
     {
         private bool _isActivated;
         private bool _drawingModeEnabled;
-        private bool _dKeyDown;
-        private DateTime _lastDKeyTime = DateTime.MinValue;
+        private readonly DrawingKeyGesture _drawingKeyGesture = new DrawingKeyGesture();
         private bool _acceptDrawingMouseUp;
         private static HopperDraw _capturingOwner;
 
@@ -42,6 +41,7 @@ namespace hopperdraw
 
         private GH_Canvas _canvas;
         private bool _eventsRegistered;
+        private DrawingCanvasValidator _drawingCanvasValidator;
 
         private float _lineThickness = 8f;
         private Color _borderColor = Color.Black;
@@ -241,6 +241,9 @@ namespace hopperdraw
             _canvas = Grasshopper.Instances.ActiveCanvas;
             if (_canvas != null)
             {
+                if (_drawingCanvasValidator == null)
+                    _drawingCanvasValidator = new DrawingCanvasValidator(this);
+                _canvas.AddValidator(_drawingCanvasValidator);
                 _canvas.MouseDown += Canvas_MouseDown;
                 _canvas.MouseMove += Canvas_MouseMove;
                 _canvas.MouseUp += Canvas_MouseUp;
@@ -260,9 +263,11 @@ namespace hopperdraw
         private void UnregisterCanvasEvents()
         {
             if (!_eventsRegistered) return;
+            _drawingKeyGesture.Reset(releaseKey: true);
 
             if (_canvas != null)
             {
+                _canvas.RemoveValidator(_drawingCanvasValidator);
                 _canvas.MouseDown -= Canvas_MouseDown;
                 _canvas.MouseMove -= Canvas_MouseMove;
                 _canvas.MouseUp -= Canvas_MouseUp;
@@ -343,11 +348,25 @@ namespace hopperdraw
             return false;
         }
 
+        internal sealed class DrawingCanvasValidator : GH_CanvasValidator
+        {
+            private readonly HopperDraw _owner;
+
+            internal DrawingCanvasValidator(HopperDraw owner) { _owner = owner; }
+
+            public override bool CanShowComponentSearchBox(PointF point)
+            {
+                return !_owner._drawingModeEnabled || !_owner.CanHandleCanvasEvent(Canvas) ||
+                    (Control.ModifierKeys & (Keys.Control | Keys.Alt)) != Keys.None ||
+                    _owner.IsOverGrasshopperObject(new Point3d(point.X, point.Y, 0));
+            }
+        }
+
         private void CancelDrawing()
         {
             if (ReferenceEquals(_capturingOwner, this)) _capturingOwner = null;
             _drawingModeEnabled = false;
-            ResetDrawingKeyGesture();
+            _drawingKeyGesture.Reset();
             _currentPoints.Clear();
             _isDrawing = false;
             _frameCornerCount = 0;
@@ -390,20 +409,14 @@ namespace hopperdraw
             _canvas.Invalidate();
         }
 
-        private void ResetDrawingKeyGesture()
-        {
-            _dKeyDown = false;
-            _lastDKeyTime = DateTime.MinValue;
-        }
-
         private void Canvas_LostFocus(object sender, EventArgs e)
         {
-            ResetDrawingKeyGesture();
+            _drawingKeyGesture.Reset(releaseKey: true);
         }
 
         private void Canvas_KeyUp(object sender, KeyEventArgs e)
         {
-            if (e.KeyCode == Keys.D) _dKeyDown = false;
+            _drawingKeyGesture.KeyUp(e.KeyCode);
             if (CanHandleCanvasEvent(sender) && e.KeyCode == Keys.ShiftKey)
                 _canvas?.Invalidate();
         }
@@ -435,6 +448,8 @@ namespace hopperdraw
 
         private void Canvas_MouseDown(object sender, MouseEventArgs e)
         {
+            // A mouse gesture between D presses starts a separate activation gesture.
+            _drawingKeyGesture.Reset();
             if (!CanHandleCanvasEvent(sender))
                 return;
 
@@ -950,8 +965,12 @@ namespace hopperdraw
 
         private void Canvas_KeyDown(object sender, KeyEventArgs e)
         {
-            if (!CanHandleCanvasEvent(sender))
-                return;
+            if (!ReferenceEquals(sender, _canvas)) return;
+            bool canHandle = CanHandleCanvasEvent(sender);
+            bool doubleD = _drawingKeyGesture.KeyDown(e.KeyCode,
+                canHandle && !e.Handled && e.Modifiers == Keys.None,
+                Environment.TickCount, SystemInformation.DoubleClickTime);
+            if (!canHandle) return;
 
             if (e.KeyCode == Keys.Escape && _drawingModeEnabled)
             {
@@ -961,9 +980,10 @@ namespace hopperdraw
                 e.SuppressKeyPress = true;
                 return;
             }
+            // Ownership can change during the same multicast event (e.g. after Escape).
+            if (e.Handled) return;
             if (e.Modifiers != Keys.None)
             {
-                _lastDKeyTime = DateTime.MinValue;
                 if (e.KeyCode == Keys.ShiftKey) _canvas?.Invalidate();
                 return;
             }
@@ -971,16 +991,9 @@ namespace hopperdraw
             if (e.KeyCode == Keys.D)
             {
                 e.Handled = true; // Keep KeyUp so auto-repeat cannot trigger drawing mode.
-                if (_dKeyDown) return; // Holding D must not count as two presses.
-                _dKeyDown = true;
-                var now = DateTime.UtcNow;
-                bool doublePress = _lastDKeyTime != DateTime.MinValue &&
-                    (now - _lastDKeyTime).TotalMilliseconds <= SystemInformation.DoubleClickTime;
-                _lastDKeyTime = doublePress ? DateTime.MinValue : now;
-                if (doublePress) EnterDrawingMode();
+                if (doubleD) EnterDrawingMode();
                 return;
             }
-            _lastDKeyTime = DateTime.MinValue;
 
             if (e.KeyCode == Keys.Enter)
             {

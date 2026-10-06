@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ShouldRemoveRhinoReferences>false</ShouldRemoveRhinoReferences>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../HopperDraw.cs" Link="HopperDraw.cs" />
+    <Compile Include="../../HopperDrawUIAttributes.cs" Link="HopperDrawUIAttributes.cs" />
+    <Compile Include="../../Shapes/*.cs" Link="Shapes/%(Filename)%(Extension)" />
+    <Compile Include="../../Utilities/*.cs" Link="Utilities/%(Filename)%(Extension)" />
+    <PackageReference Include="Grasshopper" Version="8.0.23304.9001" />
+  </ItemGroup>
+</Project>
