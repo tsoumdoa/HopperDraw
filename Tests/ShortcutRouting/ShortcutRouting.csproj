@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../Utilities/CanvasDrawingShortcut.cs" Link="CanvasDrawingShortcut.cs" />
+    <Compile Include="../../Utilities/DrawingKeyGesture.cs" Link="DrawingKeyGesture.cs" />
+  </ItemGroup>
+</Project>
