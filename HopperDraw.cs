@@ -42,6 +42,7 @@ namespace hopperdraw
         private GH_Canvas _canvas;
         private bool _eventsRegistered;
         private DrawingCanvasValidator _drawingCanvasValidator;
+        private CanvasDrawingShortcut.Registration _drawingShortcut;
 
         private float _lineThickness = 8f;
         private Color _borderColor = Color.Black;
@@ -252,6 +253,8 @@ namespace hopperdraw
                 _canvas.KeyPress += Canvas_KeyPress;
                 _canvas.LostFocus += Canvas_LostFocus;
                 _canvas.DocumentChanged += Canvas_DocumentChanged;
+                if (Environment.OSVersion.Platform == PlatformID.Win32NT)
+                    _drawingShortcut = CanvasDrawingShortcut.Register(_canvas, CanActivateDrawingShortcut, EnterDrawingMode);
                 _eventsRegistered = true;
 
                 _ghDragSyncTimer = new System.Windows.Forms.Timer();
@@ -264,6 +267,8 @@ namespace hopperdraw
         {
             if (!_eventsRegistered) return;
             _drawingKeyGesture.Reset(releaseKey: true);
+            _drawingShortcut?.Dispose();
+            _drawingShortcut = null;
 
             if (_canvas != null)
             {
@@ -304,6 +309,41 @@ namespace hopperdraw
                    ReferenceEquals(sender, _canvas) &&
                    ReferenceEquals(_canvas?.Document, OnPingDocument()) &&
                    IsInputOwner();
+        }
+
+        private bool CanActivateDrawingShortcut()
+        {
+            if (!ReferenceEquals(_canvas, Instances.ActiveCanvas) || !CanHandleCanvasEvent(_canvas) ||
+                !_canvas.ModifiersEnabled || _canvas.ActiveInteraction != null ||
+                _canvas.ActiveWidget != null || _canvas.ActiveObject != null ||
+                _drawMode < 0 || _drawMode > 3) return false;
+
+            // Respect custom Grasshopper navigation and menu bindings for plain D.
+            if (GH_Canvas.NavigationPanLeft == Keys.D || GH_Canvas.NavigationPanRight == Keys.D ||
+                GH_Canvas.NavigationPanUp == Keys.D || GH_Canvas.NavigationPanDown == Keys.D ||
+                GH_Canvas.NavigationZoomIn == Keys.D || GH_Canvas.NavigationZoomOut == Keys.D) return false;
+            var editor = _canvas.FindForm();
+            return editor == null || !HasDrawingShortcut(editor.Controls);
+        }
+
+        private static bool HasDrawingShortcut(Control.ControlCollection controls)
+        {
+            foreach (Control control in controls)
+            {
+                if (control is MenuStrip menu && HasDrawingShortcut(menu.Items)) return true;
+                if (control.HasChildren && HasDrawingShortcut(control.Controls)) return true;
+            }
+            return false;
+        }
+
+        private static bool HasDrawingShortcut(ToolStripItemCollection items)
+        {
+            foreach (ToolStripItem item in items)
+            {
+                if (!(item is ToolStripMenuItem menu)) continue;
+                if (menu.ShortcutKeys == Keys.D || HasDrawingShortcut(menu.DropDownItems)) return true;
+            }
+            return false;
         }
 
         private bool IsInputOwner()
@@ -367,6 +407,7 @@ namespace hopperdraw
             if (ReferenceEquals(_capturingOwner, this)) _capturingOwner = null;
             _drawingModeEnabled = false;
             _drawingKeyGesture.Reset();
+            _drawingShortcut?.Reset();
             _currentPoints.Clear();
             _isDrawing = false;
             _frameCornerCount = 0;
@@ -412,6 +453,7 @@ namespace hopperdraw
         private void Canvas_LostFocus(object sender, EventArgs e)
         {
             _drawingKeyGesture.Reset(releaseKey: true);
+            _drawingShortcut?.Reset();
         }
 
         private void Canvas_KeyUp(object sender, KeyEventArgs e)
@@ -423,6 +465,7 @@ namespace hopperdraw
 
         private void Canvas_KeyPress(object sender, KeyPressEventArgs e)
         {
+            if (_drawingShortcut != null) return;
             if (CanHandleCanvasEvent(sender) && Control.ModifierKeys == Keys.None &&
                 char.ToUpperInvariant(e.KeyChar) == 'D')
                 e.Handled = true;
@@ -450,6 +493,7 @@ namespace hopperdraw
         {
             // A mouse gesture between D presses starts a separate activation gesture.
             _drawingKeyGesture.Reset();
+            _drawingShortcut?.Reset();
             if (!CanHandleCanvasEvent(sender))
                 return;
 
@@ -967,7 +1011,7 @@ namespace hopperdraw
         {
             if (!ReferenceEquals(sender, _canvas)) return;
             bool canHandle = CanHandleCanvasEvent(sender);
-            bool doubleD = _drawingKeyGesture.KeyDown(e.KeyCode,
+            bool doubleD = _drawingShortcut == null && _drawingKeyGesture.KeyDown(e.KeyCode,
                 canHandle && !e.Handled && e.Modifiers == Keys.None,
                 Environment.TickCount, SystemInformation.DoubleClickTime);
             if (!canHandle) return;
@@ -990,6 +1034,9 @@ namespace hopperdraw
 
             if (e.KeyCode == Keys.D)
             {
+                // Windows activation is owned by the HWND hook. A passed-through D
+                // belongs to native GH input (or is outside shortcut eligibility).
+                if (_drawingShortcut != null) return;
                 e.Handled = true; // Keep KeyUp so auto-repeat cannot trigger drawing mode.
                 if (doubleD) EnterDrawingMode();
                 return;
