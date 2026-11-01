@@ -293,8 +293,15 @@ namespace hopperdraw
             Instances.ActiveCanvas?.Invalidate();
         }
 
-        private static bool ContainsOpaque(DrawShape shape) => shape is OpaqueShape ||
-            shape is DrawShapeGroup group && group.Children.Any(ContainsOpaque);
+        private static bool ContainsOpaque(DrawShape shape) => !shape.CanTransformGeometry;
+
+        private bool AllowGeometryEdit(IEnumerable<DrawShape> shapes)
+        {
+            if (!shapes.Any(ContainsOpaque)) return true;
+            AddRuntimeMessage(GH_RuntimeMessageLevel.Warning,
+                "Geometry edit blocked: selection contains unreadable annotation records. Remove the records or use a compatible version first.");
+            return false;
+        }
 
         private void RefreshShapeWarnings()
         {
@@ -324,8 +331,9 @@ namespace hopperdraw
 
         internal void SetSelectedColor(Color color)
         {
-            if (!HasSelection || !RecordShapeUndo("Change annotation color")) return;
-            foreach (var leaf in SelectedLeaves()) leaf.OverrideColor = color;
+            var leaves = SelectedLeaves().Where(leaf => leaf.OverrideColor?.ToArgb() != color.ToArgb()).ToList();
+            if (leaves.Count == 0 || !RecordShapeUndo("Change annotation color")) return;
+            foreach (var leaf in leaves) leaf.OverrideColor = color;
             MarkDocumentModified();
         }
 
@@ -343,6 +351,7 @@ namespace hopperdraw
         {
             if (_dragShapeIndex < 0 || _dragShapeIndex >= Shapes.Count) return;
             var shape = Shapes[_dragShapeIndex];
+            if (!AllowGeometryEdit(new[] { shape })) return;
             if (_dragPointIndex < 0)
             {
                 var offset = _isFrameDragging ? _dragFrameOffset : _dragOffset;
@@ -370,6 +379,7 @@ namespace hopperdraw
 
         private void ApplyDragGeometry(DrawShape shape, Point3d point)
         {
+            if (!AllowGeometryEdit(new[] { shape })) return;
             if (_isFrameDragging && shape is FrameShape frame && _dragPointIndex >= 0)
             {
                 var fixedCorner = GetFrameOppositeCorner(frame, _dragPointIndex);
@@ -513,19 +523,23 @@ namespace hopperdraw
         {
             if (_capturingOwner != null && ReferenceEquals(_capturingOwner.OnPingDocument(), _canvas?.Document))
             {
-                if (!_capturingOwner._isActivated || _capturingOwner.Locked ||
+                if (!_capturingOwner.CanEditShapes || !_capturingOwner._isActivated || _capturingOwner.Locked ||
                     !_capturingOwner.Visible || !_capturingOwner._drawingModeEnabled)
                     _capturingOwner.CancelDrawing();
                 else
                     return ReferenceEquals(_capturingOwner, this);
             }
-            var controllers = _canvas?.Document?.Objects.OfType<HopperDraw>()
-                .Where(controller => controller._isActivated && !controller.Locked && controller.Visible)
-                .ToList();
-            if (controllers == null || controllers.Count == 0) return false;
+            return ReferenceEquals(ChooseInputOwner(_canvas?.Document?.Objects.OfType<HopperDraw>()), this);
+        }
+
+        internal static HopperDraw ChooseInputOwner(IEnumerable<HopperDraw> candidates)
+        {
+            var controllers = candidates?.Where(controller => controller.CanEditShapes && controller._isActivated &&
+                !controller.Locked && controller.Visible).ToList();
+            if (controllers == null || controllers.Count == 0) return null;
             var selected = controllers.FirstOrDefault(controller => controller.Attributes?.Selected == true);
             var editing = controllers.FirstOrDefault(controller => controller.HasSelection);
-            return ReferenceEquals(selected ?? editing ?? controllers[0], this);
+            return selected ?? editing ?? controllers[0];
         }
 
         private bool IsOverGrasshopperObject(Point3d point)
@@ -590,7 +604,7 @@ namespace hopperdraw
         internal void EnterDrawingMode()
         {
             EndShapeGesture();
-            if (!_isActivated || Locked || !Visible || _canvas?.Document == null ||
+            if (!CanEditShapes || !_isActivated || Locked || !Visible || _canvas?.Document == null ||
                 !ReferenceEquals(_canvas.Document, OnPingDocument()) ||
                 _drawMode < 0 || _drawMode > 3) return;
 
@@ -950,6 +964,7 @@ namespace hopperdraw
             }
             else if (_isMultiDragging && HasSelection)
             {
+                if (!AllowGeometryEdit(SelectedShapeIndices.Select(i => Shapes[i]))) return;
                 double dx = pt.X - _multiDragStart.X, dy = pt.Y - _multiDragStart.Y;
                 if ((dx == 0 && dy == 0) ||
                     SelectedShapeIndices.SelectMany(i => GeometryPoints(Shapes[i])).Any(p =>
@@ -1205,6 +1220,13 @@ namespace hopperdraw
                 RequestCanvasRedraw();
             }) { Enabled = Shapes.Count > 0 });
 
+            menu.Items.Add(new ToolStripMenuItem("Select unreadable annotation records", null, (s, e) =>
+            {
+                ClearSelection();
+                for (int i = 0; i < Shapes.Count; i++) if (Shapes[i] is OpaqueShape) SelectedShapeIndices.Add(i);
+                RequestCanvasRedraw();
+            }) { Enabled = Shapes.Any(shape => shape is OpaqueShape) });
+
             var thicknessMenu = new ToolStripMenuItem("Shape thickness");
             thicknessMenu.DropDownItems.Add("0.5x", null, (s, e) => SetThicknessMultiplier(0.5f));
             thicknessMenu.DropDownItems.Add("1x", null, (s, e) => SetThicknessMultiplier(1.0f));
@@ -1233,8 +1255,10 @@ namespace hopperdraw
         {
             if (HasSelection)
             {
-                if (!RecordShapeUndo("Change annotation thickness")) return;
-                foreach (var leaf in SelectedLeaves()) leaf.ThicknessMultiplier = multiplier;
+                multiplier = StyleValidation.Multiplier(multiplier);
+                var leaves = SelectedLeaves().Where(leaf => leaf.ThicknessMultiplier != multiplier).ToList();
+                if (leaves.Count == 0 || !RecordShapeUndo("Change annotation thickness")) return;
+                foreach (var leaf in leaves) leaf.ThicknessMultiplier = multiplier;
                 MarkDocumentModified();
             }
             else
@@ -1248,8 +1272,9 @@ namespace hopperdraw
         {
             if (HasSelection)
             {
-                if (!RecordShapeUndo("Change annotation line type")) return;
-                foreach (var leaf in SelectedLeaves())
+                var leaves = SelectedLeaves().ToList();
+                if (leaves.Count == 0 || !RecordShapeUndo("Change annotation line type")) return;
+                foreach (var leaf in leaves)
                     leaf.LineType = (DashStyle)(((int)StyleValidation.SafeDash(leaf.LineType) + 1) % 5);
                 MarkDocumentModified();
             }

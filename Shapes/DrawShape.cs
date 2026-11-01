@@ -15,6 +15,8 @@ namespace hopperdraw
         public Color? OverrideColor { get; set; }
         public DashStyle LineType { get; set; } = DashStyle.Solid;
 
+        internal virtual bool CanTransformGeometry => true;
+
         public abstract void Render(Graphics g, Pen pen, float thickness);
         public abstract (bool hit, int pointIndex) HitTest(PointF pt, float tolerance, float thickness);
         public abstract PointF[] GetPoints();

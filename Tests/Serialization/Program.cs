@@ -241,6 +241,7 @@ internal static class Program
             Check(pasted.Shapes[0].PersistentId != id && RoundTrip(pasted, true).Shapes[0].PersistentId == pasted.Shapes[0].PersistentId, "opaque v1 paste identity not rekeyed");
         });
         ReliabilityTests.Run();
+        Review2Tests.Run();
         return Finish();
     }
     private static int Finish()

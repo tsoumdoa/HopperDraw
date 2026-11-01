@@ -38,7 +38,7 @@ namespace hopperdraw
             }
         }
 
-        internal static void Handles(Graphics graphics, DrawShape shape, int hoveredPoint, bool selected, float scale)
+        internal static void Handles(Graphics graphics, DrawShape shape, int hoveredPoint, bool selected, float scale, bool drawOutline = true)
         {
             try
             {
@@ -55,7 +55,7 @@ namespace hopperdraw
                         graphics.FillRectangle(brush, pt.X - size / 2, pt.Y - size / 2, size, size);
                         graphics.DrawRectangle(pen, pt.X - size / 2, pt.Y - size / 2, size, size);
                     }
-                    if (selected && points.Length > 1)
+                    if (selected && drawOutline && points.Length > 1)
                     {
                         pen.Width = scale;
                         pen.DashStyle = System.Drawing.Drawing2D.DashStyle.Dash;

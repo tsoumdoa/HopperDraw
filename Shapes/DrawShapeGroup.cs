@@ -11,6 +11,7 @@ namespace hopperdraw
     {
         public List<DrawShape> Children { get; } = new List<DrawShape>();
         protected override int ShapeType => 4;
+        internal override bool CanTransformGeometry => Children.All(child => child.CanTransformGeometry);
         public override void Render(Graphics g, Pen pen, float thickness)
         {
             foreach (var child in Children) ShapeRenderer.Render(g, child, pen.Color, thickness);
@@ -46,8 +47,15 @@ namespace hopperdraw
             return found; // Zero width/height is valid geometry, independently of RectangleF.IsEmpty.
         }
         internal RectangleF GetBoundingBox() { TryGetBoundingBox(out var bounds); return bounds; }
-        public override void Move(double dx, double dy) { foreach (var child in Children) child.Move(dx, dy); }
-        public override void MovePoint(int pointIndex, Point3d newPos) { }
+        public override void Move(double dx, double dy)
+        {
+            if (!CanTransformGeometry) throw new InvalidOperationException("Cannot transform a group containing unreadable annotation records.");
+            foreach (var child in Children) child.Move(dx, dy);
+        }
+        public override void MovePoint(int pointIndex, Point3d newPos)
+        {
+            if (!CanTransformGeometry) throw new InvalidOperationException("Cannot edit handles in a group containing unreadable annotation records.");
+        }
         public override DrawShape Clone()
         {
             var group = new DrawShapeGroup { Id = HopperDraw.GetNextId() };

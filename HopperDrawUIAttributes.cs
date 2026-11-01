@@ -54,7 +54,7 @@ namespace hopperdraw
                     preview.LineType = owner.CurrentLineType;
                     ShapeRenderer.Render(graphics, preview, owner.BorderColor, owner.LineThickness);
                     if (owner.DrawMode == 1 || owner.DrawMode == 3)
-                        ShapeRenderer.Handles(graphics, preview, -1, true, owner.CanvasScale);
+                        ShapeRenderer.Handles(graphics, preview, -1, true, owner.CanvasScale, drawOutline: false);
                 }
             }
             foreach (int index in owner.SelectedShapeIndices)
