@@ -109,6 +109,11 @@ internal static class Program
     [STAThread]
     private static int Main()
     {
+        if (Array.IndexOf(Environment.GetCommandLineArgs(), "--failure-exit-probe") >= 0)
+        {
+            Run("intentional failure exit probe", () => Check(false, "Intentional failure to verify process exit status."));
+            return Finish();
+        }
         using (var form = new Form { KeyPreview = true, ShowInTaskbar = false, StartPosition = FormStartPosition.Manual, Location = new Point(-32000, -32000) })
         using (var canvas = new Canvas { Size = new Size(200, 150) })
         using (var text = new TextBox { Location = new Point(0, 160) })
@@ -325,6 +330,10 @@ internal static class Program
             }));
             Application.Run(form);
         }
+        return Finish();
+    }
+    private static int Finish()
+    {
         Console.WriteLine(_failures + " failure(s)");
         return _failures == 0 ? 0 : 1;
     }
