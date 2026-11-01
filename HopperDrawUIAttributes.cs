@@ -1,9 +1,6 @@
-using Grasshopper;
-using Grasshopper.Kernel;
 using Grasshopper.Kernel.Attributes;
 using Grasshopper.GUI;
 using Grasshopper.GUI.Canvas;
-using Rhino;
 using Rhino.Geometry;
 using System;
 using System.Collections.Generic;
@@ -15,11 +12,7 @@ namespace hopperdraw
 {
     public class HopperDrawUIAttributes : GH_ComponentAttributes
     {
-        private Point3d _previewPoint = Point3d.Unset;
-
-        public HopperDrawUIAttributes(HopperDraw owner) : base(owner)
-        {
-        }
+        public HopperDrawUIAttributes(HopperDraw owner) : base(owner) { }
 
         protected override void Layout()
         {
@@ -27,259 +20,68 @@ namespace hopperdraw
             Bounds = new RectangleF(Bounds.X, Bounds.Y, Bounds.Width + 10, Bounds.Height + 24);
         }
 
-        protected override void Render(
-            GH_Canvas canvas,
-            Graphics graphics,
-            GH_CanvasChannel channel
-        )
+        protected override void Render(GH_Canvas canvas, Graphics graphics, GH_CanvasChannel channel)
         {
             base.Render(canvas, graphics, channel);
-
-            if (channel != GH_CanvasChannel.Objects)
-                return;
-
+            if (channel != GH_CanvasChannel.Objects) return;
             var owner = (HopperDraw)Owner;
-            var modeNames = new[] { "Line", "Polyline", "Frame", "Curve" };
-            var modeText = owner.DrawMode >= 0 && owner.DrawMode < modeNames.Length ? modeNames[owner.DrawMode] : "Unknown";
-            if (owner.DrawingModeEnabled) modeText += " ON";
-
+            var names = new[] { "Line", "Polyline", "Frame", "Curve" };
+            string text = names[StyleValidation.Clamp(owner.DrawMode, 0, 3)] + (owner.DrawingModeEnabled ? " ON" : "");
             var footer = new RectangleF(Bounds.X + 4, Bounds.Bottom - 22, Bounds.Width - 8, 18);
-
-            using (var capsule = GH_Capsule.CreateTextCapsule(
-                footer,
-                footer,
-                owner.DrawingModeEnabled ? GH_Palette.Blue : GH_Palette.Black,
-                modeText,
-                2,
-                0
-            ))
-            {
+            using (var capsule = GH_Capsule.CreateTextCapsule(footer, footer,
+                owner.DrawingModeEnabled ? GH_Palette.Blue : GH_Palette.Black, text, 2, 0))
                 capsule.Render(graphics, Selected, Owner.Locked, false);
-            }
 
-            _previewPoint = Point3d.Unset;
-            if (canvas != null)
+            if (owner.Locked || !owner.Visible) return;
+            foreach (var shape in owner.Shapes) ShapeRenderer.Render(graphics, shape, owner.BorderColor, owner.LineThickness);
+            if (owner.IsActivated && owner.IsDrawing)
             {
-                var mousePos = System.Windows.Forms.Control.MousePosition;
-                var screenPt = canvas.PointToClient(mousePos);
-                if (canvas.Viewport != null)
+                var point = owner.DrawEnd;
+                if (canvas?.Viewport != null)
                 {
-                    var unprojected = canvas.Viewport.UnprojectPoint(screenPt);
-                    _previewPoint = new Point3d(unprojected.X, unprojected.Y, 0);
+                    var mouse = canvas.Viewport.UnprojectPoint(canvas.PointToClient(Control.MousePosition));
+                    point = new Point3d(mouse.X, mouse.Y, 0);
+                }
+                var preview = BuildPreview(owner, point);
+                if (preview != null)
+                {
+                    preview.ThicknessMultiplier = owner.CurrentThicknessMultiplier;
+                    preview.OverrideColor = owner.PendingColorOverride;
+                    preview.LineType = owner.CurrentLineType;
+                    ShapeRenderer.Render(graphics, preview, owner.BorderColor, owner.LineThickness);
+                    if (owner.DrawMode == 1 || owner.DrawMode == 3)
+                        ShapeRenderer.Handles(graphics, preview, -1, true, 1);
                 }
             }
-
-            if (!owner.Locked && owner.IsActivated && owner.Visible)
-            {
-                float effectiveThickness = owner.LineThickness * owner.CurrentThicknessMultiplier;
-                Color effectiveColor = owner.PendingColorOverride ?? owner.BorderColor;
-
-                using (var pen = new Pen(effectiveColor, effectiveThickness))
-                {
-                    pen.DashStyle = owner.CurrentLineType;
-                    if (owner.DrawMode == 0 && owner.IsDrawing && owner.DrawStart.IsValid && owner.DrawEnd.IsValid)
-                    {
-                        Point3d end = owner.DrawEnd;
-
-                        bool shiftPressed = (Control.ModifierKeys & Keys.Shift) == Keys.Shift;
-                        if (shiftPressed)
-                        {
-                            end = GeometryUtilities.SnapOrthogonal(owner.DrawStart, owner.DrawEnd);
-                        }
-
-                        graphics.DrawLine(pen,
-                            (float)owner.DrawStart.X, (float)owner.DrawStart.Y,
-                            (float)end.X, (float)end.Y);
-                    }
-                    else if (owner.DrawMode == 1 && owner.IsDrawing && owner.CurrentPoints.Count > 0)
-                    {
-                        var pts = owner.CurrentPoints;
-
-                        if (pts.Count >= 2)
-                        {
-                            var points = pts.ToPointFArray();
-                            graphics.DrawLines(pen, points);
-                        }
-
-                        if (_previewPoint.IsValid && pts.Count > 0)
-                        {
-                            var lastPt = pts[pts.Count - 1];
-                            Point3d endPt = _previewPoint;
-
-                            bool shiftPressed = (Control.ModifierKeys & Keys.Shift) == Keys.Shift;
-                            if (shiftPressed)
-                            {
-                                endPt = GeometryUtilities.SnapOrthogonal(lastPt, _previewPoint);
-                            }
-
-                            graphics.DrawLine(pen,
-                                (float)lastPt.X, (float)lastPt.Y,
-                                (float)endPt.X, (float)endPt.Y);
-                        }
-
-                        foreach (var p in pts)
-                        {
-                            graphics.FillRectangle(new SolidBrush(Color.White), (float)p.X - 4, (float)p.Y - 4, 8, 8);
-                            graphics.DrawRectangle(new Pen(Color.FromArgb(200, 0, 120, 215), 2), (int)p.X - 4, (int)p.Y - 4, 8, 8);
-                        }
-                    }
-                    else if (owner.DrawMode == 3 && owner.IsDrawing && owner.CurrentPoints.Count > 0)
-                    {
-                        var pts = owner.CurrentPoints;
-
-                        if (_previewPoint.IsValid && pts.Count > 0)
-                        {
-                            var lastPt = pts[pts.Count - 1];
-                            Point3d endPt = _previewPoint;
-
-                            bool shiftPressed = (Control.ModifierKeys & Keys.Shift) == Keys.Shift;
-                            if (shiftPressed)
-                            {
-                                endPt = GeometryUtilities.SnapOrthogonal(lastPt, _previewPoint);
-                            }
-
-                            var previewPoints = new List<PointF>();
-                            previewPoints.AddRange(pts.ToPointFArray());
-                            previewPoints.Add(endPt.ToPointF());
-
-                            if (previewPoints.Count >= 2)
-                            {
-                                graphics.DrawCurve(pen, previewPoints.ToArray(), 0.5f);
-                            }
-                        }
-                        else if (pts.Count >= 2)
-                        {
-                            var points = pts.ToPointFArray();
-                            graphics.DrawCurve(pen, points, 0.5f);
-                        }
-
-                        foreach (var p in pts)
-                        {
-                            graphics.FillRectangle(new SolidBrush(Color.White), (float)p.X - 4, (float)p.Y - 4, 8, 8);
-                            graphics.DrawRectangle(new Pen(Color.FromArgb(200, 0, 120, 215), 2), (int)p.X - 4, (int)p.Y - 4, 8, 8);
-                        }
-
-                        if (_previewPoint.IsValid)
-                        {
-                            graphics.FillRectangle(new SolidBrush(Color.Yellow), (float)_previewPoint.X - 4, (float)_previewPoint.Y - 4, 8, 8);
-                            graphics.DrawRectangle(new Pen(Color.FromArgb(200, 0, 120, 215), 2), (int)_previewPoint.X - 4, (int)_previewPoint.Y - 4, 8, 8);
-                        }
-                    }
-                    else if (owner.DrawMode == 2 && owner.IsDrawing && owner.FrameFirstCorner.IsValid && _previewPoint.IsValid)
-                    {
-                        var corner1 = owner.FrameFirstCorner;
-                        var corner2 = _previewPoint;
-
-                        bool shiftPressed = (Control.ModifierKeys & Keys.Shift) == Keys.Shift;
-                        if (shiftPressed)
-                        {
-                            double dx = corner2.X - corner1.X;
-                            double dy = corner2.Y - corner1.Y;
-                            double size = Math.Max(Math.Abs(dx), Math.Abs(dy));
-                            corner2 = new Point3d(
-                                corner1.X + size * Math.Sign(dx),
-                                corner1.Y + size * Math.Sign(dy),
-                                0);
-                        }
-
-                        var topLeft = new PointF((float)Math.Min(corner1.X, corner2.X), (float)Math.Max(corner1.Y, corner2.Y));
-                        var topRight = new PointF((float)Math.Max(corner1.X, corner2.X), (float)Math.Max(corner1.Y, corner2.Y));
-                        var bottomRight = new PointF((float)Math.Max(corner1.X, corner2.X), (float)Math.Min(corner1.Y, corner2.Y));
-                        var bottomLeft = new PointF((float)Math.Min(corner1.X, corner2.X), (float)Math.Min(corner1.Y, corner2.Y));
-
-                        var points = new PointF[] { topLeft, topRight, bottomRight, bottomLeft, topLeft };
-                        graphics.DrawPolygon(pen, points);
-                    }
-                }
-            }
-
-            if (!owner.Locked && owner.Visible)
-            {
-                foreach (var shape in owner.Shapes)
-                {
-                    float effectiveThickness = owner.LineThickness * shape.ThicknessMultiplier;
-                    Color effectiveColor = shape.OverrideColor ?? owner.BorderColor;
-                    using (var pen = new Pen(effectiveColor, effectiveThickness))
-                    {
-                        pen.DashStyle = shape.LineType;
-                        shape.Render(graphics, pen, effectiveThickness);
-                    }
-                }
-
-                if (owner.HasSelection)
-                {
-                    foreach (var shapeIdx in owner.SelectedShapeIndices)
-                    {
-                        if (shapeIdx >= 0 && shapeIdx < owner.Shapes.Count)
-                        {
-                            var selectedShape = owner.Shapes[shapeIdx];
-                            float selectedThickness = owner.LineThickness * selectedShape.ThicknessMultiplier;
-                            RenderSelectionHandles(graphics, selectedShape, -1, selectedThickness);
-                        }
-                    }
-                }
-
-                if (owner.HoveredShapeIndex >= 0 && owner.HoveredShapeIndex < owner.Shapes.Count)
-                {
-                    var hoveredShape = owner.Shapes[owner.HoveredShapeIndex];
-                    float hoveredThickness = owner.LineThickness * hoveredShape.ThicknessMultiplier;
-                    RenderHoverHandles(graphics, hoveredShape, owner.HoveredPointIndex, hoveredThickness);
-                }
-            }
+            foreach (int index in owner.SelectedShapeIndices)
+                if (index >= 0 && index < owner.Shapes.Count) ShapeRenderer.Handles(graphics, owner.Shapes[index], -1, true, 1);
+            if (owner.HoveredShapeIndex >= 0 && owner.HoveredShapeIndex < owner.Shapes.Count)
+                ShapeRenderer.Handles(graphics, owner.Shapes[owner.HoveredShapeIndex], owner.HoveredPointIndex, false, 1);
         }
 
-        private void RenderSelectionHandles(Graphics g, DrawShape shape, int selectedPointIndex, float thickness)
+        internal static DrawShape BuildPreview(HopperDraw owner, Point3d point)
         {
-            if (shape is DrawShapeGroup group)
+            if (owner.DrawMode == 0)
+                return new LineShape(owner.DrawStart, owner.ShiftPressed ? GeometryUtilities.SnapOrthogonal(owner.DrawStart, point) : point);
+            if (owner.DrawMode == 1 || owner.DrawMode == 3)
             {
-                var bbox = group.GetBoundingBox();
-                using (var selPen = new Pen(Color.FromArgb(200, 0, 120, 215), 1))
-                {
-                    selPen.DashStyle = System.Drawing.Drawing2D.DashStyle.Dash;
-                    selPen.DashPattern = new float[] { 5, 5 };
-                    g.DrawRectangle(selPen, bbox.X, bbox.Y, bbox.Width, bbox.Height);
-                }
-                return;
+                var points = new List<Point3d>(owner.CurrentPoints);
+                if (points.Count > 0 && point.IsValid)
+                    points.Add(owner.ShiftPressed ? GeometryUtilities.SnapOrthogonal(points.Last(), point) : point);
+                return owner.DrawMode == 1 ? (DrawShape)new PolylineShape(points) : new CurveShape(points);
             }
-
-            var points = shape.GetPoints();
-            using (var handleBrush = new SolidBrush(Color.White))
-            using (var handlePen = new Pen(Color.FromArgb(200, 0, 120, 215), 2))
+            if (owner.DrawMode == 2)
             {
-                for (int i = 0; i < points.Length; i++)
+                var first = owner.FrameFirstCorner;
+                if (owner.ShiftPressed)
                 {
-                    var pt = points[i];
-                    g.FillRectangle(handleBrush, pt.X - 4, pt.Y - 4, 8, 8);
-                    g.DrawRectangle(handlePen, (int)pt.X - 4, (int)pt.Y - 4, 8, 8);
+                    double dx = point.X - first.X, dy = point.Y - first.Y;
+                    double size = Math.Max(Math.Abs(dx), Math.Abs(dy));
+                    point = new Point3d(first.X + size * Math.Sign(dx), first.Y + size * Math.Sign(dy), 0);
                 }
+                return new FrameShape(first, new Point3d(point.X, first.Y, 0), point, new Point3d(first.X, point.Y, 0));
             }
-            using (var selPen = new Pen(Color.FromArgb(200, 0, 120, 215), 1))
-            {
-                selPen.DashStyle = System.Drawing.Drawing2D.DashStyle.Dash;
-                if (points.Length > 1)
-                {
-                    if (shape is FrameShape || shape is PolylineShape poly && poly.Closed)
-                        g.DrawPolygon(selPen, points);
-                    else
-                        g.DrawLines(selPen, points);
-                }
-            }
-        }
-
-        private void RenderHoverHandles(Graphics g, DrawShape shape, int hoveredPointIndex, float thickness)
-        {
-            var points = shape.GetPoints();
-            using (var hoverBrush = new SolidBrush(Color.FromArgb(100, 0, 120, 215)))
-            {
-                for (int i = 0; i < points.Length; i++)
-                {
-                    if (i == hoveredPointIndex)
-                    {
-                        var pt = points[i];
-                        g.FillRectangle(hoverBrush, pt.X - 4, pt.Y - 4, 8, 8);
-                    }
-                }
-            }
+            return null;
         }
     }
 }

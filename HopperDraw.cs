@@ -73,7 +73,8 @@ namespace hopperdraw
 
         public List<DrawShape> Shapes { get; set; } = new List<DrawShape>();
         public Color BorderColor { get; set; } = Color.Black;
-        public float LineThickness { get; set; } = 8f;
+        private float _validatedThickness = 8f;
+        public float LineThickness { get => _validatedThickness; set => _validatedThickness = StyleValidation.Width(value); }
         public int DrawOrder { get; set; } = 1;
         public bool Visible { get; set; } = true;
 
@@ -181,9 +182,15 @@ namespace hopperdraw
             int lineType = 0;
             DA.GetData(5, ref lineType);
 
-            int drawOrder = 0;
+            int drawOrder = 1;
             DA.GetData(6, ref drawOrder);
 
+            drawMode = ValidateRange("DrawMode", drawMode, 0, 3);
+            lineType = ValidateRange("LineType", lineType, 0, 4);
+            drawOrder = ValidateRange("DrawOrder", drawOrder, 0, 1);
+            if (!StyleValidation.ValidWidth(thickness))
+                AddRuntimeMessage(GH_RuntimeMessageLevel.Warning, "Thickness must be finite and between 0.1 and 1000 canvas units; clamped/defaulted.");
+            thickness = StyleValidation.Width(thickness);
             _borderColor = color;
             _lineThickness = (float)thickness;
             if (_drawMode != drawMode && (_isDrawing || _drawingModeEnabled)) CancelDrawing();
@@ -224,6 +231,13 @@ namespace hopperdraw
             DrawOrder = drawOrder;
 
             ExpirePreview(false);
+        }
+
+        private int ValidateRange(string name, int value, int minimum, int maximum)
+        {
+            if (value < minimum || value > maximum)
+                AddRuntimeMessage(GH_RuntimeMessageLevel.Warning, name + " must be between " + minimum + " and " + maximum + "; clamped.");
+            return StyleValidation.Clamp(value, minimum, maximum);
         }
 
         private void MarkDocumentModified()
@@ -1437,11 +1451,13 @@ namespace hopperdraw
                     payload.TryGetInt32("DrawOrder", ref order);
                     payload.TryGetBoolean("Visible", ref visible);
                     BorderColor = Color.FromArgb(color);
-                    LineThickness = (float)width;
+                    bool invalidStyle = !StyleValidation.ValidWidth(width) || order < 0 || order > 1;
+                    LineThickness = StyleValidation.Width(width);
                     _lineThickness = LineThickness;
-                    DrawOrder = order;
+                    DrawOrder = StyleValidation.Clamp(order, 0, 1);
                     Visible = visible;
                     Shapes = ShapeSerializer.ReadShapeList(payload, "Shapes", out var diagnostics);
+                    if (invalidStyle) diagnostics.Add("Invalid component style clamped/defaulted for safe paint.");
                     if (diagnostics.Count > 0) _loadWarning = string.Join(" ", diagnostics);
                 }
             }

@@ -10,7 +10,8 @@ namespace hopperdraw
     {
         public int Id { get; set; }
         public Guid PersistentId { get; internal set; } = Guid.NewGuid();
-        public float ThicknessMultiplier { get; set; } = 1.0f;
+        private float _thicknessMultiplier = 1f;
+        public float ThicknessMultiplier { get => _thicknessMultiplier; set => _thicknessMultiplier = StyleValidation.Multiplier(value); }
         public Color? OverrideColor { get; set; }
         public DashStyle LineType { get; set; } = DashStyle.Solid;
 

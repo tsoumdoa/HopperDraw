@@ -163,7 +163,7 @@ namespace hopperdraw
             reader.TryGetDouble("ThickMult", ref multiplier);
             reader.TryGetInt32("LineType", ref dash);
             reader.TryGetBoolean("HasColor", ref hasColor);
-            if (double.IsNaN(multiplier) || double.IsInfinity(multiplier) || multiplier <= 0 || multiplier > 1000 || dash < 0 || dash > 4)
+            if (!StyleValidation.ValidMultiplier(multiplier) || dash < 0 || dash > 4)
                 throw new FormatException("Invalid annotation style.");
             shape.ThicknessMultiplier = (float)multiplier;
             shape.LineType = (DashStyle)dash;
