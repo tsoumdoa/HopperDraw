@@ -1,3 +1,5 @@
 <Solution>
   <Project Path="hopperborder.csproj" />
+  <Project Path="Tests/InputRegression/InputRegression.csproj" />
+  <Project Path="Tests/ShortcutRouting/ShortcutRouting.csproj" />
 </Solution>
