@@ -40,7 +40,7 @@ internal static class Program
         Check(copy.ExtractObject(result, "Annotation"), "extract failed");
         return result;
     }
-    private static string Fingerprint(DrawShape shape)
+    internal static string Fingerprint(DrawShape shape)
     {
         if (shape is OpaqueShape o) return o.Payload.Serialize_Xml();
         return shape.GetType().Name + shape.PersistentId + ":" + shape.ThicknessMultiplier + ":" + shape.LineType + ":" + shape.OverrideColor?.ToArgb() +

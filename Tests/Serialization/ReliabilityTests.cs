@@ -13,6 +13,65 @@ internal static class ReliabilityTests
 {
     internal static void Run()
     {
+        Program.Test("snapshot undo swaps each mutation without losing IDs or selection state", () =>
+        {
+            Action<HopperDraw>[] edits = {
+                c => c.Shapes.Add(new LineShape(new Point3d(3, 4, 0), new Point3d(9, 8, 0))),
+                c => Invoke(c, "DeleteSelectedShapes"),
+                c => c.ClearAll(),
+                c => Invoke(c, "SetThicknessMultiplier", 3f),
+                c => Invoke(c, "CycleLineType"),
+                c => c.SetSelectedColor(Color.Blue),
+                c => c.GroupSelectedShapes(),
+                c => { c.GroupSelectedShapes(); c.UngroupSelectedGroups(); },
+                c => Invoke(c, "DuplicateSelectedShapes"),
+                c => c.Shapes[0].Move(30, 40),
+                c => c.Shapes[0].MovePoint(0, new Point3d(123, 456, 0))
+            };
+            foreach (var edit in edits)
+            {
+                var c = new HopperDraw();
+                c.Shapes.Add(new LineShape(new Point3d(10, 10, 0), new Point3d(100, 10, 0)));
+                c.Shapes.Add(new LineShape(new Point3d(10, 30, 0), new Point3d(100, 30, 0)));
+                c.SelectedShapeIndices.AddRange(new[] { 0, 1 });
+                string before = string.Join("|", c.Shapes.Select(Program.Fingerprint));
+                var action = new ShapeEditUndoAction(c, Enumerable.Empty<IGH_DocumentObject>());
+                Program.Check(!action.ExpiresSolution && !action.ExpiresDisplay, "undo expires solution/display");
+                edit(c);
+                string after = string.Join("|", c.Shapes.Select(Program.Fingerprint));
+                action.Swap(null, c);
+                Program.Check(string.Join("|", c.Shapes.Select(Program.Fingerprint)) == before && !c.HasSelection, "undo changed original snapshot");
+                action.Swap(null, c);
+                Program.Check(string.Join("|", c.Shapes.Select(Program.Fingerprint)) == after && !c.HasSelection, "redo changed edited snapshot");
+            }
+        });
+        Program.Test("opaque records survive undo snapshots and warnings resolve after clear", () =>
+        {
+            var c = new HopperDraw(); c.Shapes.Add(new LineShape(new Point3d(10, 10, 0), new Point3d(100, 10, 0)));
+            var root = Program.Save(c); ((GH_IWriter)root.FindChunk("HopperDraw").FindChunk("Shapes").FindChunk("Shape", 0)).RemoveItem("X");
+            c = Program.Load(root);
+            string before = Program.Fingerprint(c.Shapes[0]);
+            var action = new ShapeEditUndoAction(c, Enumerable.Empty<IGH_DocumentObject>());
+            c.ClearAll(); Program.Check(c.LoadWarning == null && c.RuntimeMessages(GH_RuntimeMessageLevel.Warning).Count == 0, "resolved warning remains");
+            action.Swap(null, c); Program.Check(Program.Fingerprint(c.Shapes[0]) == before && c.LoadWarning != null, "opaque snapshot not exact");
+        });
+        Program.Test("drag snapshots require real geometry changes and reset on interruption", () =>
+        {
+            var c = new HopperDraw(); c.Shapes.Add(new LineShape(new Point3d(10, 10, 0), new Point3d(100, 10, 0)));
+            Set(c, "_dragShapeIndex", 0); Set(c, "_dragPointIndex", -1); Set(c, "_dragOffset", new Point3d(50, 10, 0)); Set(c, "_isDragging", true);
+            Invoke(c, "DragShapeTo", new Point3d(50, 10, 0)); Program.Check(!(bool)Get(c, "_dragUndoRecorded"), "same-position event recorded undo");
+            Invoke(c, "DragShapeTo", new Point3d(60, 10, 0)); Program.Check((bool)Get(c, "_dragUndoRecorded"), "movement not recorded");
+            foreach (string method in new[] { "CancelDrawing", "Canvas_LostFocus", "Canvas_MouseCaptureChanged", "EndShapeGesture" })
+            {
+                Set(c, "_dragUndoRecorded", true); Set(c, "_isDragging", true);
+                if (method.StartsWith("Canvas_")) Invoke(c, method, null, EventArgs.Empty); else Invoke(c, method);
+                Program.Check(!(bool)Get(c, "_dragUndoRecorded") && !(bool)Get(c, "_isDragging"), "gesture survived " + method);
+            }
+            Set(c, "_dragShapeIndex", 0); Set(c, "_dragPointIndex", 0); Set(c, "_isDragging", true);
+            var line = (LineShape)c.Shapes[0]; Invoke(c, "DragShapeTo", line.Start); Program.Check(!(bool)Get(c, "_dragUndoRecorded"), "unchanged handle recorded undo");
+            Invoke(c, "DragShapeTo", new Point3d(30, 30, 0)); Program.Check((bool)Get(c, "_dragUndoRecorded"), "second gesture lost undo");
+            c.RestoreShapes(ShapeEditUndoAction.Snapshot(c.Shapes)); Program.Check(!(bool)Get(c, "_dragUndoRecorded"), "restore retained drag marker");
+        });
         Program.Test("group order, child styles, clone styles and reference-based ungroup selection", () =>
         {
             var c = new HopperDraw();
@@ -102,4 +161,7 @@ internal static class ReliabilityTests
             }
         });
     }
+    private static object Get(HopperDraw c, string field) => typeof(HopperDraw).GetField(field, BindingFlags.Instance | BindingFlags.NonPublic).GetValue(c);
+    private static void Set(HopperDraw c, string field, object value) => typeof(HopperDraw).GetField(field, BindingFlags.Instance | BindingFlags.NonPublic).SetValue(c, value);
+    private static void Invoke(HopperDraw c, string method, params object[] args) => typeof(HopperDraw).GetMethod(method, BindingFlags.Instance | BindingFlags.NonPublic).Invoke(c, args);
 }
