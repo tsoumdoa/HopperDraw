@@ -50,13 +50,13 @@ namespace hopperdraw
                     preview.LineType = owner.CurrentLineType;
                     ShapeRenderer.Render(graphics, preview, owner.BorderColor, owner.LineThickness);
                     if (owner.DrawMode == 1 || owner.DrawMode == 3)
-                        ShapeRenderer.Handles(graphics, preview, -1, true, 1);
+                        ShapeRenderer.Handles(graphics, preview, -1, true, owner.CanvasScale);
                 }
             }
             foreach (int index in owner.SelectedShapeIndices)
-                if (index >= 0 && index < owner.Shapes.Count) ShapeRenderer.Handles(graphics, owner.Shapes[index], -1, true, 1);
+                if (index >= 0 && index < owner.Shapes.Count) ShapeRenderer.Handles(graphics, owner.Shapes[index], -1, true, owner.CanvasScale);
             if (owner.HoveredShapeIndex >= 0 && owner.HoveredShapeIndex < owner.Shapes.Count)
-                ShapeRenderer.Handles(graphics, owner.Shapes[owner.HoveredShapeIndex], owner.HoveredPointIndex, false, 1);
+                ShapeRenderer.Handles(graphics, owner.Shapes[owner.HoveredShapeIndex], owner.HoveredPointIndex, false, owner.CanvasScale);
         }
 
         internal static DrawShape BuildPreview(HopperDraw owner, Point3d point)

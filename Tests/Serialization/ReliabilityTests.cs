@@ -2,6 +2,7 @@ using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Reflection;
+using System.Linq;
 using GH_IO.Serialization;
 using Grasshopper.GUI.Canvas;
 using Grasshopper.Kernel;
@@ -12,6 +13,47 @@ internal static class ReliabilityTests
 {
     internal static void Run()
     {
+        Program.Test("group order, child styles, clone styles and reference-based ungroup selection", () =>
+        {
+            var c = new HopperDraw();
+            foreach (var color in new[] { Color.Red, Color.Green, Color.Blue, Color.Black })
+                c.Shapes.Add(new LineShape(new Point3d(10, 10, 0), new Point3d(100, 10, 0)) { OverrideColor = color, ThicknessMultiplier = 2, LineType = DashStyle.Dot });
+            var red = c.Shapes[0]; var blue = c.Shapes[2]; var black = c.Shapes[3];
+            c.SelectedShapeIndices.AddRange(new[] { 2, 0 }); var group = c.GroupSelectedShapes();
+            Program.Check(c.Shapes.IndexOf(group) == 1 && group.Children.SequenceEqual(new[] { red, blue }) && c.Shapes[2] == black, "group order changed");
+            var clone = (DrawShapeGroup)group.Clone();
+            Program.Check(clone.Children[1].OverrideColor == Color.Blue && clone.Children[1].ThicknessMultiplier == 2 && clone.Children[1].LineType == DashStyle.Dot, "clone styles lost");
+            c.Shapes.Insert(0, clone); c.SelectedShapeIndices.Clear(); c.SelectedShapeIndices.AddRange(new[] { 0, 2, 3 });
+            c.UngroupSelectedGroups();
+            Program.Check(c.SelectedShapeIndices.SequenceEqual(new[] { 0, 1, 3, 4, 5 }) && c.Shapes[5] == black, "ungroup selection shifted");
+        });
+        Program.Test("horizontal, vertical, coincident and nested group bounds retain zero-area geometry", () =>
+        {
+            foreach (var delta in new[] { new Point3d(100, 0, 0), new Point3d(0, 100, 0), new Point3d(0, 0, 0) })
+            {
+                var inner = new DrawShapeGroup(); inner.Children.Add(new LineShape(new Point3d(10, 20, 0), new Point3d(10 + delta.X, 20 + delta.Y, 0)));
+                var outer = new DrawShapeGroup(); outer.Children.Add(inner);
+                Program.Check(inner.GetPoints().Length == 4 && outer.GetPoints().Length == 4 && outer.GetBoundingBox().X == 10 && outer.GetBoundingBox().Y == 20, "zero-area geometry lost");
+            }
+            Program.Check(new DrawShapeGroup().GetPoints().Length == 0, "empty group invented geometry");
+        });
+        Program.Test("topmost picking respects child multipliers and screen-space zoom tolerance", () =>
+        {
+            using (var canvas = new GH_Canvas())
+            {
+                var c = new HopperDraw { LineThickness = 8 };
+                var line = new LineShape(new Point3d(0, 100, 0), new Point3d(500, 100, 0)) { ThicknessMultiplier = 3 };
+                c.Shapes.Add(line); var group = new DrawShapeGroup(); group.Children.Add(line.Clone()); c.Shapes.Add(group);
+                typeof(HopperDraw).GetField("_canvas", BindingFlags.NonPublic | BindingFlags.Instance).SetValue(c, canvas);
+                Program.Check(c.HitTest(new PointF(250, 100)).shapeIndex == 1, "picked bottom shape");
+                foreach (float zoom in new[] { 0.25f, 1, 4 })
+                {
+                    canvas.Viewport.Zoom = zoom;
+                    Program.Check(c.HitTest(new PointF(250, 100 + 12 + 14 / zoom)).shapeIndex == 1, "zoom hit missed");
+                    Program.Check(c.HitTest(new PointF(250, 100 + 12 + 16 / zoom)).shapeIndex == -1, "zoom tolerance too large");
+                }
+            }
+        });
         Program.Test("input values clamp with runtime warnings, including double.MaxValue", () =>
         {
             var solve = typeof(HopperDraw).GetMethod("SolveInstance", BindingFlags.NonPublic | BindingFlags.Instance);

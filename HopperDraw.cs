@@ -1147,7 +1147,7 @@ namespace hopperdraw
             menu.Items.Add(new ToolStripMenuItem("Select all HopperDraw shapes", null, (s, e) =>
             {
                 SelectedShapeIndices.Clear();
-                for (int i = 0; i < Shapes.Count; i++) SelectedShapeIndices.Add(i);
+                for (int i = 0; i < Shapes.Count; i++) if (!(Shapes[i] is OpaqueShape)) SelectedShapeIndices.Add(i);
                 ExpireDisplay();
                 _canvas?.Invalidate();
             }) { Enabled = Shapes.Count > 0 });
@@ -1184,7 +1184,7 @@ namespace hopperdraw
         {
             if (HasSelection)
             {
-                foreach (var idx in SelectedShapeIndices) Shapes[idx].ThicknessMultiplier = multiplier;
+                foreach (var leaf in SelectedLeaves()) leaf.ThicknessMultiplier = multiplier;
                 MarkDocumentModified();
             }
             else
@@ -1199,8 +1199,8 @@ namespace hopperdraw
         {
             if (HasSelection)
             {
-                foreach (var idx in SelectedShapeIndices)
-                    Shapes[idx].LineType = (DashStyle)(((int)Shapes[idx].LineType + 1) % 5);
+                foreach (var leaf in SelectedLeaves())
+                    leaf.LineType = (DashStyle)(((int)StyleValidation.SafeDash(leaf.LineType) + 1) % 5);
                 MarkDocumentModified();
             }
             else
@@ -1241,10 +1241,7 @@ namespace hopperdraw
                 dialog.Color = firstShape.OverrideColor ?? _borderColor;
                 if (dialog.ShowDialog() == DialogResult.OK)
                 {
-                    foreach (var idx in SelectedShapeIndices)
-                    {
-                        Shapes[idx].OverrideColor = dialog.Color;
-                    }
+                    foreach (var leaf in SelectedLeaves()) leaf.OverrideColor = dialog.Color;
                     MarkDocumentModified();
                     _canvas?.Invalidate();
                 }
@@ -1499,15 +1496,25 @@ namespace hopperdraw
         public float CurrentThicknessMultiplier => _currentThicknessMultiplier;
         public Color? PendingColorOverride => _pendingColorOverride;
 
+        internal float CanvasScale
+        {
+            get
+            {
+                double zoom = _canvas?.Viewport?.Zoom ?? 1;
+                return StyleValidation.Finite(zoom) && zoom > 0 ? (float)(1 / Math.Max(0.01, Math.Min(100, zoom))) : 1;
+            }
+        }
+
         public bool HasSelection => SelectedShapeIndices.Count > 0;
 
         internal static int GetNextId() => _shapeIdCounter++;
 
         public (int shapeIndex, int pointIndex) HitTest(PointF point)
         {
-            for (int i = 0; i < Shapes.Count; i++)
+            for (int i = Shapes.Count - 1; i >= 0; i--)
             {
-                var (hit, ptIdx) = Shapes[i].HitTest(point, HitTolerance, LineThickness);
+                float width = Shapes[i] is DrawShapeGroup ? LineThickness : StyleValidation.EffectiveWidth(LineThickness, Shapes[i].ThicknessMultiplier);
+                var (hit, ptIdx) = Shapes[i].HitTest(point, HitTolerance * CanvasScale, width);
                 if (hit) return (i, ptIdx);
             }
             return (-1, -1);
@@ -1551,54 +1558,58 @@ namespace hopperdraw
 
         public DrawShapeGroup GroupSelectedShapes()
         {
-            if (SelectedShapeIndices.Count < 1) return null;
-
-            var sortedIndices = SelectedShapeIndices.OrderBy(i => i).ToList();
+            if (!CanEditShapes) return null;
+            var indices = SelectedShapeIndices.Where(i => i >= 0 && i < Shapes.Count).Distinct().OrderBy(i => i).ToList();
+            if (indices.Count < 2) return null;
             var group = new DrawShapeGroup();
-
-            for (int i = sortedIndices.Count - 1; i >= 0; i--)
-            {
-                var shape = Shapes[sortedIndices[i]];
-                Shapes.RemoveAt(sortedIndices[i]);
-                group.Children.Add(shape);
-            }
-
-            Shapes.Add(group);
-            int groupIndex = Shapes.Count - 1;
-
-            SelectedShapeIndices.Clear();
-            SelectedShapeIndices.Add(groupIndex);
-
+            foreach (int i in indices) group.Children.Add(Shapes[i]);
+            // Keep child order and replace the highest selected slot after removing selected children.
+            int slot = indices.Last() - indices.Count + 1;
+            for (int i = indices.Count - 1; i >= 0; i--) Shapes.RemoveAt(indices[i]);
+            Shapes.Insert(slot, group);
+            ClearSelection();
+            SelectedShapeIndices.Add(slot);
             return group;
         }
 
         public void UngroupSelectedGroups()
         {
-            var indicesToRemove = SelectedShapeIndices
-                .Where(i => i >= 0 && i < Shapes.Count && Shapes[i] is DrawShapeGroup)
-                .OrderByDescending(i => i)
-                .ToList();
-
-            if (indicesToRemove.Count == 0) return;
-
-            var newSelections = new List<int>();
-
-            foreach (var idx in indicesToRemove)
+            if (!CanEditShapes) return;
+            var selected = new HashSet<DrawShape>(SelectedShapeIndices.Where(i => i >= 0 && i < Shapes.Count).Select(i => Shapes[i]));
+            var result = new List<DrawShape>();
+            var newSelection = new HashSet<DrawShape>();
+            foreach (var shape in Shapes)
             {
-                if (Shapes[idx] is DrawShapeGroup group)
+                if (selected.Contains(shape) && shape is DrawShapeGroup group)
                 {
-                    int insertPos = idx;
-                    for (int i = 0; i < group.Children.Count; i++)
-                    {
-                        Shapes.Insert(insertPos + i, group.Children[i]);
-                        newSelections.Add(insertPos + i);
-                    }
-                    Shapes.RemoveAt(insertPos + group.Children.Count);
+                    result.AddRange(group.Children);
+                    foreach (var child in group.Children) newSelection.Add(child);
+                }
+                else
+                {
+                    result.Add(shape);
+                    if (selected.Contains(shape)) newSelection.Add(shape);
                 }
             }
+            Shapes = result;
+            ClearSelection();
+            for (int i = 0; i < Shapes.Count; i++) if (newSelection.Contains(Shapes[i])) SelectedShapeIndices.Add(i);
+        }
 
-            SelectedShapeIndices.Clear();
-            SelectedShapeIndices.AddRange(newSelections);
+        private IEnumerable<DrawShape> SelectedLeaves()
+        {
+            foreach (int index in SelectedShapeIndices.Distinct())
+                if (index >= 0 && index < Shapes.Count)
+                    foreach (var leaf in Leaves(Shapes[index])) yield return leaf;
+        }
+        private static IEnumerable<DrawShape> Leaves(DrawShape shape)
+        {
+            if (shape is DrawShapeGroup group)
+            {
+                foreach (var child in group.Children)
+                    foreach (var leaf in Leaves(child)) yield return leaf;
+            }
+            else if (!(shape is OpaqueShape)) yield return shape;
         }
 
         public void ExpireDisplay()

@@ -1,103 +1,57 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
-using System.Drawing.Drawing2D;
 using System.Linq;
-using GH_IO.Serialization;
 using Rhino.Geometry;
 
 namespace hopperdraw
 {
+    // Pure container: style commands explicitly visit leaves; grouping never changes their styles.
     public class DrawShapeGroup : DrawShape
     {
-        public List<DrawShape> Children { get; set; } = new List<DrawShape>();
-
+        public List<DrawShape> Children { get; } = new List<DrawShape>();
         protected override int ShapeType => 4;
-
         public override void Render(Graphics g, Pen pen, float thickness)
         {
-            foreach (var child in Children)
-            {
-                child.Render(g, pen, thickness);
-            }
+            foreach (var child in Children) ShapeRenderer.Render(g, child, pen.Color, thickness);
         }
-
         public override (bool hit, int pointIndex) HitTest(PointF pt, float tolerance, float thickness)
         {
-            foreach (var child in Children)
-            {
-                var (hit, ptIdx) = child.HitTest(pt, tolerance, thickness);
-                if (hit) return (true, -1);
-            }
+            for (int i = Children.Count - 1; i >= 0; i--)
+                if (HitChild(Children[i], pt, tolerance, thickness)) return (true, -1);
             return (false, -1);
         }
-
+        private static bool HitChild(DrawShape child, PointF pt, float tolerance, float basis)
+        {
+            float width = child is DrawShapeGroup ? basis : StyleValidation.EffectiveWidth(basis, child.ThicknessMultiplier);
+            return child.HitTest(pt, tolerance, width).hit;
+        }
         public override PointF[] GetPoints()
         {
-            if (Children.Count == 0) return new PointF[0];
-
-            double minX = double.MaxValue, minY = double.MaxValue, maxX = double.MinValue, maxY = double.MinValue;
+            if (!TryGetBoundingBox(out var box)) return new PointF[0];
+            return new[] { new PointF(box.Left, box.Top), new PointF(box.Right, box.Top), new PointF(box.Right, box.Bottom), new PointF(box.Left, box.Bottom) };
+        }
+        internal bool TryGetBoundingBox(out RectangleF bounds)
+        {
+            bool found = false;
+            float minX = 0, minY = 0, maxX = 0, maxY = 0;
             foreach (var child in Children)
-            {
-                foreach (var p in child.GetPoints())
+                foreach (var point in child.GetPoints())
                 {
-                    minX = Math.Min(minX, p.X);
-                    minY = Math.Min(minY, p.Y);
-                    maxX = Math.Max(maxX, p.X);
-                    maxY = Math.Max(maxY, p.Y);
+                    if (!ShapeSerializer.ValidCoordinate(point.X) || !ShapeSerializer.ValidCoordinate(point.Y)) continue;
+                    if (!found) { minX = maxX = point.X; minY = maxY = point.Y; found = true; }
+                    else { minX = Math.Min(minX, point.X); minY = Math.Min(minY, point.Y); maxX = Math.Max(maxX, point.X); maxY = Math.Max(maxY, point.Y); }
                 }
-            }
-            return new PointF[]
-            {
-                new PointF((float)minX, (float)minY),
-                new PointF((float)maxX, (float)minY),
-                new PointF((float)maxX, (float)maxY),
-                new PointF((float)minX, (float)maxY)
-            };
+            bounds = found ? RectangleF.FromLTRB(minX, minY, maxX, maxY) : RectangleF.Empty;
+            return found; // Zero width/height is valid geometry, independently of RectangleF.IsEmpty.
         }
-
-        internal RectangleF GetBoundingBox()
-        {
-            if (Children.Count == 0) return RectangleF.Empty;
-
-            double minX = double.MaxValue, minY = double.MaxValue, maxX = double.MinValue, maxY = double.MinValue;
-            foreach (var child in Children)
-            {
-                foreach (var p in child.GetPoints())
-                {
-                    minX = Math.Min(minX, p.X);
-                    minY = Math.Min(minY, p.Y);
-                    maxX = Math.Max(maxX, p.X);
-                    maxY = Math.Max(maxY, p.Y);
-                }
-            }
-            return new RectangleF((float)minX, (float)minY, (float)(maxX - minX), (float)(maxY - minY));
-        }
-
-        public override void Move(double dx, double dy)
-        {
-            foreach (var child in Children)
-            {
-                child.Move(dx, dy);
-            }
-        }
-
-        public override void MovePoint(int pointIndex, Point3d newPos)
-        {
-        }
-
+        internal RectangleF GetBoundingBox() { TryGetBoundingBox(out var bounds); return bounds; }
+        public override void Move(double dx, double dy) { foreach (var child in Children) child.Move(dx, dy); }
+        public override void MovePoint(int pointIndex, Point3d newPos) { }
         public override DrawShape Clone()
         {
-            var group = new DrawShapeGroup();
-            foreach (var child in Children)
-            {
-                var clonedChild = child.Clone();
-                clonedChild.ThicknessMultiplier = ThicknessMultiplier;
-                clonedChild.OverrideColor = OverrideColor;
-                clonedChild.LineType = LineType;
-                group.Children.Add(clonedChild);
-            }
-            group.Id = HopperDraw.GetNextId();
+            var group = new DrawShapeGroup { Id = HopperDraw.GetNextId() };
+            group.Children.AddRange(Children.Select(child => child.Clone()));
             return group;
         }
     }
