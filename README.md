@@ -26,7 +26,7 @@ Out-of-range mode, order, dash, or thickness inputs produce runtime warnings and
 
 ## Editing and menus
 
-Click a shape outside drawing mode to select it. **Shift-click** toggles selection. Drag a body to move it, or a vertex handle to edit it. Drag empty canvas to select shapes with a vertex inside the rectangle. At overlaps, the topmost annotation is picked. **Delete** removes selected annotations when native GH objects are not also selected. **Escape** clears an annotation selection; during a drag it ends the gesture, retaining changes already applied and their undo record.
+Click a shape outside drawing mode to select it. **Shift-click** toggles selection. Drag a body to move it, or a vertex handle to edit it. Drag empty canvas to select shapes with a vertex inside the rectangle. At overlaps, the topmost annotation is picked. **Delete** removes selected annotations when native GH objects are not also selected. Undo and redo restore shapes but clear the annotation selection. **Escape** clears an annotation selection; during a drag it ends the gesture, retaining changes already applied and their undo record.
 
 **Shift** while drawing lines/polyline segments/curves constrains the next segment to horizontal or vertical. With a frame it makes a square. When editing, Shift snaps a line endpoint to 45-degree increments and preserves a frame's starting aspect ratio. Polyline/curve handle drags have no Shift constraint.
 
