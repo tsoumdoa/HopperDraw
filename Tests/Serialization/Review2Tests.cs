@@ -193,5 +193,18 @@ internal static class Review2Tests
                 Program.Check(bitmap.GetPixel(6, 10).ToArgb() != Color.White.ToArgb(), "preview lost handle squares");
             }
         });
+        Program.Test("no-op selected styles return before modification/redraw", () =>
+        {
+            using (var canvas = new GH_Canvas())
+            {
+                var c = new HopperDraw(); var line = Line(); line.OverrideColor = Color.Red;
+                c.Shapes.Add(line); c.SelectedShapeIndices.Add(0); Set(c, "_canvas", canvas);
+                var handle = canvas.Handle; int invalidations = 0; canvas.Invalidated += (s, e) => invalidations++;
+                c.SetSelectedColor(Color.FromArgb(Color.Red.ToArgb())); Call(c, "SetThicknessMultiplier", 1f);
+                var group = new DrawShapeGroup(); group.Children.Add(Opaque()); c.Shapes[0] = group;
+                c.SetSelectedColor(Color.Blue); Call(c, "SetThicknessMultiplier", 2f); Call(c, "CycleLineType");
+                Program.Check(invalidations == 0, "no-op style marked the document for repaint");
+            }
+        });
     }
 }

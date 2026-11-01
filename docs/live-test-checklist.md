@@ -56,3 +56,13 @@ doc.SolutionStart += onSolve;
 ## Known integration limits
 
 Headless tests exercise archive serialization, actual shape code, bitmap render channels, snapshot swapping, shortcut routing, and gesture resets. They do not dispatch undo through a live GH_Document, validate GH's native mouse-interaction ordering, or demonstrate DPI/OS integration. Mixed native-object movement and multi-component ownership require particular attention. Unknown payload preservation consumes memory proportional to that payload; parser budgets bound interpretation rather than archive loading performed by GH itself.
+
+## Independent review follow-up checks
+
+1. Put a future-format/read-only HopperDraw before an editable one in document order. Select the read-only component and leave it first. The editable component must still draw and edit when it is the eligible owner; the read-only component must never capture double-D or mouse input.
+2. Group a readable line with an opaque child, including one nested group. Attempt body/handle/multi-selection drags: no selected geometry or native pivot may move, no undo record should be added, and a blocking warning should appear. Ungroup to expose the opaque child, use Select unreadable annotation records and Delete, then Undo/Redo its removal and confirm original raw data and order.
+3. Remove only the HopperDraw annotation chunk from a saved GHX while leaving valid GH metadata. Reopen: expect an empty editable annotation component and a one-time pre-v1 notice; draw/save/reopen normally. No GH metadata should appear inside the new annotation chunk.
+4. Remove a shape style field or a component style field from a GHX copy. Defaults should be safe and warnings should name the missing fields. Make another edit and trigger solutions: component diagnostics must remain. Clear all, Undo, Redo, then read a clean file to check diagnostic lifecycle. Selecting an already-set color/thickness, or styling an all-opaque group, must not dirty the file or add undo history.
+5. Add optional unknown items/sub-chunks to a v1 component, shape and child-list chunk. Reopen, edit, save as both GHX and GH, and reopen: values/sub-chunks must survive while edited known values update. A changed major FormatVersion remains opaque/read-only instead. During polyline/curve drafting, vertex squares should appear without a dashed selection path over the preview stroke.
+
+The automated hook suite additionally stages a failing marker while its working file passes, stages a passing snapshot while its working files/verifier fail, checks pushed refs different from HEAD, multiple refs, duplicate tips and deletions, and compares index/working/untracked contents before and after.
