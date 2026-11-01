@@ -15,6 +15,18 @@ internal static class ReliabilityTests
 {
     internal static void Run()
     {
+        Program.Test("valid width boundaries do not warn or change on save", () =>
+        {
+            var solve = typeof(HopperDraw).GetMethod("SolveInstance", BindingFlags.NonPublic | BindingFlags.Instance);
+            foreach (double width in new[] { 0.1, 8, 1000 })
+            {
+                var c = new HopperDraw();
+                solve.Invoke(c, new object[] { new FakeAccess(false, true, 0, Color.Black, width, 0, 1) });
+                Program.Check(c.RuntimeMessages(GH_RuntimeMessageLevel.Warning).Count == 0, "valid width warned");
+                c.Shapes.Add(new LineShape(new Point3d(5, 5, 0), new Point3d(15, 15, 0)) { ThicknessMultiplier = 0.01f });
+                Program.Check(Program.RoundTrip(c, true).LoadWarning == null, "valid minimum multiplier warned");
+            }
+        });
         Program.Test("DrawOrder channels and grouped child styles render to real bitmaps", () =>
         {
             var c = new HopperDraw { LineThickness = 4 };
@@ -231,6 +243,7 @@ internal static class ReliabilityTests
                 c.Attributes.PerformLayout();
                 var render = typeof(HopperDrawUIAttributes).GetMethod("Render", BindingFlags.NonPublic | BindingFlags.Instance);
                 render.Invoke(c.Attributes, new object[] { canvas, g, GH_CanvasChannel.Objects });
+                render.Invoke(c.Attributes, new object[] { canvas, g, GH_CanvasChannel.Overlay });
                 var preview = HopperDrawUIAttributes.BuildPreview(c, new Point3d(double.MaxValue, 1, 0));
                 ShapeRenderer.Render(g, preview, Color.Black, float.PositiveInfinity);
             }

@@ -1,3 +1,4 @@
+using System;
 using System.Drawing;
 using GH_IO.Serialization;
 using Rhino.Geometry;
@@ -13,6 +14,22 @@ namespace hopperdraw
         {
             Payload = ShapeSerializer.Capture(reader);
             Diagnostic = diagnostic;
+            Guid id = Guid.Empty;
+            try { if (reader != null && reader.TryGetGuid("Id", ref id) && id != Guid.Empty) PersistentId = id; }
+            catch (Exception) { } // A malformed ID is itself opaque data, not permission to discard the record.
+        }
+        internal void UpdateArchiveIdentity()
+        {
+            Guid id = Guid.Empty;
+            // Copy/paste is an explicit new identity. Only the known v1 envelope GUID is changed;
+            // unsupported extension contents and future-format payloads remain uninterpreted.
+            try
+            {
+                if (!Payload.TryGetGuid("Id", ref id) || id == Guid.Empty) return;
+                Payload.RemoveItem("Id");
+                Payload.SetGuid("Id", PersistentId);
+            }
+            catch (Exception) { }
         }
         protected override int ShapeType => -1;
         public override void Render(Graphics g, Pen pen, float thickness) { }
@@ -21,6 +38,6 @@ namespace hopperdraw
         public override void Move(double dx, double dy) { }
         public override void MovePoint(int pointIndex, Point3d newPos) { }
         // Opaque payloads cannot be meaningfully edited or duplicated by this version.
-        public override DrawShape Clone() => new OpaqueShape(Payload, Diagnostic);
+        public override DrawShape Clone() => throw new InvalidOperationException("Unreadable annotations cannot be duplicated.");
     }
 }

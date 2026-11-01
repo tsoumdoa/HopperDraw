@@ -50,6 +50,11 @@ internal static class Program
     [STAThread]
     private static int Main()
     {
+        if (Array.IndexOf(Environment.GetCommandLineArgs(), "--failure-exit-probe") >= 0)
+        {
+            Test("intentional failure exit probe", () => Check(false, "Intentional failure to verify process exit status."));
+            return Finish();
+        }
         Test("double D requires two distinct presses", () =>
         {
             var gesture = new DrawingKeyGesture();
@@ -186,6 +191,10 @@ internal static class Program
             for (int i = 0; i < targets.Length; i++)
                 Check(GeometryUtilities.SnapOrthogonal(start, targets[i]) == expected[i], "Snap case " + i);
         });
+        return Finish();
+    }
+    private static int Finish()
+    {
         Console.WriteLine(_failures + " failure(s)");
         return _failures == 0 ? 0 : 1;
     }

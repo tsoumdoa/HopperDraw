@@ -50,7 +50,7 @@ namespace hopperdraw
                 {
                     for (int i = 0; i < points.Length; i++)
                     {
-                        if (!selected && i != hoveredPoint) continue;
+                        if (shape is DrawShapeGroup || !selected && i != hoveredPoint) continue;
                         var pt = points[i];
                         graphics.FillRectangle(brush, pt.X - size / 2, pt.Y - size / 2, size, size);
                         graphics.DrawRectangle(pen, pt.X - size / 2, pt.Y - size / 2, size, size);

@@ -59,6 +59,7 @@ namespace hopperdraw
                 copy.Children.AddRange(Snapshot(group.Children));
                 result = copy;
             }
+            else if (shape is OpaqueShape opaque) result = new OpaqueShape(opaque.Payload, opaque.Diagnostic);
             else result = shape.Clone();
             result.Id = shape.Id;
             result.PersistentId = shape.PersistentId;

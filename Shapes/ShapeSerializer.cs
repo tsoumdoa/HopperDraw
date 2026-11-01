@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Linq;
+using System.IO;
+using System.Text;
 using GH_IO.Serialization;
 using Rhino.Geometry;
 
@@ -22,7 +24,23 @@ namespace hopperdraw
             while (pending.Count > 0)
             {
                 var pair = pending.Pop();
-                pair.Item2.Items.AddRange(pair.Item1.Items);
+                // Items is a detached list, not a mutable view into GH_Chunk. Round-trip one
+                // node's items through GH_IO itself to retain every supported item type and
+                // indexed key, without recursively copying its children or renaming the target.
+                var items = pair.Item1.Items;
+                using (var stream = new MemoryStream())
+                {
+                    using (var writer = new BinaryWriter(stream, Encoding.UTF8, true))
+                    {
+                        writer.Write(pair.Item2.Name);
+                        writer.Write(pair.Item2.Index);
+                        writer.Write(items.Count);
+                        writer.Write(0); // Children are copied iteratively below.
+                        foreach (var item in items) item.Write(writer);
+                    }
+                    stream.Position = 0;
+                    using (var reader = new BinaryReader(stream)) pair.Item2.Read(reader);
+                }
                 foreach (GH_Chunk child in pair.Item1.Chunks)
                 {
                     var copy = child.HasIndex ? pair.Item2.CreateChunk(child.Name, child.Index) : pair.Item2.CreateChunk(child.Name);
@@ -43,6 +61,7 @@ namespace hopperdraw
             foreach (var shape in shapes)
             {
                 shape.PersistentId = Guid.NewGuid();
+                if (shape is OpaqueShape opaque) opaque.UpdateArchiveIdentity();
                 if (shape is DrawShapeGroup group) RegenerateIds(group.Children);
             }
         }
@@ -119,7 +138,8 @@ namespace hopperdraw
 
         private static DrawShape ReadShape(GH_IReader reader, Budget budget, int depth)
         {
-            int kind = reader.GetInt32("Kind");
+            int kind = -1;
+            if (!reader.TryGetInt32("Kind", ref kind)) throw new FormatException("Missing required shape kind.");
             if (kind < 0 || kind > 4) throw new FormatException("Unknown shape kind " + kind + ".");
             Guid id = reader.GetGuid("Id");
             if (id == Guid.Empty || !budget.Ids.Add(id)) throw new FormatException("Missing/duplicate shape ID.");
@@ -160,9 +180,10 @@ namespace hopperdraw
             double multiplier = 1;
             int dash = 0, color = 0;
             bool hasColor = false;
-            reader.TryGetDouble("ThickMult", ref multiplier);
-            reader.TryGetInt32("LineType", ref dash);
-            reader.TryGetBoolean("HasColor", ref hasColor);
+            if (reader.ItemExists("ThickMult") && !reader.TryGetDouble("ThickMult", ref multiplier) ||
+                reader.ItemExists("LineType") && !reader.TryGetInt32("LineType", ref dash) ||
+                reader.ItemExists("HasColor") && !reader.TryGetBoolean("HasColor", ref hasColor))
+                throw new FormatException("Annotation style has a mismatched field type.");
             if (!StyleValidation.ValidMultiplier(multiplier) || dash < 0 || dash > 4)
                 throw new FormatException("Invalid annotation style.");
             shape.ThicknessMultiplier = (float)multiplier;

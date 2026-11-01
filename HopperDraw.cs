@@ -18,7 +18,7 @@ using Grasshopper.Kernel.Undo;
 
 namespace hopperdraw
 {
-    public class HopperDraw : GH_Component
+    public class HopperDraw : GH_Component, IGH_InstanceGuidDependent
     {
         private bool _isActivated;
         private bool _drawingModeEnabled;
@@ -951,7 +951,11 @@ namespace hopperdraw
             else if (_isMultiDragging && HasSelection)
             {
                 double dx = pt.X - _multiDragStart.X, dy = pt.Y - _multiDragStart.Y;
-                if ((dx == 0 && dy == 0) || !EnsureDragUndo()) return;
+                if ((dx == 0 && dy == 0) ||
+                    SelectedShapeIndices.SelectMany(i => GeometryPoints(Shapes[i])).Any(p =>
+                        !ShapeSerializer.ValidCoordinate(p.X + dx) || !ShapeSerializer.ValidCoordinate(p.Y + dy)) ||
+                    _selectedGHObjects.Any(o => !ShapeSerializer.ValidCoordinate(o.Attributes.Pivot.X + dx) ||
+                        !ShapeSerializer.ValidCoordinate(o.Attributes.Pivot.Y + dy)) || !EnsureDragUndo()) return;
                 foreach (int index in SelectedShapeIndices) Shapes[index].Move(dx, dy);
                 foreach (var obj in _selectedGHObjects)
                 {
@@ -1357,7 +1361,7 @@ namespace hopperdraw
         }
 
         // Unknown schema payloads are read-only and copied without interpreting their contents.
-        private GH_LooseChunk _opaquePayload;
+        private GH_IReader _opaquePayload;
         private string _loadWarning;
         internal string LoadWarning => _loadWarning;
         internal bool CanEditShapes => _opaquePayload == null;
@@ -1389,14 +1393,14 @@ namespace hopperdraw
         public override bool Read(GH_IReader reader)
         {
             // GH omits a component when Read returns false. Keep recovery data and warn instead.
-            ClearRuntimeMessages();
-            _loadWarning = null;
-            _opaquePayload = null;
-            CancelDrawing();
-            ClearSelection();
-            Shapes = new List<DrawShape>();
             try
             {
+                ClearRuntimeMessages();
+                _loadWarning = null;
+                _opaquePayload = null;
+                CancelDrawing();
+                ClearSelection();
+                Shapes = new List<DrawShape>();
                 if (!base.Read(reader)) _loadWarning = "Component metadata could not be fully read.";
                 _shapeOwnerId = InstanceGuid;
                 var payload = reader.FindChunk("HopperDraw");
@@ -1412,10 +1416,11 @@ namespace hopperdraw
                     int color = Color.Black.ToArgb(), order = 1;
                     double width = 8;
                     bool visible = true;
-                    payload.TryGetInt32("Color", ref color);
-                    payload.TryGetDouble("Thickness", ref width);
-                    payload.TryGetInt32("DrawOrder", ref order);
-                    payload.TryGetBoolean("Visible", ref visible);
+                    if (payload.ItemExists("Color") && !payload.TryGetInt32("Color", ref color) ||
+                        payload.ItemExists("Thickness") && !payload.TryGetDouble("Thickness", ref width) ||
+                        payload.ItemExists("DrawOrder") && !payload.TryGetInt32("DrawOrder", ref order) ||
+                        payload.ItemExists("Visible") && !payload.TryGetBoolean("Visible", ref visible))
+                        throw new FormatException("Component style has a mismatched field type.");
                     BorderColor = Color.FromArgb(color);
                     bool invalidStyle = !StyleValidation.ValidWidth(width) || order < 0 || order > 1;
                     LineThickness = StyleValidation.Width(width);
@@ -1430,11 +1435,14 @@ namespace hopperdraw
             catch (Exception ex)
             {
                 // An invalid list is not an empty list. Preserve the entire annotation payload.
-                var payload = reader?.FindChunk("HopperDraw");
-                _opaquePayload = ShapeSerializer.Capture(payload ?? reader);
+                GH_IReader payload = null;
+                try { payload = reader?.FindChunk("HopperDraw"); } catch (Exception) { }
+                // Retain the host's raw chunk as a last resort if even cloning the data failed.
+                _opaquePayload = payload ?? reader ?? new GH_LooseChunk("Unreadable");
                 _loadWarning = "Unreadable HopperDraw data preserved: " + ex.Message;
             }
-            ReportLoadWarning();
+            try { ReportLoadWarning(); }
+            catch (Exception ex) { System.Diagnostics.Debug.WriteLine("HopperDraw load warning: " + ex.Message); }
             return true;
         }
 
@@ -1451,6 +1459,8 @@ namespace hopperdraw
             EnsureShapeIdentity();
             base.AddedToDocument(document);
         }
+
+        void IGH_InstanceGuidDependent.InstanceGuidsChanged(SortedDictionary<Guid, Guid> map) => EnsureShapeIdentity();
 
         public bool IsActivated => _isActivated;
         public Point3d DrawStart => _drawStart;

@@ -40,7 +40,7 @@ Multiple HopperDraw components keep separate annotation lists. While drawing, th
 
 ## File format and recovery
 
-This release uses annotation **format v1**, in a dedicated `HopperDraw` chunk with a `FormatVersion` value. Each shape has an indexed sub-chunk and a persistent GUID; groups recursively contain child lists. GUIDs survive save/load and undo; copies receive fresh IDs. No legacy flat-key reader or downgrade format is provided. Files from 0.1.6 and earlier are unsupported.
+This release uses annotation **format v1**, in a dedicated `HopperDraw` chunk with a `FormatVersion` value. Each shape has an indexed sub-chunk and a persistent GUID; groups recursively contain child lists. GUIDs survive save/load and undo; copies receive fresh IDs. Copy/paste rekeys the standard v1 ID envelope even for opaque records; future-format payload contents remain untouched. No legacy flat-key reader or downgrade format is provided. Files from 0.1.6 and earlier are unsupported.
 
 Required kind, GUID, geometry/cardinality, and coordinate checks prevent damaged data becoming guessed geometry at the origin. Optional missing styles use defaults. Invalid/unknown records remain opaque in their original list positions and produce a persistent runtime warning. They are retained on re-save, are not painted, and groups containing them cannot be duplicated. Clear all intentionally removes these records and is undoable. An unsupported format or damaged list keeps the entire raw annotation payload read-only on re-save. Open it with a compatible version to resolve it; this release does not interpret or rewrite it as v1.
 
