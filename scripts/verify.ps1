@@ -29,7 +29,14 @@ try {
         & dotnet run --project $test.FullName -c $configuration --no-launch-profile
         if ($LASTEXITCODE -ne 0) { throw "Tests failed: $($test.Directory.Name) (exit $LASTEXITCODE)" }
     }
-    Write-Host "VERIFY PASSED: $builds plugin builds, $($tests.Count) test projects, version $version."
+    $scriptTests = @(Get-ChildItem Tests -Recurse -Filter '*-tests.ps1' | Sort-Object FullName)
+    foreach ($scriptTest in $scriptTests) {
+        Write-Host "Testing $($scriptTest.Name)..."
+        $shell = Join-Path $PSHOME $(if ($PSVersionTable.PSEdition -eq 'Core') { 'pwsh.exe' } else { 'powershell.exe' })
+        & $shell -NoProfile -ExecutionPolicy Bypass -File $scriptTest.FullName
+        if ($LASTEXITCODE -ne 0) { throw "Script tests failed: $($scriptTest.Name) (exit $LASTEXITCODE)" }
+    }
+    Write-Host "VERIFY PASSED: $builds plugin builds, $($tests.Count) test projects, $($scriptTests.Count) script suites, version $version."
 } catch {
     Write-Host "VERIFY FAILED: $_" -ForegroundColor Red
     exit 1
