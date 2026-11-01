@@ -9,6 +9,13 @@ namespace hopperdraw
     public abstract class DrawShape
     {
         public int Id { get; set; }
+        internal GH_LooseChunk Extensions { get; set; }
+        internal System.Collections.Generic.List<string> LoadDiagnostics { get; } = new System.Collections.Generic.List<string>();
+        internal void CopyArchiveStateTo(DrawShape target)
+        {
+            target.Extensions = Extensions == null ? null : ShapeSerializer.Capture(Extensions);
+            target.LoadDiagnostics.AddRange(LoadDiagnostics);
+        }
         public Guid PersistentId { get; internal set; } = Guid.NewGuid();
         private float _thicknessMultiplier = 1f;
         public float ThicknessMultiplier { get => _thicknessMultiplier; set => _thicknessMultiplier = StyleValidation.Multiplier(value); }

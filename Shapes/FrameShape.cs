@@ -69,13 +69,15 @@ namespace hopperdraw
 
         public override DrawShape Clone()
         {
-            return new FrameShape(TopLeft, TopRight, BottomRight, BottomLeft)
+            var clone = new FrameShape(TopLeft, TopRight, BottomRight, BottomLeft)
             {
                 ThicknessMultiplier = ThicknessMultiplier,
                 OverrideColor = OverrideColor,
                 LineType = LineType,
                 Id = HopperDraw.GetNextId()
             };
+            CopyArchiveStateTo(clone);
+            return clone;
         }
     }
 }

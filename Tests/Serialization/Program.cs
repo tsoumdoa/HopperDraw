@@ -144,7 +144,7 @@ internal static class Program
         {
             var root = Save(Pair()); var record = FirstRecord(root);
             foreach (var key in new[] { "ThickMult", "LineType", "HasColor" }) record.RemoveItem(key);
-            var loaded = Load(root); Check(loaded.LoadWarning == null && loaded.Shapes[0].ThicknessMultiplier == 1 && loaded.Shapes[0].LineType == DashStyle.Solid, "optional defaults wrong");
+            var loaded = Load(root); Check(loaded.LoadWarning != null && loaded.Shapes[0].ThicknessMultiplier == 1 && loaded.Shapes[0].LineType == DashStyle.Solid, "optional defaults wrong");
             loaded.Shapes[0].OverrideColor = Color.FromArgb(0);
             Check(RoundTrip(loaded, true).Shapes[0].OverrideColor.Value.ToArgb() == 0, "transparent color lost");
         });
@@ -221,14 +221,11 @@ internal static class Program
             var root = Save(Pair()); FirstRecord(root).RemoveItem("X"); var loaded = Load(root); loaded.SelectedShapeIndices.Add(1);
             Check(loaded.Read(Save(Pair())) && loaded.LoadWarning == null && !loaded.HasSelection && loaded.RuntimeMessages(Grasshopper.Kernel.GH_RuntimeMessageLevel.Warning).Count == 0, "stale warning/selection");
         });
-        Test("missing component payload and metadata never throw or become a valid empty list", () =>
+        Test("base Grasshopper read exceptions propagate without annotation recovery", () =>
         {
-            foreach (GH_IReader reader in new GH_IReader[] { null, new GH_LooseChunk("Broken") })
-            {
-                var loaded = Load(reader);
-                Check(!loaded.CanEditShapes && loaded.LoadWarning != null, "component damage became empty");
-                Check(Load(Save(loaded)).LoadWarning != null, "component damage lost on save");
-            }
+            var component = new HopperDraw(); bool threw = false;
+            try { component.Read(null); } catch (Exception) { threw = true; }
+            Check(threw && component.LoadWarning == null, "base metadata exception became annotation recovery");
         });
         Test("known duplicates and pasted component IDs are fresh", () =>
         {

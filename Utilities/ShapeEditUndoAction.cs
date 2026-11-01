@@ -12,9 +12,11 @@ namespace hopperdraw
     {
         private List<DrawShape> _shapes;
         private Dictionary<Guid, PointF> _pivots;
+        private List<string> _componentDiagnostics;
         internal ShapeEditUndoAction(HopperDraw owner, IEnumerable<IGH_DocumentObject> movedObjects) : base(owner.InstanceGuid)
         {
             _shapes = Snapshot(owner.Shapes);
+            _componentDiagnostics = owner.ComponentLoadDiagnostics.ToList();
             _pivots = movedObjects.Where(o => o?.Attributes != null).Distinct()
                 .ToDictionary(o => o.InstanceGuid, o => o.Attributes.Pivot);
         }
@@ -26,6 +28,7 @@ namespace hopperdraw
         {
             if (!(obj is HopperDraw owner)) throw new InvalidOperationException("HopperDraw undo target is unavailable.");
             var current = Snapshot(owner.Shapes);
+            var currentDiagnostics = owner.ComponentLoadDiagnostics.ToList();
             // Prepare everything before changing the live state. No tolerant archive reader is involved.
             var restored = Snapshot(_shapes);
             var objects = new Dictionary<Guid, IGH_DocumentObject>();
@@ -37,7 +40,7 @@ namespace hopperdraw
                 objects.Add(pair.Key, target);
                 currentPivots.Add(pair.Key, target.Attributes.Pivot);
             }
-            owner.RestoreShapes(restored);
+            owner.RestoreShapes(restored, _componentDiagnostics);
             foreach (var pair in _pivots)
             {
                 var attributes = objects[pair.Key].Attributes;
@@ -46,6 +49,7 @@ namespace hopperdraw
                 attributes.PerformLayout();
             }
             _shapes = current;
+            _componentDiagnostics = currentDiagnostics;
             _pivots = currentPivots;
         }
 
@@ -57,10 +61,14 @@ namespace hopperdraw
             {
                 var copy = new DrawShapeGroup();
                 copy.Children.AddRange(Snapshot(group.Children));
+                copy.ChildrenExtensions = group.ChildrenExtensions == null ? null : ShapeSerializer.Capture(group.ChildrenExtensions);
                 result = copy;
             }
             else if (shape is OpaqueShape opaque) result = new OpaqueShape(opaque.Payload, opaque.Diagnostic);
             else result = shape.Clone();
+            result.Extensions = shape.Extensions == null ? null : ShapeSerializer.Capture(shape.Extensions);
+            result.LoadDiagnostics.Clear();
+            result.LoadDiagnostics.AddRange(shape.LoadDiagnostics);
             result.Id = shape.Id;
             result.PersistentId = shape.PersistentId;
             result.ThicknessMultiplier = shape.ThicknessMultiplier;

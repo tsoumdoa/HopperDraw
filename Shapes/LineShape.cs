@@ -49,13 +49,15 @@ namespace hopperdraw
 
         public override DrawShape Clone()
         {
-            return new LineShape(Start, End)
+            var clone = new LineShape(Start, End)
             {
                 ThicknessMultiplier = ThicknessMultiplier,
                 OverrideColor = OverrideColor,
                 LineType = LineType,
                 Id = HopperDraw.GetNextId()
             };
+            CopyArchiveStateTo(clone);
+            return clone;
         }
     }
 }

@@ -9,6 +9,7 @@ namespace hopperdraw
     // Pure container: style commands explicitly visit leaves; grouping never changes their styles.
     public class DrawShapeGroup : DrawShape
     {
+        internal GH_IO.Serialization.GH_LooseChunk ChildrenExtensions { get; set; }
         public List<DrawShape> Children { get; } = new List<DrawShape>();
         protected override int ShapeType => 4;
         internal override bool CanTransformGeometry => Children.All(child => child.CanTransformGeometry);
@@ -60,6 +61,8 @@ namespace hopperdraw
         {
             var group = new DrawShapeGroup { Id = HopperDraw.GetNextId() };
             group.Children.AddRange(Children.Select(child => child.Clone()));
+            CopyArchiveStateTo(group);
+            group.ChildrenExtensions = ChildrenExtensions == null ? null : ShapeSerializer.Capture(ChildrenExtensions);
             return group;
         }
     }

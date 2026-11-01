@@ -13,6 +13,7 @@ namespace hopperdraw
     /// <summary>Version 1: dedicated chunks, strict geometry, optional styles, lossless opaque recovery.</summary>
     internal static class ShapeSerializer
     {
+        // Major version only: breaking changes bump this. Additive unknown keys are retained.
         internal const int CurrentFormat = 1;
         internal const int MaxDepth = 32, MaxShapes = 20000, MaxPoints = 200000;
 
@@ -56,6 +57,14 @@ namespace hopperdraw
             return copy;
         }
 
+        internal static GH_LooseChunk Residual(GH_IReader source, IEnumerable<string> knownItems, params string[] knownChunks)
+        {
+            var residual = Capture(source);
+            foreach (string name in knownItems) residual.RemoveItem(name);
+            foreach (string name in knownChunks) residual.RemoveChunk(name);
+            return residual;
+        }
+
         internal static void RegenerateIds(IEnumerable<DrawShape> shapes)
         {
             foreach (var shape in shapes)
@@ -66,9 +75,10 @@ namespace hopperdraw
             }
         }
 
-        internal static void WriteShapeList(GH_IWriter parent, string name, IList<DrawShape> shapes)
+        internal static void WriteShapeList(GH_IWriter parent, string name, IList<DrawShape> shapes, GH_IReader extensions = null)
         {
             var list = parent.CreateChunk(name);
+            if (extensions != null) CopyChunk(extensions, list);
             list.SetInt32("Count", shapes.Count);
             for (int i = 0; i < shapes.Count; i++) WriteShape(list.CreateChunk("Shape", i), shapes[i]);
         }
@@ -76,6 +86,7 @@ namespace hopperdraw
         internal static void WriteShape(GH_IWriter writer, DrawShape shape)
         {
             if (shape is OpaqueShape opaque) { CopyChunk(opaque.Payload, writer); return; }
+            if (shape.Extensions != null) CopyChunk(shape.Extensions, writer);
             int kind = shape is LineShape ? 0 : shape is PolylineShape ? 1 : shape is FrameShape ? 2 : shape is CurveShape ? 3 : 4;
             writer.SetInt32("Kind", kind);
             writer.SetGuid("Id", shape.PersistentId);
@@ -83,7 +94,7 @@ namespace hopperdraw
             writer.SetInt32("LineType", (int)shape.LineType);
             writer.SetBoolean("HasColor", shape.OverrideColor.HasValue);
             if (shape.OverrideColor.HasValue) writer.SetInt32("Color", shape.OverrideColor.Value.ToArgb());
-            if (shape is DrawShapeGroup group) { WriteShapeList(writer, "Children", group.Children); return; }
+            if (shape is DrawShapeGroup group) { WriteShapeList(writer, "Children", group.Children, group.ChildrenExtensions); return; }
             IEnumerable<Point3d> points;
             if (shape is LineShape line) points = new[] { line.Start, line.End };
             else if (shape is FrameShape frame) points = new[] { frame.TopLeft, frame.TopRight, frame.BottomRight, frame.BottomLeft };
@@ -101,15 +112,18 @@ namespace hopperdraw
             internal readonly List<string> Diagnostics = new List<string>();
         }
 
-        internal static List<DrawShape> ReadShapeList(GH_IReader parent, string name, out List<string> diagnostics)
+        internal static List<DrawShape> ReadShapeList(GH_IReader parent, string name, out List<string> diagnostics) =>
+            ReadShapeList(parent, name, out diagnostics, out _);
+
+        internal static List<DrawShape> ReadShapeList(GH_IReader parent, string name, out List<string> diagnostics, out GH_LooseChunk extensions)
         {
             var budget = new Budget();
-            var result = ReadList(parent, name, budget, 0);
+            var result = ReadList(parent, name, budget, 0, out extensions);
             diagnostics = budget.Diagnostics;
             return result;
         }
 
-        private static List<DrawShape> ReadList(GH_IReader parent, string name, Budget budget, int depth)
+        private static List<DrawShape> ReadList(GH_IReader parent, string name, Budget budget, int depth, out GH_LooseChunk extensions)
         {
             var list = parent.FindChunk(name);
             int count = -1;
@@ -118,13 +132,16 @@ namespace hopperdraw
             if (depth > MaxDepth || count > MaxShapes - budget.Shapes)
                 throw new FormatException("Shape depth/count budget exceeded.");
             // Missing or extra records are damage, even when Count claims the list is empty.
-            if (((GH_Chunk)list).ChunkCount != count) throw new FormatException("Shape count does not match records.");
+            if (((GH_Chunk)list).Chunks.Count(c => string.Equals(c.Name, "Shape", StringComparison.OrdinalIgnoreCase)) != count)
+                throw new FormatException("Shape count does not match records.");
+            extensions = Residual(list, new[] { "Count" });
             budget.Shapes += count;
             var result = new List<DrawShape>(count);
             for (int i = 0; i < count; i++)
             {
                 var record = list.FindChunk("Shape", i);
                 if (record == null) throw new FormatException("Missing shape record " + i + ".");
+                extensions.RemoveChunk("Shape", i);
                 try { result.Add(ReadShape(record, budget, depth)); }
                 catch (Exception ex)
                 {
@@ -147,7 +164,8 @@ namespace hopperdraw
             if (kind == 4)
             {
                 var group = new DrawShapeGroup();
-                group.Children.AddRange(ReadList(reader, "Children", budget, depth + 1));
+                group.Children.AddRange(ReadList(reader, "Children", budget, depth + 1, out var childExtensions));
+                group.ChildrenExtensions = childExtensions;
                 shape = group;
             }
             else
@@ -176,6 +194,17 @@ namespace hopperdraw
                     default: shape = new CurveShape(points, closed); break;
                 }
             }
+            var knownItems = new List<string> { "Kind", "Id", "ThickMult", "LineType", "HasColor", "Color" };
+            if (kind != 4) knownItems.AddRange(new[] { "X", "Y" });
+            if (kind == 1 || kind == 3) knownItems.Add("Closed");
+            shape.Extensions = Residual(reader, knownItems, kind == 4 ? new[] { "Children" } : new string[0]);
+            foreach (string field in new[] { "ThickMult", "LineType", "HasColor" })
+                if (!reader.ItemExists(field))
+                {
+                    string message = "Annotation " + id + ": missing optional " + field + "; default used.";
+                    shape.LoadDiagnostics.Add(message);
+                    budget.Diagnostics.Add(message);
+                }
             shape.PersistentId = id;
             double multiplier = 1;
             int dash = 0, color = 0;

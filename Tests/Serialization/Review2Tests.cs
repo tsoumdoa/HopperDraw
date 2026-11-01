@@ -31,6 +31,91 @@ internal static class Review2Tests
     }
     internal static void Run()
     {
+        Program.Test("missing annotation chunk loads empty/editable with a one-time notice and no metadata nesting", () =>
+        {
+            var root = Program.Save(new HopperDraw()); root.RemoveChunk("HopperDraw");
+            root.SetInt32("ShapeCount", 123); // Unsupported pre-v1 data must never be interpreted or captured.
+            var c = Program.Load(root);
+            Program.Check(c.CanEditShapes && c.Shapes.Count == 0 && c.LoadWarning == null, "missing payload locked component");
+            Program.Check(c.RuntimeMessages(GH_RuntimeMessageLevel.Warning).Any(m => m.Contains("pre-v1")), "missing one-time notice");
+            var saved = Program.Save(c).FindChunk("HopperDraw");
+            Program.Check(!saved.ChunkExists("Attributes") && !saved.ChunkExists("param_input", 0) && !saved.ItemExists("ShapeCount"), "nested GH/legacy metadata");
+            c.Shapes.Add(Line());
+            c.ClearRuntimeMessages();
+            typeof(HopperDraw).GetMethod("SolveInstance", Private).Invoke(c, new object[] { new FakeAccess(false, true, 0, Color.Black, 8d, 0, 1) });
+            Program.Check(c.RuntimeMessages(GH_RuntimeMessageLevel.Warning).Count == 0, "one-time notice repeated on solve");
+            Program.Check(Program.RoundTrip(c, true).CanEditShapes, "new annotation data not editable");
+        });
+        Program.Test("missing written style fields retain defaults with persistent diagnostics", () =>
+        {
+            foreach (string field in new[] { "ThickMult", "LineType", "HasColor" })
+            {
+                var c = new HopperDraw(); c.Shapes.Add(Line()); var root = Program.Save(c);
+                ((GH_IWriter)root.FindChunk("HopperDraw").FindChunk("Shapes").FindChunk("Shape", 0)).RemoveItem(field);
+                c = Program.Load(root);
+                Program.Check(c.Shapes[0] is LineShape && c.LoadWarning.Contains(field) && c.Shapes[0].ThicknessMultiplier == 1, "missing shape style silently defaulted");
+                c.SelectedShapeIndices.Add(0); c.SetSelectedColor(Color.Red);
+                Program.Check(c.LoadWarning.Contains(field), "edit erased shape diagnostic");
+            }
+            foreach (string field in new[] { "Color", "Thickness", "DrawOrder", "Visible" })
+            {
+                var c = new HopperDraw(); c.Shapes.Add(Line()); var root = Program.Save(c);
+                ((GH_IWriter)root.FindChunk("HopperDraw")).RemoveItem(field);
+                c = Program.Load(root);
+                Program.Check(c.CanEditShapes && c.LoadWarning.Contains(field) && c.LineThickness == 8 && c.DrawOrder == 1 && c.Visible, "missing component style silently defaulted");
+                c.SelectedShapeIndices.Add(0); c.SetSelectedColor(Color.Red);
+                Program.Check(c.LoadWarning.Contains(field), "edit erased component diagnostic");
+                c.ClearRuntimeMessages(); Call(c, "SolveInstance", new FakeAccess(false, true, 0, Color.Black, 8d, 0, 1));
+                Program.Check(c.RuntimeMessages(GH_RuntimeMessageLevel.Warning).Any(m => m.Contains(field)), "solve lost component warning");
+                Program.Check(c.Read(Program.Save(new HopperDraw())) && c.LoadWarning == null, "successful read retained old diagnostic");
+            }
+        });
+        Program.Test("component diagnostics persist through edits and are cleared/restored by clear undo", () =>
+        {
+            var c = new HopperDraw(); c.Shapes.Add(Line()); var root = Program.Save(c); var payload = (GH_IWriter)root.FindChunk("HopperDraw");
+            payload.RemoveItem("Thickness"); payload.SetDouble("Thickness", double.MaxValue);
+            c = Program.Load(root); string warning = c.LoadWarning;
+            c.SelectedShapeIndices.Add(0); c.SetSelectedColor(Color.Blue);
+            Program.Check(c.LoadWarning == warning, "first edit erased component diagnostic");
+            var undo = new ShapeEditUndoAction(c, Enumerable.Empty<IGH_DocumentObject>());
+            c.ClearAll(); Program.Check(c.LoadWarning == null, "clear retained diagnostics");
+            undo.Swap(null, c); Program.Check(c.LoadWarning == warning, "clear undo lost component diagnostic");
+            undo.Swap(null, c); Program.Check(c.LoadWarning == null, "clear redo retained diagnostic");
+        });
+        Program.Test("additive shape/component/list extensions survive XML/binary reads, edits, duplicate and undo", () =>
+        {
+            var c = new HopperDraw(); var group = new DrawShapeGroup(); group.Children.Add(Line()); c.Shapes.Add(group);
+            var root = Program.Save(c); var payload = (GH_Chunk)root.FindChunk("HopperDraw");
+            payload.SetDouble("FutureOpacity", 0.375); payload.SetString("Color", 7, "indexed extension");
+            payload.CreateChunk("Extension", 9).CreateChunk("Nested").SetByteArray("Bytes", new byte[] { 0, 2, 255 });
+            var list = (GH_Chunk)payload.FindChunk("Shapes"); list.SetString("FutureListMode", "preserve"); list.CreateChunk("IndexExtension").SetInt32("Value", 42);
+            var record = (GH_Chunk)list.FindChunk("Shape", 0); record.SetString("GroupFeature", "future group style");
+            var children = (GH_Chunk)record.FindChunk("Children"); children.SetDouble("ChildFeature", 0.75); children.CreateChunk("ChildIndexExtension").SetInt32("Value", 3);
+            var line = (GH_Chunk)children.FindChunk("Shape", 0); line.SetDouble("Opacity", 0.5); line.SetString("Kind", 13, "indexed shape key");
+            line.CreateChunk("Extension").SetString("Label", "future line metadata");
+            c = Program.Load(root); Program.Check(c.CanEditShapes && c.LoadWarning == null, "additive extension made v1 unreadable");
+            var snapshot = new ShapeEditUndoAction(c, Enumerable.Empty<IGH_DocumentObject>());
+            c.Shapes[0].Move(25, 10); snapshot.Swap(null, c); snapshot.Swap(null, c);
+            c.Shapes.Add(c.Shapes[0].Clone()); c.BorderColor = Color.Red;
+            foreach (bool binary in new[] { false, true })
+            {
+                var copy = Program.RoundTrip(Program.RoundTrip(c, binary), binary);
+                Program.Check(copy.CanEditShapes && copy.LoadWarning == null && copy.BorderColor.ToArgb() == Color.Red.ToArgb(), "extension affected normal edits");
+                var saved = Program.Save(copy).FindChunk("HopperDraw");
+                Program.Check(saved.GetDouble("FutureOpacity") == 0.375 && saved.GetString("Color", 7) == "indexed extension", "component unknown items lost");
+                Program.Check(saved.FindChunk("Extension", 9).FindChunk("Nested").GetByteArray("Bytes").SequenceEqual(new byte[] { 0, 2, 255 }), "component unknown chunks lost");
+                var savedList = saved.FindChunk("Shapes");
+                Program.Check(savedList.GetString("FutureListMode") == "preserve" && savedList.FindChunk("IndexExtension").GetInt32("Value") == 42, "list extensions lost");
+                for (int i = 0; i < 2; i++)
+                {
+                    var savedGroup = savedList.FindChunk("Shape", i); var savedChildren = savedGroup.FindChunk("Children"); var savedLine = savedChildren.FindChunk("Shape", 0);
+                    Program.Check(savedGroup.GetString("GroupFeature") == "future group style" && savedChildren.GetDouble("ChildFeature") == 0.75 && savedChildren.FindChunk("ChildIndexExtension").GetInt32("Value") == 3, "group extensions lost");
+                    Program.Check(savedLine.GetDouble("Opacity") == 0.5 && savedLine.GetString("Kind", 13) == "indexed shape key" && savedLine.FindChunk("Extension").GetString("Label") == "future line metadata", "leaf extensions lost");
+                    Program.Check(savedLine.GetDoubleArray("X")[0] == 35, "extension restored old geometry");
+                }
+                Program.Check(copy.Shapes[0].PersistentId != copy.Shapes[1].PersistentId, "extension copied known ID on duplicate");
+            }
+        });
         Program.Test("read-only components cannot win fallback, selected, or editing ownership", () =>
         {
             var opaque = ReadOnly(); var editable = new HopperDraw();

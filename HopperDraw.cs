@@ -282,11 +282,16 @@ namespace hopperdraw
             ClearCapturedGHObjects();
         }
 
-        internal void RestoreShapes(List<DrawShape> shapes)
+        internal void RestoreShapes(List<DrawShape> shapes, IEnumerable<string> componentDiagnostics = null)
         {
             CancelDrawing();
             ClearSelection();
             Shapes = shapes;
+            if (componentDiagnostics != null)
+            {
+                _componentLoadDiagnostics.Clear();
+                _componentLoadDiagnostics.AddRange(componentDiagnostics);
+            }
             RefreshShapeWarnings();
             MarkDocumentModified();
             _canvas?.Invalidate();
@@ -305,8 +310,7 @@ namespace hopperdraw
 
         private void RefreshShapeWarnings()
         {
-            if (_opaquePayload != null) return;
-            var messages = new List<string>();
+            var messages = new List<string>(_componentLoadDiagnostics);
             CollectDiagnostics(Shapes, messages);
             string warning = messages.Count == 0 ? null : string.Join(" ", messages.Distinct());
             if (_loadWarning != warning)
@@ -325,8 +329,11 @@ namespace hopperdraw
         private static void CollectDiagnostics(IEnumerable<DrawShape> shapes, List<string> messages)
         {
             foreach (var shape in shapes)
+            {
+                messages.AddRange(shape.LoadDiagnostics);
                 if (shape is OpaqueShape opaque) messages.Add(opaque.Diagnostic);
                 else if (shape is DrawShapeGroup group) CollectDiagnostics(group.Children, messages);
+            }
         }
 
         internal void SetSelectedColor(Color color)
@@ -1194,8 +1201,9 @@ namespace hopperdraw
 
         public void ClearAll()
         {
-            if (!CanEditShapes || Shapes.Count == 0 || !RecordShapeUndo("Clear annotations")) return;
+            if (!CanEditShapes || Shapes.Count == 0 && _componentLoadDiagnostics.Count == 0 || !RecordShapeUndo("Clear annotations")) return;
             Shapes.Clear();
+            _componentLoadDiagnostics.Clear();
             MarkDocumentModified();
             CancelDrawing();
             ClearSelection();
@@ -1247,7 +1255,7 @@ namespace hopperdraw
                 UngroupSelectedGroups();
                 RequestCanvasRedraw();
             }) { Enabled = SelectedShapeIndices.Any(idx => idx >= 0 && idx < Shapes.Count && Shapes[idx] is DrawShapeGroup) });
-            menu.Items.Add(new ToolStripMenuItem("Clear all HopperDraw shapes", null, (s, e) => ClearAll()) { Enabled = Shapes.Count > 0 });
+            menu.Items.Add(new ToolStripMenuItem("Clear all HopperDraw shapes", null, (s, e) => ClearAll()) { Enabled = Shapes.Count > 0 || _componentLoadDiagnostics.Count > 0 });
             return true;
         }
 
@@ -1388,6 +1396,10 @@ namespace hopperdraw
         // Unknown schema payloads are read-only and copied without interpreting their contents.
         private GH_IReader _opaquePayload;
         private string _loadWarning;
+        private GH_LooseChunk _payloadExtensions;
+        private GH_LooseChunk _shapeListExtensions;
+        private readonly List<string> _componentLoadDiagnostics = new List<string>();
+        internal IEnumerable<string> ComponentLoadDiagnostics => _componentLoadDiagnostics;
         internal string LoadWarning => _loadWarning;
         internal bool CanEditShapes => _opaquePayload == null;
 
@@ -1405,42 +1417,54 @@ namespace hopperdraw
             if (_opaquePayload != null) ShapeSerializer.CopyChunk(_opaquePayload, payload);
             else
             {
+                if (_payloadExtensions != null) ShapeSerializer.CopyChunk(_payloadExtensions, payload);
                 payload.SetInt32("FormatVersion", ShapeSerializer.CurrentFormat);
                 payload.SetInt32("Color", BorderColor.ToArgb());
                 payload.SetDouble("Thickness", LineThickness);
                 payload.SetInt32("DrawOrder", DrawOrder);
                 payload.SetBoolean("Visible", Visible);
-                ShapeSerializer.WriteShapeList(payload, "Shapes", Shapes);
+                ShapeSerializer.WriteShapeList(payload, "Shapes", Shapes, _shapeListExtensions);
             }
             return true;
         }
 
         public override bool Read(GH_IReader reader)
         {
-            // GH omits a component when Read returns false. Keep recovery data and warn instead.
+            // Base metadata/wires belong to GH. Let native failures propagate or return false.
+            ClearRuntimeMessages();
+            if (!base.Read(reader)) return false;
+            GH_IReader payload = null;
             try
             {
-                ClearRuntimeMessages();
                 _loadWarning = null;
                 _opaquePayload = null;
+                _payloadExtensions = _shapeListExtensions = null;
+                _componentLoadDiagnostics.Clear();
                 CancelDrawing();
                 ClearSelection();
                 Shapes = new List<DrawShape>();
-                if (!base.Read(reader)) _loadWarning = "Component metadata could not be fully read.";
                 _shapeOwnerId = InstanceGuid;
-                var payload = reader.FindChunk("HopperDraw");
-                if (payload == null) throw new InvalidOperationException("Missing HopperDraw payload (legacy files are unsupported).");
+                payload = reader.FindChunk("HopperDraw");
+                if (payload == null)
+                {
+                    // No legacy reader or base-metadata capture. This notice is deliberately one-time.
+                    AddRuntimeMessage(GH_RuntimeMessageLevel.Warning,
+                        "No HopperDraw v1 annotation data found; pre-v1 formats are not supported.");
+                    return true;
+                }
                 int version = -1;
                 if (!payload.TryGetInt32("FormatVersion", ref version) || version != ShapeSerializer.CurrentFormat)
                 {
                     _opaquePayload = ShapeSerializer.Capture(payload);
-                    _loadWarning = "Unsupported HopperDraw format " + version + ". Annotation payload preserved; editing disabled.";
+                    _componentLoadDiagnostics.Add("Unsupported HopperDraw format " + version + ". Annotation payload preserved; editing disabled.");
                 }
                 else
                 {
                     int color = Color.Black.ToArgb(), order = 1;
                     double width = 8;
                     bool visible = true;
+                    foreach (string field in new[] { "Color", "Thickness", "DrawOrder", "Visible" })
+                        if (!payload.ItemExists(field)) _componentLoadDiagnostics.Add("Missing optional component " + field + "; default used.");
                     if (payload.ItemExists("Color") && !payload.TryGetInt32("Color", ref color) ||
                         payload.ItemExists("Thickness") && !payload.TryGetDouble("Thickness", ref width) ||
                         payload.ItemExists("DrawOrder") && !payload.TryGetInt32("DrawOrder", ref order) ||
@@ -1452,22 +1476,19 @@ namespace hopperdraw
                     _lineThickness = LineThickness;
                     DrawOrder = StyleValidation.Clamp(order, 0, 1);
                     Visible = visible;
-                    Shapes = ShapeSerializer.ReadShapeList(payload, "Shapes", out var diagnostics);
-                    if (invalidStyle) diagnostics.Add("Invalid component style clamped/defaulted for safe paint.");
-                    if (diagnostics.Count > 0) _loadWarning = string.Join(" ", diagnostics);
+                    Shapes = ShapeSerializer.ReadShapeList(payload, "Shapes", out _, out _shapeListExtensions);
+                    _payloadExtensions = ShapeSerializer.Residual(payload,
+                        new[] { "FormatVersion", "Color", "Thickness", "DrawOrder", "Visible" }, "Shapes");
+                    if (invalidStyle) _componentLoadDiagnostics.Add("Invalid component style clamped/defaulted for safe paint.");
                 }
             }
             catch (Exception ex)
             {
-                // An invalid list is not an empty list. Preserve the entire annotation payload.
-                GH_IReader payload = null;
-                try { payload = reader?.FindChunk("HopperDraw"); } catch (Exception) { }
-                // Retain the host's raw chunk as a last resort if even cloning the data failed.
-                _opaquePayload = payload ?? reader ?? new GH_LooseChunk("Unreadable");
-                _loadWarning = "Unreadable HopperDraw data preserved: " + ex.Message;
+                // Guard annotation data only; never nest the entire GH component into this payload.
+                if (payload != null) _opaquePayload = payload;
+                _componentLoadDiagnostics.Add("Unreadable HopperDraw annotation data preserved: " + ex.Message);
             }
-            try { ReportLoadWarning(); }
-            catch (Exception ex) { System.Diagnostics.Debug.WriteLine("HopperDraw load warning: " + ex.Message); }
+            RefreshShapeWarnings();
             return true;
         }
 

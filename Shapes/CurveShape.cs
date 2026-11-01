@@ -162,13 +162,15 @@ namespace hopperdraw
 
         public override DrawShape Clone()
         {
-            return new CurveShape(new List<Point3d>(Points), Closed)
+            var clone = new CurveShape(new List<Point3d>(Points), Closed)
             {
                 ThicknessMultiplier = ThicknessMultiplier,
                 OverrideColor = OverrideColor,
                 LineType = LineType,
                 Id = HopperDraw.GetNextId()
             };
+            CopyArchiveStateTo(clone);
+            return clone;
         }
     }
 }
