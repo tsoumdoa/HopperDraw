@@ -115,13 +115,13 @@ namespace hopperdraw
 
         protected override void RegisterInputParams(GH_Component.GH_InputParamManager pManager)
         {
-            pManager.AddBooleanParameter("Active", "A", "Enable border drawing", GH_ParamAccess.item, true);
-            pManager.AddBooleanParameter("Show", "S", "Display borders on canvas", GH_ParamAccess.item, true);
+            pManager.AddBooleanParameter("Active", "A", "Enable annotation editing and double-D drawing activation. Existing annotations remain visible when inactive", GH_ParamAccess.item, true);
+            pManager.AddBooleanParameter("Show", "S", "Show annotations on the Grasshopper canvas", GH_ParamAccess.item, true);
             pManager.AddIntegerParameter("DrawMode", "M", "Drawing mode: 0=Line, 1=Polyline, 2=Frame, 3=Curve", GH_ParamAccess.item, 0);
-            pManager.AddColourParameter("Color", "C", "Default border color. Use the component menu for per-shape color overrides", GH_ParamAccess.item, Color.Black);
-            pManager.AddNumberParameter("Thickness", "T", "Base thickness. Use the component menu for per-shape thickness", GH_ParamAccess.item, 8.0);
-            pManager.AddIntegerParameter("LineType", "L", "Line type: 0=Solid, 1=Dash, 2=Dot, 3=DashDot. Use the component menu for per-shape line type", GH_ParamAccess.item, 0);
-            pManager.AddIntegerParameter("DrawOrder", "O", "0=Below components, 1=Above components", GH_ParamAccess.item, 1);
+            pManager.AddColourParameter("Color", "C", "Default annotation color. Use the component menu for per-shape color overrides", GH_ParamAccess.item, Color.Black);
+            pManager.AddNumberParameter("Thickness", "T", "Base annotation thickness (0.1-1000 canvas units, default 8). Effective width is capped at 1000; use the menu for per-shape multipliers", GH_ParamAccess.item, 8.0);
+            pManager.AddIntegerParameter("LineType", "L", "Annotation line type: 0=Solid, 1=Dash, 2=Dot, 3=DashDot, 4=DashDotDot. Use the component menu for per-shape line type", GH_ParamAccess.item, 0);
+            pManager.AddIntegerParameter("DrawOrder", "O", "Annotation order: 0=Below wires and components, 1=Above (default). Editing handles and previews stay on top", GH_ParamAccess.item, 1);
         }
 
         protected override void AfterSolveInstance()
