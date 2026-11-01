@@ -67,32 +67,6 @@ namespace hopperdraw
             }
         }
 
-        public override void Write(GH_IWriter writer, int index)
-        {
-            writer.SetDouble($"TLX{index}", TopLeft.X);
-            writer.SetDouble($"TLY{index}", TopLeft.Y);
-            writer.SetDouble($"TLZ{index}", TopLeft.Z);
-            writer.SetDouble($"TRX{index}", TopRight.X);
-            writer.SetDouble($"TRY{index}", TopRight.Y);
-            writer.SetDouble($"TRZ{index}", TopRight.Z);
-            writer.SetDouble($"BRX{index}", BottomRight.X);
-            writer.SetDouble($"BRY{index}", BottomRight.Y);
-            writer.SetDouble($"BRZ{index}", BottomRight.Z);
-            writer.SetDouble($"BLX{index}", BottomLeft.X);
-            writer.SetDouble($"BLY{index}", BottomLeft.Y);
-            writer.SetDouble($"BLZ{index}", BottomLeft.Z);
-            WriteCommonProperties(writer, index);
-        }
-
-        public override void Read(GH_IReader reader, int index)
-        {
-            TopLeft = new Point3d(reader.GetDouble($"TLX{index}"), reader.GetDouble($"TLY{index}"), reader.GetDouble($"TLZ{index}"));
-            TopRight = new Point3d(reader.GetDouble($"TRX{index}"), reader.GetDouble($"TRY{index}"), reader.GetDouble($"TRZ{index}"));
-            BottomRight = new Point3d(reader.GetDouble($"BRX{index}"), reader.GetDouble($"BRY{index}"), reader.GetDouble($"BRZ{index}"));
-            BottomLeft = new Point3d(reader.GetDouble($"BLX{index}"), reader.GetDouble($"BLY{index}"), reader.GetDouble($"BLZ{index}"));
-            ReadCommonProperties(reader, index);
-        }
-
         public override DrawShape Clone()
         {
             return new FrameShape(TopLeft, TopRight, BottomRight, BottomLeft)

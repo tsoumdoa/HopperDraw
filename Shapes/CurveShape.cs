@@ -64,34 +64,6 @@ namespace hopperdraw
                 Points[pointIndex] = newPos;
         }
 
-        public override void Write(GH_IWriter writer, int index)
-        {
-            writer.SetInt32($"PointCount{index}", Points.Count);
-            writer.SetBoolean($"Closed{index}", Closed);
-            for (int i = 0; i < Points.Count; i++)
-            {
-                writer.SetDouble($"Pt{i}X{index}", Points[i].X);
-                writer.SetDouble($"Pt{i}Y{index}", Points[i].Y);
-                writer.SetDouble($"Pt{i}Z{index}", Points[i].Z);
-            }
-            WriteCommonProperties(writer, index);
-        }
-
-        public override void Read(GH_IReader reader, int index)
-        {
-            int count = reader.GetInt32($"PointCount{index}");
-            Closed = reader.GetBoolean($"Closed{index}");
-            Points.Clear();
-            for (int i = 0; i < count; i++)
-            {
-                double px = reader.GetDouble($"Pt{i}X{index}");
-                double py = reader.GetDouble($"Pt{i}Y{index}");
-                double pz = reader.GetDouble($"Pt{i}Z{index}");
-                Points.Add(new Point3d(px, py, pz));
-            }
-            ReadCommonProperties(reader, index);
-        }
-
         private List<PointF> SampleCurve(int segmentsPerSpan)
         {
             var result = new List<PointF>();

@@ -86,39 +86,6 @@ namespace hopperdraw
         {
         }
 
-        public override void Write(GH_IWriter writer, int index)
-        {
-            writer.SetInt32($"GroupChildCount{index}", Children.Count);
-            for (int i = 0; i < Children.Count; i++)
-            {
-                Children[i].Write(writer, 1000 * index + i);
-            }
-            WriteCommonProperties(writer, index);
-        }
-
-        public override void Read(GH_IReader reader, int index)
-        {
-            int childCount = reader.GetInt32($"GroupChildCount{index}");
-            Children.Clear();
-            for (int i = 0; i < childCount; i++)
-            {
-                int childIndex = 1000 * index + i;
-                int type = reader.GetInt32($"Type{childIndex}");
-                DrawShape child;
-                switch (type)
-                {
-                    case 0: child = new LineShape(); break;
-                    case 1: child = new PolylineShape(); break;
-                    case 2: child = new FrameShape(); break;
-                    case 3: child = new CurveShape(); break;
-                    default: child = new LineShape(); break;
-                }
-                child.Read(reader, childIndex);
-                Children.Add(child);
-            }
-            ReadCommonProperties(reader, index);
-        }
-
         public override DrawShape Clone()
         {
             var group = new DrawShapeGroup();

@@ -47,30 +47,6 @@ namespace hopperdraw
             else if (pointIndex == 1) End = newPos;
         }
 
-        public override void Write(GH_IWriter writer, int index)
-        {
-            writer.SetDouble($"StartX{index}", Start.X);
-            writer.SetDouble($"StartY{index}", Start.Y);
-            writer.SetDouble($"StartZ{index}", Start.Z);
-            writer.SetDouble($"EndX{index}", End.X);
-            writer.SetDouble($"EndY{index}", End.Y);
-            writer.SetDouble($"EndZ{index}", End.Z);
-            WriteCommonProperties(writer, index);
-        }
-
-        public override void Read(GH_IReader reader, int index)
-        {
-            double sx = reader.GetDouble($"StartX{index}");
-            double sy = reader.GetDouble($"StartY{index}");
-            double sz = reader.GetDouble($"StartZ{index}");
-            double ex = reader.GetDouble($"EndX{index}");
-            double ey = reader.GetDouble($"EndY{index}");
-            double ez = reader.GetDouble($"EndZ{index}");
-            Start = new Point3d(sx, sy, sz);
-            End = new Point3d(ex, ey, ez);
-            ReadCommonProperties(reader, index);
-        }
-
         public override DrawShape Clone()
         {
             return new LineShape(Start, End)

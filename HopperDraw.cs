@@ -162,6 +162,7 @@ namespace hopperdraw
 #if DEBUG
             System.Diagnostics.Debug.WriteLine($"[HopperDraw SolveInstance] Called. _isActivated={_isActivated}");
 #endif
+            ReportLoadWarning();
             bool active = true;
             if (!DA.GetData(0, ref active)) return;
 
@@ -305,7 +306,7 @@ namespace hopperdraw
 
         private bool CanHandleCanvasEvent(object sender)
         {
-            return _isActivated && !Locked && Visible &&
+            return CanEditShapes && _isActivated && !Locked && Visible &&
                    ReferenceEquals(sender, _canvas) &&
                    ReferenceEquals(_canvas?.Document, OnPingDocument()) &&
                    IsInputOwner();
@@ -1376,108 +1377,97 @@ namespace hopperdraw
             m_attributes = new HopperDrawUIAttributes(this);
         }
 
+        // Unknown schema payloads are read-only and copied without interpreting their contents.
+        private GH_LooseChunk _opaquePayload;
+        private string _loadWarning;
+        internal string LoadWarning => _loadWarning;
+        internal bool CanEditShapes => _opaquePayload == null;
+
+        private void ReportLoadWarning()
+        {
+            if (!string.IsNullOrEmpty(_loadWarning))
+                AddRuntimeMessage(GH_RuntimeMessageLevel.Warning, _loadWarning);
+        }
+
         public override bool Write(GH_IWriter writer)
         {
-#if DEBUG
-            System.Diagnostics.Debug.WriteLine($"[HopperDraw Write] Called. Shapes.Count={Shapes.Count}, Color={BorderColor}, Thickness={LineThickness}, DrawOrder={DrawOrder}");
-#endif
-            bool result = base.Write(writer);
-            if (!result) return false;
-
-            writer.SetInt32("ShapeCount", Shapes.Count);
-            writer.SetInt32("Color", BorderColor.ToArgb());
-            writer.SetDouble("Thickness", LineThickness);
-            writer.SetInt32("DrawOrder", DrawOrder);
-            writer.SetInt32("Visible", Visible ? 1 : 0);
-            for (int i = 0; i < Shapes.Count; i++)
+            EnsureShapeIdentity();
+            if (!base.Write(writer)) return false;
+            var payload = writer.CreateChunk("HopperDraw");
+            if (_opaquePayload != null) ShapeSerializer.CopyChunk(_opaquePayload, payload);
+            else
             {
-#if DEBUG
-                System.Diagnostics.Debug.WriteLine($"[HopperDraw Write] Writing shape {i} of type {Shapes[i].GetType().Name}");
-#endif
-                Shapes[i].Write(writer, i);
+                payload.SetInt32("FormatVersion", ShapeSerializer.CurrentFormat);
+                payload.SetInt32("Color", BorderColor.ToArgb());
+                payload.SetDouble("Thickness", LineThickness);
+                payload.SetInt32("DrawOrder", DrawOrder);
+                payload.SetBoolean("Visible", Visible);
+                ShapeSerializer.WriteShapeList(payload, "Shapes", Shapes);
             }
             return true;
         }
 
         public override bool Read(GH_IReader reader)
         {
-#if DEBUG
-            System.Diagnostics.Debug.WriteLine($"[HopperDraw Read] Called. reader={reader == null}");
-#endif
+            // GH omits a component when Read returns false. Keep recovery data and warn instead.
+            _loadWarning = null;
+            _opaquePayload = null;
+            CancelDrawing();
+            ClearSelection();
+            Shapes = new List<DrawShape>();
             try
             {
-                bool result = base.Read(reader);
-#if DEBUG
-                System.Diagnostics.Debug.WriteLine($"[HopperDraw Read] base.Read returned {result}");
-#endif
-                if (!result) return false;
-
-                CancelDrawing();
-                Shapes.Clear();
-                int count = reader.GetInt32("ShapeCount");
-#if DEBUG
-                System.Diagnostics.Debug.WriteLine($"[HopperDraw Read] ShapeCount={count}");
-#endif
-                BorderColor = Color.FromArgb(reader.GetInt32("Color"));
-                LineThickness = (float)reader.GetDouble("Thickness");
-                DrawOrder = reader.GetInt32("DrawOrder");
-                Visible = reader.GetInt32("Visible") == 1;
-#if DEBUG
-                System.Diagnostics.Debug.WriteLine($"[HopperDraw Read] Color={BorderColor}, Thickness={LineThickness}, DrawOrder={DrawOrder}");
-#endif
-                for (int i = 0; i < count; i++)
+                if (!base.Read(reader)) _loadWarning = "Component metadata could not be fully read.";
+                _shapeOwnerId = InstanceGuid;
+                var payload = reader.FindChunk("HopperDraw");
+                if (payload == null) throw new InvalidOperationException("Missing HopperDraw payload (legacy files are unsupported).");
+                int version = -1;
+                if (!payload.TryGetInt32("FormatVersion", ref version) || version != ShapeSerializer.CurrentFormat)
                 {
-#if DEBUG
-                    System.Diagnostics.Debug.WriteLine($"[HopperDraw Read] About to read Type{i}");
-#endif
-                    int type = reader.GetInt32($"Type{i}");
-#if DEBUG
-                    System.Diagnostics.Debug.WriteLine($"[HopperDraw Read] Reading shape {i} of type {type}");
-#endif
-                    DrawShape shape;
-                    switch (type)
-                    {
-                        case 0:
-                            shape = new LineShape();
-                            break;
-                        case 1:
-                            shape = new PolylineShape();
-                            break;
-                        case 2:
-                            shape = new FrameShape();
-                            break;
-                        case 3:
-                            shape = new CurveShape();
-                            break;
-                        case 4:
-                            shape = new DrawShapeGroup();
-                            break;
-                        default:
-                            shape = new LineShape();
-                            break;
-                    }
-#if DEBUG
-                    System.Diagnostics.Debug.WriteLine($"[HopperDraw Read] Calling shape.Read for shape {i}");
-#endif
-                    shape.Read(reader, i);
-#if DEBUG
-                    System.Diagnostics.Debug.WriteLine($"[HopperDraw Read] Adding shape {i} to list");
-#endif
-                    Shapes.Add(shape);
+                    _opaquePayload = ShapeSerializer.Capture(payload);
+                    _loadWarning = "Unsupported HopperDraw format " + version + ". Annotation payload preserved; editing disabled.";
                 }
-#if DEBUG
-                System.Diagnostics.Debug.WriteLine($"[HopperDraw Read] Done. Shapes.Count={Shapes.Count}");
-#endif
-                return true;
+                else
+                {
+                    int color = Color.Black.ToArgb(), order = 1;
+                    double width = 8;
+                    bool visible = true;
+                    payload.TryGetInt32("Color", ref color);
+                    payload.TryGetDouble("Thickness", ref width);
+                    payload.TryGetInt32("DrawOrder", ref order);
+                    payload.TryGetBoolean("Visible", ref visible);
+                    BorderColor = Color.FromArgb(color);
+                    LineThickness = (float)width;
+                    _lineThickness = LineThickness;
+                    DrawOrder = order;
+                    Visible = visible;
+                    Shapes = ShapeSerializer.ReadShapeList(payload, "Shapes", out var diagnostics);
+                    if (diagnostics.Count > 0) _loadWarning = string.Join(" ", diagnostics);
+                }
             }
             catch (Exception ex)
             {
-#if DEBUG
-                System.Diagnostics.Debug.WriteLine($"[HopperDraw Read] EXCEPTION: {ex.GetType().Name}: {ex.Message}");
-                System.Diagnostics.Debug.WriteLine($"[HopperDraw Read] StackTrace: {ex.StackTrace}");
-#endif
-                return false;
+                // An invalid list is not an empty list. Preserve the entire annotation payload.
+                var payload = reader?.FindChunk("HopperDraw");
+                _opaquePayload = ShapeSerializer.Capture(payload ?? reader);
+                _loadWarning = "Unreadable HopperDraw data preserved: " + ex.Message;
             }
+            ReportLoadWarning();
+            return true;
+        }
+
+        private Guid _shapeOwnerId;
+        internal void EnsureShapeIdentity()
+        {
+            if (_shapeOwnerId != Guid.Empty && _shapeOwnerId != InstanceGuid)
+                ShapeSerializer.RegenerateIds(Shapes);
+            _shapeOwnerId = InstanceGuid;
+        }
+
+        public override void AddedToDocument(GH_Document document)
+        {
+            EnsureShapeIdentity();
+            base.AddedToDocument(document);
         }
 
         public bool IsActivated => _isActivated;
