@@ -35,19 +35,53 @@ namespace hopperdraw
 
         public override (bool hit, int pointIndex) HitTest(PointF pt, float tolerance, float thickness)
         {
+            // Samples + bounds are cached and rebuilt only when the control points change
+            // (Points is a public list, so the cache is validated against a copy, O(n)).
+            var samples = CachedSamples(out var bounds);
+            float reach = thickness / 2 + tolerance;
+            if (pt.X < bounds.Left - reach || pt.X > bounds.Right + reach ||
+                pt.Y < bounds.Top - reach || pt.Y > bounds.Bottom + reach)
+                return (false, -1); // samples include every control point, so vertices are inside too
+
             for (int i = 0; i < Points.Count; i++)
             {
                 if (GeometryUtilities.Distance(pt, Points[i].ToPointF()) <= tolerance)
                     return (true, i);
             }
 
-            var curvePoints = SampleCurve(20);
-            for (int i = 0; i < curvePoints.Count - 1; i++)
+            for (int i = 0; i < samples.Length - 1; i++)
             {
-                if (GeometryUtilities.DistanceToSegment(pt, curvePoints[i], curvePoints[i + 1]) <= thickness / 2 + tolerance)
+                if (GeometryUtilities.DistanceToSegment(pt, samples[i], samples[i + 1]) <= reach)
                     return (true, -1);
             }
             return (false, -1);
+        }
+
+        private Point3d[] _cacheKey;
+        private bool _cacheClosed;
+        private PointF[] _cacheSamples = new PointF[0];
+        private RectangleF _cacheBounds;
+
+        private PointF[] CachedSamples(out RectangleF bounds)
+        {
+            bool valid = _cacheKey != null && _cacheClosed == Closed && _cacheKey.Length == Points.Count;
+            for (int i = 0; valid && i < Points.Count; i++) valid = _cacheKey[i] == Points[i];
+            if (!valid)
+            {
+                _cacheKey = Points.ToArray();
+                _cacheClosed = Closed;
+                _cacheSamples = SampleCurve(20).ToArray();
+                if (_cacheSamples.Length == 0 && Points.Count > 0) _cacheSamples = Points.ToPointFArray();
+                float minX = float.MaxValue, minY = float.MaxValue, maxX = float.MinValue, maxY = float.MinValue;
+                foreach (var p in _cacheSamples)
+                {
+                    minX = Math.Min(minX, p.X); minY = Math.Min(minY, p.Y);
+                    maxX = Math.Max(maxX, p.X); maxY = Math.Max(maxY, p.Y);
+                }
+                _cacheBounds = minX > maxX ? RectangleF.Empty : RectangleF.FromLTRB(minX, minY, maxX, maxY);
+            }
+            bounds = _cacheBounds;
+            return _cacheSamples;
         }
 
         public override PointF[] GetPoints() => Points.ToPointFArray();

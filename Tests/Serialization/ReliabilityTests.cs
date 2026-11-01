@@ -3,6 +3,8 @@ using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Reflection;
 using System.Linq;
+using System.Collections.Generic;
+using System.Windows.Forms;
 using GH_IO.Serialization;
 using Grasshopper.GUI.Canvas;
 using Grasshopper.Kernel;
@@ -13,6 +15,79 @@ internal static class ReliabilityTests
 {
     internal static void Run()
     {
+        Program.Test("DrawOrder channels and grouped child styles render to real bitmaps", () =>
+        {
+            var c = new HopperDraw { LineThickness = 4 };
+            var group = new DrawShapeGroup { OverrideColor = Color.Lime, ThicknessMultiplier = 9 };
+            group.Children.Add(new LineShape(new Point3d(20, 50, 0), new Point3d(200, 50, 0)) { OverrideColor = Color.Red });
+            group.Children.Add(new LineShape(new Point3d(20, 100, 0), new Point3d(200, 100, 0)) { OverrideColor = Color.Blue, ThicknessMultiplier = 3 });
+            c.Shapes.Add(group);
+            var render = typeof(HopperDrawUIAttributes).GetMethod("Render", BindingFlags.NonPublic | BindingFlags.Instance);
+            using (var canvas = new GH_Canvas())
+            using (var bitmap = new Bitmap(250, 200))
+            using (var graphics = Graphics.FromImage(bitmap))
+            {
+                foreach (int order in new[] { 0, 1 })
+                {
+                    c.DrawOrder = order;
+                    foreach (var channel in new[] { GH_CanvasChannel.Groups, GH_CanvasChannel.Overlay })
+                    {
+                        graphics.Clear(Color.White);
+                        render.Invoke(c.Attributes, new object[] { canvas, graphics, channel });
+                        bool expected = order == 0 ? channel == GH_CanvasChannel.Groups : channel == GH_CanvasChannel.Overlay;
+                        Program.Check((bitmap.GetPixel(100, 50).ToArgb() == Color.Red.ToArgb()) == expected, "wrong render channel");
+                        if (expected)
+                        {
+                            Program.Check(bitmap.GetPixel(100, 100).ToArgb() == Color.Blue.ToArgb(), "group flattened color");
+                            Program.Check(bitmap.GetPixel(100, 104).ToArgb() == Color.Blue.ToArgb() && bitmap.GetPixel(100, 54).ToArgb() == Color.White.ToArgb(), "group flattened width");
+                        }
+                    }
+                }
+            }
+        });
+        Program.Test("curve cache matches reference picking and invalidates on all geometry changes", () =>
+        {
+            var random = new Random(99);
+            var sample = typeof(CurveShape).GetMethod("SampleCurve", BindingFlags.Instance | BindingFlags.NonPublic);
+            var cache = typeof(CurveShape).GetField("_cacheSamples", BindingFlags.Instance | BindingFlags.NonPublic);
+            for (int i = 0; i < 100; i++)
+            {
+                var curve = new CurveShape(Enumerable.Range(0, random.Next(1, 12)).Select(_ => new Point3d(random.Next(500), random.Next(500), 0)).ToList(), i % 2 == 0);
+                for (int k = 0; k < 100; k++)
+                {
+                    if (k == 50) { curve.Points[0] = new Point3d(15, 25, 0); curve.Move(7, -3); curve.Closed = !curve.Closed; }
+                    var point = new PointF(random.Next(-50, 550), random.Next(-50, 550));
+                    var got = curve.HitTest(point, 15, 8);
+                    var want = (hit: false, index: -1);
+                    for (int p = 0; p < curve.Points.Count; p++)
+                        if (GeometryUtilities.Distance(point, curve.Points[p].ToPointF()) <= 15) { want = (true, p); break; }
+                    var points = (List<PointF>)sample.Invoke(curve, new object[] { 20 });
+                    if (!want.hit) for (int p = 0; p < points.Count - 1; p++)
+                        if (GeometryUtilities.DistanceToSegment(point, points[p], points[p + 1]) <= 19) { want = (true, -1); break; }
+                    Program.Check(got.hit == want.hit && got.pointIndex == want.index, "cache differs from reference");
+                    var saved = cache.GetValue(curve); curve.HitTest(point, 15, 8);
+                    Program.Check(ReferenceEquals(saved, cache.GetValue(curve)), "unchanged geometry rebuilt cache");
+                }
+            }
+        });
+        Program.Test("idle mouse moves do not invalidate an unchanged empty hover", () =>
+        {
+            using (var canvas = new GH_Canvas())
+            {
+                var c = new HopperDraw();
+                Set(c, "_canvas", canvas); Set(c, "_isActivated", true); Set(c, "_drawingModeEnabled", true);
+                var owner = typeof(HopperDraw).GetField("_capturingOwner", BindingFlags.Static | BindingFlags.NonPublic);
+                owner.SetValue(null, c);
+                try
+                {
+                    var handle = canvas.Handle;
+                    int invalidations = 0; canvas.Invalidated += (s, e) => invalidations++;
+                    for (int i = 0; i < 100; i++) Invoke(c, "Canvas_MouseMove", canvas, new MouseEventArgs(MouseButtons.None, 0, i, i, 0));
+                    Program.Check(invalidations == 0, "idle movement repaints");
+                }
+                finally { owner.SetValue(null, null); }
+            }
+        });
         Program.Test("snapshot undo swaps each mutation without losing IDs or selection state", () =>
         {
             Action<HopperDraw>[] edits = {

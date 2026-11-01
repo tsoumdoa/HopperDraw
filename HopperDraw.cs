@@ -229,7 +229,7 @@ namespace hopperdraw
             LineThickness = _lineThickness;
             DrawOrder = drawOrder;
 
-            ExpirePreview(false);
+            RequestCanvasRedraw();
         }
 
         private int ValidateRange(string name, int value, int minimum, int maximum)
@@ -343,6 +343,19 @@ namespace hopperdraw
         {
             if (_dragShapeIndex < 0 || _dragShapeIndex >= Shapes.Count) return;
             var shape = Shapes[_dragShapeIndex];
+            if (_dragPointIndex < 0)
+            {
+                var offset = _isFrameDragging ? _dragFrameOffset : _dragOffset;
+                double dx = point.X - offset.X, dy = point.Y - offset.Y;
+                if ((dx == 0 && dy == 0) || GeometryPoints(shape).Any(p =>
+                    !ShapeSerializer.ValidCoordinate(p.X + dx) || !ShapeSerializer.ValidCoordinate(p.Y + dy))) return;
+                if (!EnsureDragUndo()) return;
+                shape.Move(dx, dy);
+                _dragOffset = _dragFrameOffset = point;
+                MarkDocumentModified();
+                _canvas?.Invalidate();
+                return;
+            }
             var proposal = ShapeEditUndoAction.CloneForSnapshot(shape);
             ApplyDragGeometry(proposal, point);
             var before = GeometryPoints(shape);
@@ -385,7 +398,7 @@ namespace hopperdraw
         private void MarkDocumentModified()
         {
             RefreshShapeWarnings();
-            ExpirePreview(false);
+            RequestCanvasRedraw();
             var doc = OnPingDocument();
             if (doc != null)
             {
@@ -683,8 +696,7 @@ namespace hopperdraw
                     MarkDocumentModified();
                     _isDrawing = false;
                     ResetNextShapeOverrides();
-                    ExpireDisplay();
-                    _canvas?.Invalidate();
+                    RequestCanvasRedraw();
                     return;
                 }
                 else if (startDrawing)
@@ -695,8 +707,7 @@ namespace hopperdraw
                     _capturingOwner = this;
                     _lastClickTime = DateTime.Now;
                     _lastClickPosition = pt;
-                    ExpireDisplay();
-                    _canvas?.Invalidate();
+                    RequestCanvasRedraw();
                     return;
                 }
             }
@@ -712,8 +723,7 @@ namespace hopperdraw
                         _acceptDrawingMouseUp = true;
                         _lastClickTime = DateTime.Now;
                         _lastClickPosition = pt;
-                        ExpireDisplay();
-                        _canvas?.Invalidate();
+                        RequestCanvasRedraw();
                         return;
                     }
                 }
@@ -731,8 +741,7 @@ namespace hopperdraw
                     ResetNextShapeOverrides();
                     _lastClickTime = DateTime.Now;
                     _lastClickPosition = pt;
-                    ExpireDisplay();
-                    _canvas?.Invalidate();
+                    RequestCanvasRedraw();
                     return;
                 }
             }
@@ -748,8 +757,7 @@ namespace hopperdraw
                         _acceptDrawingMouseUp = true;
                         _lastClickTime = DateTime.Now;
                         _lastClickPosition = pt;
-                        ExpireDisplay();
-                        _canvas?.Invalidate();
+                        RequestCanvasRedraw();
                         return;
                     }
                 }
@@ -767,8 +775,7 @@ namespace hopperdraw
                     ResetNextShapeOverrides();
                     _lastClickTime = DateTime.Now;
                     _lastClickPosition = pt;
-                    ExpireDisplay();
-                    _canvas?.Invalidate();
+                    RequestCanvasRedraw();
                     return;
                 }
             }
@@ -792,8 +799,7 @@ namespace hopperdraw
                     CreateFrame(_frameFirstCorner, finalPt);
                     _lastClickTime = DateTime.Now;
                     _lastClickPosition = pt;
-                    ExpireDisplay();
-                    _canvas?.Invalidate();
+                    RequestCanvasRedraw();
                     return;
                 }
                 else if (startDrawing)
@@ -804,8 +810,7 @@ namespace hopperdraw
                     _capturingOwner = this;
                     _lastClickTime = DateTime.Now;
                     _lastClickPosition = pt;
-                    ExpireDisplay();
-                    _canvas?.Invalidate();
+                    RequestCanvasRedraw();
                     return;
                 }
             }
@@ -906,8 +911,7 @@ namespace hopperdraw
                 _additiveSelection = shiftPressed;
             }
 
-            ExpireDisplay();
-            _canvas?.Invalidate();
+            RequestCanvasRedraw();
         }
 
         private void CreateFrame(Point3d corner1, Point3d corner2)
@@ -925,7 +929,7 @@ namespace hopperdraw
             Shapes.Add(frameShape);
             MarkDocumentModified();
             ResetNextShapeOverrides();
-            ExpireDisplay();
+            RequestCanvasRedraw();
         }
 
         private void Canvas_MouseMove(object sender, MouseEventArgs e)
@@ -989,9 +993,14 @@ namespace hopperdraw
             else
             {
                 var (shapeIdx, pointIdx) = HitTest(new PointF((float)pt.X, (float)pt.Y));
-                HoveredShapeIndex = shapeIdx >= 0 ? shapeIdx : -1;
-                HoveredPointIndex = pointIdx >= 0 ? pointIdx : -1;
-                _canvas?.Invalidate();
+                int hoveredShape = shapeIdx >= 0 ? shapeIdx : -1;
+                int hoveredPoint = pointIdx >= 0 ? pointIdx : -1;
+                if (HoveredShapeIndex != hoveredShape || HoveredPointIndex != hoveredPoint)
+                {
+                    HoveredShapeIndex = hoveredShape;
+                    HoveredPointIndex = hoveredPoint;
+                    _canvas?.Invalidate();
+                }
             }
         }
 
@@ -1019,7 +1028,7 @@ namespace hopperdraw
                 if (dist > 5)
                 {
                     _currentPoints.Add(endPt);
-                    ExpireDisplay();
+                    RequestCanvasRedraw();
                 }
                 _canvas?.Invalidate();
             }
@@ -1033,8 +1042,7 @@ namespace hopperdraw
                 RectangleF rect = new RectangleF(minX, minY, maxX - minX, maxY - minY);
                 SelectShapesInRectangle(rect, _additiveSelection);
                 _isWindowSelecting = false;
-                ExpireDisplay();
-                _canvas?.Invalidate();
+                RequestCanvasRedraw();
             }
             else if (_clickStartPt.IsValid)
             {
@@ -1042,8 +1050,7 @@ namespace hopperdraw
                 {
                     ClearSelection();
                 }
-                ExpireDisplay();
-                _canvas?.Invalidate();
+                RequestCanvasRedraw();
             }
 
             _acceptDrawingMouseUp = false;
@@ -1077,8 +1084,7 @@ namespace hopperdraw
             if (e.KeyCode == Keys.Escape && (_drawingModeEnabled || _isDragging || _isMultiDragging))
             {
                 CancelDrawing();
-                ExpireDisplay();
-                _canvas?.Invalidate();
+                RequestCanvasRedraw();
                 e.SuppressKeyPress = true;
                 return;
             }
@@ -1125,7 +1131,7 @@ namespace hopperdraw
                     _currentPoints.Clear();
                     _isDrawing = false;
                     ResetNextShapeOverrides();
-                    ExpireDisplay();
+                    RequestCanvasRedraw();
                     e.SuppressKeyPress = true;
                 }
             }
@@ -1134,8 +1140,7 @@ namespace hopperdraw
                 if (HasSelection && !HasSelectedGHObjects())
                 {
                     ClearSelection();
-                    ExpireDisplay();
-                    _canvas?.Invalidate();
+                    RequestCanvasRedraw();
                     e.SuppressKeyPress = true;
                 }
             }
@@ -1164,8 +1169,7 @@ namespace hopperdraw
                 }
                 MarkDocumentModified();
                 ClearSelection();
-                ExpireDisplay();
-                _canvas?.Invalidate();
+                RequestCanvasRedraw();
             }
         }
 
@@ -1176,8 +1180,7 @@ namespace hopperdraw
             MarkDocumentModified();
             CancelDrawing();
             ClearSelection();
-            ExpireDisplay();
-            _canvas?.Invalidate();
+            RequestCanvasRedraw();
         }
 
         public override bool AppendMenuItems(ToolStripDropDown menu)
@@ -1195,8 +1198,7 @@ namespace hopperdraw
             {
                 SelectedShapeIndices.Clear();
                 for (int i = 0; i < Shapes.Count; i++) if (!(Shapes[i] is OpaqueShape)) SelectedShapeIndices.Add(i);
-                ExpireDisplay();
-                _canvas?.Invalidate();
+                RequestCanvasRedraw();
             }) { Enabled = Shapes.Count > 0 });
 
             var thicknessMenu = new ToolStripMenuItem("Shape thickness");
@@ -1212,14 +1214,12 @@ namespace hopperdraw
             menu.Items.Add(new ToolStripMenuItem("Group selected shapes", null, (s, e) =>
             {
                 GroupSelectedShapes();
-                ExpireDisplay();
-                _canvas?.Invalidate();
+                RequestCanvasRedraw();
             }) { Enabled = SelectedShapeIndices.Count > 1 });
             menu.Items.Add(new ToolStripMenuItem("Ungroup selected shapes", null, (s, e) =>
             {
                 UngroupSelectedGroups();
-                ExpireDisplay();
-                _canvas?.Invalidate();
+                RequestCanvasRedraw();
             }) { Enabled = SelectedShapeIndices.Any(idx => idx >= 0 && idx < Shapes.Count && Shapes[idx] is DrawShapeGroup) });
             menu.Items.Add(new ToolStripMenuItem("Clear all HopperDraw shapes", null, (s, e) => ClearAll()) { Enabled = Shapes.Count > 0 });
             return true;
@@ -1237,8 +1237,7 @@ namespace hopperdraw
             {
                 _currentThicknessMultiplier = multiplier;
             }
-            ExpireDisplay();
-            _canvas?.Invalidate();
+            RequestCanvasRedraw();
         }
 
         private void CycleLineType()
@@ -1255,8 +1254,7 @@ namespace hopperdraw
                 _currentLineType = (DashStyle)(((int)_currentLineType + 1) % 5);
                 _hasPendingLineTypeOverride = true;
             }
-            ExpireDisplay();
-            _canvas?.Invalidate();
+            RequestCanvasRedraw();
         }
 
         private void DuplicateSelectedShapes()
@@ -1279,8 +1277,7 @@ namespace hopperdraw
             SelectedShapeIndices.Clear();
             SelectedShapeIndices.AddRange(newIndices);
             MarkDocumentModified();
-            ExpireDisplay();
-            _canvas?.Invalidate();
+            RequestCanvasRedraw();
         }
 
         private void ShowColorPickerForSelected()
@@ -1588,11 +1585,10 @@ namespace hopperdraw
             else if (!(shape is OpaqueShape)) yield return shape;
         }
 
-        public void ExpireDisplay()
+        private void RequestCanvasRedraw()
         {
-            var doc = OnPingDocument();
-            if (doc != null)
-                doc.ScheduleSolution(5, d => this.ExpirePreview(false));
+            var canvas = _canvas ?? Instances.ActiveCanvas;
+            if (canvas != null && ReferenceEquals(canvas.Document, OnPingDocument())) canvas.Invalidate();
         }
     }
 }
