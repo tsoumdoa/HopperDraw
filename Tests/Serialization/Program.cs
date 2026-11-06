@@ -239,6 +239,7 @@ internal static class Program
         });
         ReliabilityTests.Run();
         Review2Tests.Run();
+        CanvasMenuTests.Run();
         return Finish();
     }
     private static int Finish()

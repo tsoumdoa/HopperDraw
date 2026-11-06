@@ -138,15 +138,15 @@ internal static class Program
             Click(component, 100, 100);
             var e = new KeyEventArgs(Keys.Escape | Keys.Shift);
             Invoke(component, "Canvas_KeyDown", e);
-            Check(!component.DrawingModeEnabled && !component.IsDrawing && component.CurrentPoints.Count == 0, "Escape retained drawing state");
+            Check(component.DrawingModeEnabled && !component.IsDrawing && component.CurrentPoints.Count == 0, "Escape retained drawing state");
             Check(component.Shapes.Count == 1 && e.SuppressKeyPress, "Escape lost completed geometry or was not consumed");
         });
-        Test("Escape exits even when a native Grasshopper interaction handled it first", () =>
+        Test("Escape already consumed by native interaction does not exit drawing", () =>
         {
             var component = DrawingComponent(0);
             var e = new KeyEventArgs(Keys.Escape) { Handled = true };
             Invoke(component, "Canvas_KeyDown", e);
-            Check(!component.DrawingModeEnabled, "Native-handled Escape left mode enabled");
+            Check(component.DrawingModeEnabled, "Native-handled Escape also exited drawing");
         });
         Test("HopperDraw respects keys already handled by another subscriber", () =>
         {
@@ -167,10 +167,11 @@ internal static class Program
         {
             var component = DrawingComponent(1);
             var validator = new HopperDraw.DrawingCanvasValidator(component);
-            var point = new System.Drawing.PointF(200, 150);
+            var point = new System.Drawing.PointF(500, 500);
             Check(!validator.CanShowComponentSearchBox(point), "Search can interrupt drawing mode");
             Click(component, 100, 100); Click(component, 200, 150);
-            Click(component, 200, 150);
+            Invoke(component, "Canvas_MouseDown", new MouseEventArgs(MouseButtons.Left, 2, 200, 150, 0));
+            Invoke(component, "Canvas_MouseUp", new MouseEventArgs(MouseButtons.Left, 2, 200, 150, 0));
             Check(component.Shapes.Count == 1 && component.DrawingModeEnabled, "Double click did not complete the polyline");
             Check(!validator.CanShowComponentSearchBox(point), "Search reopened as the double click completed");
             Invoke(component, "Canvas_KeyDown", new KeyEventArgs(Keys.Escape));
@@ -191,6 +192,7 @@ internal static class Program
             for (int i = 0; i < targets.Length; i++)
                 Check(GeometryUtilities.SnapOrthogonal(start, targets[i]) == expected[i], "Snap case " + i);
         });
+        CanvasUxTests.Run(Test, Check);
         return Finish();
     }
     private static int Finish()

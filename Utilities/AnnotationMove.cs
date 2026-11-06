@@ -1,0 +1,91 @@
+using System;
+using System.Collections.Generic;
+using System.Drawing;
+using System.Linq;
+using Grasshopper.Kernel;
+using Grasshopper.Kernel.Undo;
+using Rhino.Geometry;
+
+namespace hopperdraw
+{
+    // Absolute proposals from press snapshots. No undo or dirty state until a successful commit.
+    internal sealed class AnnotationMove
+    {
+        private readonly Dictionary<HopperDraw, List<DrawShape>> _before;
+        private readonly Dictionary<HopperDraw, int[]> _indices;
+        internal readonly Dictionary<HopperDraw, ShapeEditUndoAction> Actions;
+        private readonly Dictionary<IGH_DocumentObject, PointF> _pivots;
+        internal readonly GH_UndoRecord Record;
+        private PointF _delta;
+        private bool _edited;
+        internal bool Changed => _edited || _delta != PointF.Empty;
+        internal bool Allowed { get; }
+        internal AnnotationMove(IEnumerable<HopperDraw> owners, IEnumerable<IGH_DocumentObject> natives, GH_Document document)
+        {
+            var selected = owners.Where(o => o.HasSelection).ToArray();
+            _before = selected.ToDictionary(o => o, o => ShapeEditUndoAction.Snapshot(o.Shapes));
+            _indices = selected.ToDictionary(o => o, o => o.SelectedShapeIndices.Distinct().Where(i => i >= 0 && i < o.Shapes.Count).ToArray());
+            Actions = selected.ToDictionary(o => o, o => new ShapeEditUndoAction(o, Enumerable.Empty<IGH_DocumentObject>()));
+            _pivots = natives.Where(o => o.Attributes != null).Distinct().ToDictionary(o => o, o => o.Attributes.Pivot);
+            Allowed = selected.All(o => o.Selection.All(s => s.CanTransformGeometry));
+            if (!Allowed) foreach (var o in selected) o.AddRuntimeMessage(GH_RuntimeMessageLevel.Warning, "Geometry edit blocked: selection contains unreadable annotation records.");
+            Record = document?.UndoUtil.CreatePivotEvent("HopperDraw: Move selection", _pivots.Keys) ?? new GH_UndoRecord("HopperDraw: Move selection");
+            foreach (var action in Actions.Values) Record.AddAction(action);
+        }
+        internal void Translate(PointF delta, bool native)
+        {
+            if (!Allowed || delta == _delta) return;
+            var proposals = _before.ToDictionary(p => p.Key, p => ShapeEditUndoAction.Snapshot(p.Value));
+            foreach (var pair in proposals)
+                foreach (int index in _indices[pair.Key]) pair.Value[index].Move(delta.X, delta.Y);
+            if (proposals.Values.SelectMany(s => s).SelectMany(AnnotationGeometry.Strokes).Any(s => !ShapeRenderer.ValidPoints(s))) return;
+            foreach (var pair in proposals) pair.Key.Shapes = pair.Value;
+            if (native) foreach (var pair in _pivots) SetPivot(pair.Key, new PointF(pair.Value.X + delta.X, pair.Value.Y + delta.Y));
+            _delta = delta;
+        }
+        internal void Edit(HopperDraw owner, int shape, int handle, Point3d point, bool shift)
+        {
+            if (!Allowed) return;
+            var proposal = ShapeEditUndoAction.CloneForSnapshot(_before[owner][shape]);
+            var points = proposal.GetPoints();
+            if (proposal is FrameShape frame)
+            {
+                var fixedPoint = points[(handle + 2) % 4];
+                if (shift) point = GeometryUtilities.SnapToAspectRatio(new Point3d(fixedPoint.X, fixedPoint.Y, 0), point,
+                    Math.Abs((points[1].X-points[0].X) / Math.Max(.001, Math.Abs(points[3].Y-points[0].Y))));
+                var a = new Point3d(fixedPoint.X, fixedPoint.Y, 0);
+                var b = point;
+                frame.TopLeft = new Point3d(Math.Min(a.X,b.X),Math.Min(a.Y,b.Y),0);
+                frame.TopRight = new Point3d(Math.Max(a.X,b.X),Math.Min(a.Y,b.Y),0);
+                frame.BottomRight = new Point3d(Math.Max(a.X,b.X),Math.Max(a.Y,b.Y),0);
+                frame.BottomLeft = new Point3d(Math.Min(a.X,b.X),Math.Max(a.Y,b.Y),0);
+            }
+            else
+            {
+                if (shift && points.Length > 1)
+                {
+                    int anchor = proposal is LineShape ? 1-handle : Math.Max(0,handle-1);
+                    point = GeometryUtilities.SnapAngle(new Point3d(points[anchor].X,points[anchor].Y,0), point);
+                }
+                proposal.MovePoint(handle, point);
+            }
+            if (!ShapeRenderer.ValidPoints(proposal.GetPoints())) return;
+            owner.Shapes[shape] = proposal;
+            _edited = !proposal.GetPoints().SequenceEqual(_before[owner][shape].GetPoints());
+        }
+        internal void Revert(bool native)
+        {
+            foreach (var pair in _before) pair.Key.Shapes = ShapeEditUndoAction.Snapshot(pair.Value);
+            if (native) foreach (var pair in _pivots) SetPivot(pair.Key,pair.Value);
+            _delta = PointF.Empty; _edited = false;
+        }
+        internal void Commit(GH_Document document)
+        {
+            if (!Changed) return;
+            if (document != null && document.UndoUtil.RecordEvent(Record) == Guid.Empty) { Revert(true); return; }
+            foreach (var owner in _before.Keys) owner.Changed();
+        }
+        private static void SetPivot(IGH_DocumentObject obj, PointF point)
+        { obj.Attributes.Pivot = point; obj.Attributes.ExpireLayout(); obj.Attributes.PerformLayout(); }
+    }
+}

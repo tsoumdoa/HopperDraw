@@ -38,7 +38,7 @@ namespace hopperdraw
             if (channel == shapeChannel)
                 foreach (var shape in owner.Shapes) ShapeRenderer.Render(graphics, shape, owner.BorderColor, owner.LineThickness);
             if (channel != GH_CanvasChannel.Overlay) return;
-            if (owner.IsActivated && owner.IsDrawing)
+            if (owner.IsActivated && (owner.Draft.Active || owner.IsDrawing))
             {
                 var point = owner.DrawEnd;
                 if (canvas?.Viewport != null)
@@ -46,7 +46,10 @@ namespace hopperdraw
                     var mouse = canvas.Viewport.UnprojectPoint(canvas.PointToClient(Control.MousePosition));
                     point = new Point3d(mouse.X, mouse.Y, 0);
                 }
-                var preview = BuildPreview(owner, point);
+                var preview = owner.Draft.Active ? owner.Draft.Preview(owner.DrawMode, point, owner.ShiftPressed) : BuildPreview(owner, point);
+                if (owner.Draft.NearStart(point, owner.CanvasScale))
+                    using (var ring = new Pen(Color.LimeGreen, 2 * owner.CanvasScale))
+                    { var first = owner.Draft.Points[0]; float r = 9 * owner.CanvasScale; graphics.DrawEllipse(ring, (float)first.X-r,(float)first.Y-r,2*r,2*r); }
                 if (preview != null)
                 {
                     preview.ThicknessMultiplier = owner.CurrentThicknessMultiplier;
@@ -67,12 +70,12 @@ namespace hopperdraw
         {
             if (!ShapeSerializer.ValidCoordinate(point.X) || !ShapeSerializer.ValidCoordinate(point.Y)) return null;
             if (owner.DrawMode == 0)
-                return new LineShape(owner.DrawStart, owner.ShiftPressed ? GeometryUtilities.SnapOrthogonal(owner.DrawStart, point) : point);
+                return new LineShape(owner.DrawStart, owner.ShiftPressed ? GeometryUtilities.SnapAngle(owner.DrawStart, point) : point);
             if (owner.DrawMode == 1 || owner.DrawMode == 3)
             {
                 var points = new List<Point3d>(owner.CurrentPoints);
                 if (points.Count > 0 && point.IsValid)
-                    points.Add(owner.ShiftPressed ? GeometryUtilities.SnapOrthogonal(points.Last(), point) : point);
+                    points.Add(owner.ShiftPressed ? GeometryUtilities.SnapAngle(points.Last(), point) : point);
                 return owner.DrawMode == 1 ? (DrawShape)new PolylineShape(points) : new CurveShape(points);
             }
             if (owner.DrawMode == 2)
