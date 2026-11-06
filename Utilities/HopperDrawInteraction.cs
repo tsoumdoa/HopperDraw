@@ -97,13 +97,13 @@ namespace hopperdraw
             sender.Invalidate(); return GH_ObjectResponse.Release;
         }
         internal bool Owns(HopperDraw owner) => ReferenceEquals(_owner,owner) || ReferenceEquals(_drawing,owner) || _move?.Actions.ContainsKey(owner)==true;
-        internal void Cancel()
+        // discardDraft: an explicit Escape discards the whole draft. A capture/focus change or an unexpected
+        // replacement only ends this press; polyline/curve drafts survive, single-gesture line/frame drafts do not.
+        internal void Cancel(bool discardDraft = false)
         {
             if (_done) return;
             _done=true; _move?.Revert(true);
-            // A capture/focus change between polyline/curve clicks must not discard the whole draft; only the
-            // single-gesture shapes (line, frame) are part of this press.
-            if (_drawing != null && (_drawing.DrawMode == 0 || _drawing.DrawMode == 2)) _drawing.Draft.Cancel();
+            if (_drawing != null && (discardDraft || _drawing.DrawMode == 0 || _drawing.DrawMode == 2)) _drawing.Draft.Cancel();
             m_canvas?.Invalidate();
         }
         public override void Destroy()

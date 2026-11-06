@@ -32,7 +32,7 @@ namespace hopperdraw
         private bool _releasing, _attached, _windowActive;
         private readonly HashSet<Guid> _seen = new HashSet<Guid>();
         private HashSet<IGH_DocumentObject> _prePress;
-        private bool _cursorOwned;
+        private Cursor _ownedCursor;
         private const GH_RelevantObjectFilter NativeFilter = GH_RelevantObjectFilter.Attributes | GH_RelevantObjectFilter.Grips;
         internal IEnumerable<HopperDraw> Owners => _canvas.Document?.Objects.OfType<HopperDraw>().Where(o => o.Eligible) ?? Enumerable.Empty<HopperDraw>();
         internal HopperDraw DrawingOwner => Owners.FirstOrDefault(o => o.DrawingModeEnabled);
@@ -108,7 +108,7 @@ namespace hopperdraw
                 var mouse = new GH_CanvasMouseEvent(_canvas.Viewport,e);
                 var p = mouse.CanvasLocation;
                 var hit = Hit(p,true);
-                if (hit.owner == null && !OverObject(_canvas.Document,p)) hit = Hit(p,false);
+                if (hit.owner == null && !OverNative(_canvas.Document,p)) hit = Hit(p,false);
                 var drawing = DrawingOwner;
                 if (hit.owner == null && (drawing == null || OverNative(_canvas.Document,p)))
                 {
@@ -228,13 +228,14 @@ namespace hopperdraw
         {
             Keys key = data & Keys.KeyCode, mods = data & Keys.Modifiers;
             if (!Owners.Any() || _canvas.Document == null || _canvas.ActiveWidget != null || _canvas.ActiveObject != null) return false;
+            // GH clears its preview boundary before dispatching Escape to any interaction.
+            if (key == Keys.Escape && _canvas.Document.PreviewBoundary != null) return false;
             if (_canvas.ActiveInteraction is HopperDrawInteraction active)
-            { if (key == Keys.Escape) { active.Cancel(); _canvas.ActiveInteraction = null; return true; } return false; }
+            { if (key == Keys.Escape) { active.Cancel(true); _canvas.ActiveInteraction = null; return true; } return false; }
             if (_canvas.ActiveInteraction != null) return false;
             var drawing = DrawingOwner;
             if (key == Keys.Escape)
             {
-                if (_canvas.Document.PreviewBoundary != null) return false; // GH clears its preview boundary first.
                 switch (AnnotationEscape.Layer(drawing?.Draft.Active == true,drawing != null,Owners.Any(o=>o.HasSelection)))
                 {
                     case EscapeLayer.Gesture: drawing.Draft.Cancel(); break;
@@ -282,7 +283,7 @@ namespace hopperdraw
                 else
                 {
                     var hit = Hit(p,true);
-                    if (hit.owner == null && !OverObject(_canvas.Document,p)) hit = Hit(p,false);
+                    if (hit.owner == null && !OverNative(_canvas.Document,p)) hit = Hit(p,false);
                     if (hit.owner != null)
                     {
                         hit.owner.HoveredShapeIndex=hit.shape; hit.owner.HoveredPointIndex=hit.handle;
@@ -291,9 +292,9 @@ namespace hopperdraw
                 }
             }
             // Only touch the cursor for HopperDraw targets; GH's own wire/slider/selection cursors stay intact.
-            if (cursor == "") { _canvas.Cursor = Cursors.SizeAll; _cursorOwned = true; }
-            else if (cursor != null) { Instances.CursorServer.AttachCursor(_canvas,cursor); _cursorOwned = true; }
-            else if (_cursorOwned) { Instances.CursorServer.ResetCursor(_canvas); _cursorOwned = false; }
+            // GH's MouseMove runs first and may already have assigned its own cursor; never reset that one.
+            if (cursor != null) { _ownedCursor = cursor == "" ? Cursors.SizeAll : Instances.CursorServer.Cursor(cursor); _canvas.Cursor = _ownedCursor; }
+            else if (_ownedCursor != null) { if (ReferenceEquals(_canvas.Cursor,_ownedCursor)) Instances.CursorServer.ResetCursor(_canvas); _ownedCursor = null; }
             if (drawing != null || previous.Any(pair=>pair.Value != (pair.Key.HoveredShapeIndex,pair.Key.HoveredPointIndex))) _canvas.Invalidate();
         }
         private void PaintHud(GH_Canvas canvas) { AnnotationFeedback.Hud(canvas,DrawingOwner); }
