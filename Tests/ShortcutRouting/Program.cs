@@ -48,6 +48,20 @@ internal static class Program
         }
     }
 
+    // Records the shared key-observed broadcast without consuming anything.
+    private sealed class ObservingPeer : NativeWindow, IDisposable
+    {
+        private readonly int _observed = RegisterWindowMessage("Hopper.Grasshopper.CanvasShortcut.KeyObserved.v1");
+        internal readonly System.Collections.Generic.List<Keys> Seen = new System.Collections.Generic.List<Keys>();
+        internal ObservingPeer(Control canvas) { AssignHandle(canvas.Handle); }
+        public void Dispose() { ReleaseHandle(); }
+        protected override void WndProc(ref Message message)
+        {
+            if (message.Msg == _observed && message.LParam.ToInt32() == 0x100) Seen.Add((Keys)message.WParam.ToInt32());
+            base.WndProc(ref message);
+        }
+    }
+
     private sealed class Canvas : Control
     {
         internal Canvas() { SetStyle(ControlStyles.StandardClick | ControlStyles.StandardDoubleClick | ControlStyles.Selectable, true); TabStop = true; }
@@ -339,6 +353,29 @@ internal static class Program
                                     Tap(canvas,Keys.A);
                                     Check(routed==2 && native==0,"Command reached GH menu or repeated");
                                     text.Focus(); Tap(text,Keys.Delete); Check(routed==2,"Text editing intercepted"); canvas.Focus();
+                                }
+                                finally { SetKeyboardState(state); a.Command=null; form.MainMenuStrip=null; form.Controls.Remove(menu); }
+                            }
+                        }, a);
+                        Run("consumed annotation commands still notify peer hooks; declined Ctrl+A reaches GH's menu", () =>
+                        {
+                            int native=0;
+                            using(var peer=new ObservingPeer(canvas))
+                            using(var menu=new MenuStrip())
+                            {
+                                var all=new ToolStripMenuItem("All"){ShortcutKeys=Keys.Control|Keys.A};
+                                all.Click+=(s,args)=>native++;
+                                menu.Items.Add(all); form.Controls.Add(menu); form.MainMenuStrip=menu;
+                                // Mirrors the controller: Delete is consumed, Ctrl+A extends selection then falls through.
+                                a.Command=key=>key==Keys.Delete;
+                                var state=new byte[256]; GetKeyboardState(state);
+                                try
+                                {
+                                    Tap(canvas,Keys.Delete); Application.DoEvents();
+                                    Check(peer.Seen.Contains(Keys.Delete),"Consumed Delete was not broadcast to peer hooks");
+                                    var modified=(byte[])state.Clone(); modified[(int)Keys.ControlKey]=0x80; SetKeyboardState(modified);
+                                    Tap(canvas,Keys.A); Application.DoEvents();
+                                    Check(native==1,"Declined Ctrl+A did not reach GH's Select All menu");
                                 }
                                 finally { SetKeyboardState(state); a.Command=null; form.MainMenuStrip=null; form.Controls.Remove(menu); }
                             }

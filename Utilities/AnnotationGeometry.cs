@@ -10,6 +10,29 @@ namespace hopperdraw
     // One source of stroke geometry for picking, window selection and feedback.
     internal static class AnnotationGeometry
     {
+        // Flattened strokes are cached per leaf and rebuilt only when its control points/closure change, so hover
+        // and picking do not rebuild a GraphicsPath for every shape on every mouse move.
+        private sealed class StrokeCache { internal PointF[] Key; internal bool Closed; internal PointF[] Stroke; internal RectangleF Bounds; }
+        private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<DrawShape, StrokeCache> Cache =
+            new System.Runtime.CompilerServices.ConditionalWeakTable<DrawShape, StrokeCache>();
+        private static bool IsClosed(DrawShape shape) => shape is FrameShape || shape is PolylineShape p && p.Closed || shape is CurveShape c && c.Closed;
+        private static StrokeCache Leaf(DrawShape shape)
+        {
+            var points = shape.GetPoints();
+            bool closed = IsClosed(shape);
+            var cache = Cache.GetValue(shape, _ => new StrokeCache());
+            if (cache.Key != null && cache.Closed == closed && cache.Key.SequenceEqual(points)) return cache;
+            cache.Key = points; cache.Closed = closed;
+            cache.Stroke = points.Length < 2 || !ShapeRenderer.ValidPoints(points) ? null : Flatten(shape, points);
+            cache.Bounds = Bounds(cache.Stroke);
+            return cache;
+        }
+        private static RectangleF Bounds(PointF[] stroke)
+        {
+            if (stroke == null || stroke.Length == 0) return RectangleF.Empty;
+            float minX = stroke.Min(p => p.X), minY = stroke.Min(p => p.Y), maxX = stroke.Max(p => p.X), maxY = stroke.Max(p => p.Y);
+            return RectangleF.FromLTRB(minX, minY, maxX, maxY);
+        }
         internal static IEnumerable<PointF[]> Strokes(DrawShape shape)
         {
             if (shape is OpaqueShape) yield break;
@@ -19,8 +42,11 @@ namespace hopperdraw
                     foreach (var stroke in Strokes(child)) yield return stroke;
                 yield break;
             }
-            var points = shape.GetPoints();
-            if (points.Length < 2 || !ShapeRenderer.ValidPoints(points)) yield break;
+            var cached = Leaf(shape).Stroke;
+            if (cached != null) yield return cached;
+        }
+        private static PointF[] Flatten(DrawShape shape, PointF[] points)
+        {
             using (var path = new GraphicsPath())
             {
                 if (shape is CurveShape curve)
@@ -33,14 +59,22 @@ namespace hopperdraw
                 path.Flatten(null, .2f);
                 var stroke = path.PathPoints;
                 if ((path.PathTypes.Last() & 128) != 0) stroke = stroke.Concat(new[] { stroke[0] }).ToArray();
-                yield return stroke;
+                return stroke;
             }
         }
         internal static bool Hit(DrawShape shape, PointF point, float tolerance, float width)
         {
             if (shape is DrawShapeGroup group) return group.Children.Any(c => Hit(c, point, tolerance, width));
-            return Strokes(shape).Any(s => Enumerable.Range(1, s.Length - 1).Any(i =>
-                GeometryUtilities.DistanceToSegment(point, s[i - 1], s[i]) <= tolerance + StyleValidation.EffectiveWidth(width, shape.ThicknessMultiplier) / 2));
+            if (shape is OpaqueShape) return false;
+            var leaf = Leaf(shape);
+            if (leaf.Stroke == null) return false;
+            float reach = tolerance + StyleValidation.EffectiveWidth(width, shape.ThicknessMultiplier) / 2;
+            var b = leaf.Bounds;
+            if (point.X < b.Left - reach || point.X > b.Right + reach || point.Y < b.Top - reach || point.Y > b.Bottom + reach) return false;
+            var s = leaf.Stroke;
+            for (int i = 1; i < s.Length; i++)
+                if (GeometryUtilities.DistanceToSegment(point, s[i - 1], s[i]) <= reach) return true;
+            return false;
         }
         internal static bool InRectangle(DrawShape shape, RectangleF rect, bool crossing, float baseWidth = 0)
         {

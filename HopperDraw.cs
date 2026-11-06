@@ -558,7 +558,8 @@ namespace hopperdraw
 
         private bool IsOverGrasshopperObject(Point3d point)
         {
-            return _canvas?.Document?.RelevantObjectAtPoint(point.ToPointF()) != null;
+            // Group interiors are empty canvas for annotations; components, grips and group edges are native.
+            return CanvasAnnotationController.OverNative(_canvas?.Document, point.ToPointF());
         }
 
         internal sealed class DrawingCanvasValidator : GH_CanvasValidator
@@ -569,7 +570,8 @@ namespace hopperdraw
 
             public override bool CanShowComponentSearchBox(PointF point)
             {
-                if (_owner.Eligible && !_owner.IsOverGrasshopperObject(new Point3d(point.X, point.Y, 0)) &&
+                if (_owner.Eligible && ReferenceEquals(Canvas?.Document, _owner.OnPingDocument()) &&
+                    !_owner.IsOverGrasshopperObject(new Point3d(point.X, point.Y, 0)) &&
                     (_owner.DrawingModeEnabled || _owner.Shapes.Any(shape => AnnotationGeometry.Hit(shape, point, 5 * _owner.CanvasScale, _owner.LineThickness)))) return false;
                 return !_owner._drawingModeEnabled || !_owner.CanHandleCanvasEvent(Canvas) ||
                     (Control.ModifierKeys & (Keys.Control | Keys.Alt)) != Keys.None ||

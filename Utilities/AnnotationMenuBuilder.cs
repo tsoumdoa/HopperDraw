@@ -19,6 +19,16 @@ namespace hopperdraw
             var item=new ToolStripMenuItem(text,image,(s,e)=>action?.Invoke()){Enabled=enabled,Checked=check}; items.Add(item); return item;
         }
         private static ToolStripMenuItem Sub(ToolStripItemCollection items,string text) { var item=new ToolStripMenuItem(text); items.Add(item); return item; }
+        // Dispose a context menu and the preview bitmaps HopperDraw created for it.
+        internal static void Release(ToolStrip menu)
+        {
+            if(menu==null || menu.IsDisposed) return;
+            var images=new List<Image>();
+            void Collect(ToolStripItemCollection items) { foreach(ToolStripItem item in items) { if(item.Image!=null) images.Add(item.Image); if(item is ToolStripDropDownItem drop && drop.HasDropDownItems) Collect(drop.DropDownItems); } }
+            Collect(menu.Items);
+            menu.Dispose();
+            foreach(var image in images) image.Dispose();
+        }
         private static Bitmap Preview(Color color,float width,DashStyle dash,bool swatch=false)
         {
             var bitmap=new Bitmap(48,18);

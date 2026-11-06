@@ -43,7 +43,7 @@ Scope: `ux/canvas-interaction`, based on main `80fed18`, implemented only in the
 | B Shift add, Ctrl remove, Shift+Ctrl toggle; handles edit alone | Done. Selection helper and snapshot geometry edit. |
 | B native pre-press replacement | Done. Hook reads the native top-level selection before GH changes it. Live-only. |
 | B actual native window/crossing session, release modifiers, empty click, no Escape/replacement completion | Done. Tracks the actual interaction and its last integer-rounded rectangle, including synthetic auto-pan moves; stroke helpers tested. Session behavior live-only. |
-| B Ctrl+A / Ctrl+Shift+A, idle Escape | Done. Keys route before menu preprocessing. GH's separate Deselect All menu is not intercepted through fragile menu searches. |
+| B Ctrl+A / Ctrl+D, idle Escape | Done (revised after review). Ctrl+A/Ctrl+D extend GH's Select All/Deselect All to annotations and then fall through to GH's own command (no menu lookups). Ctrl+Shift+A is GH Grow Selection and is not intercepted. Escape yields to GH's preview-boundary clearing. |
 | B opaque all-or-nothing geometry block | Done across every selected annotation owner and annotation-led native pivots. Native-led GH movement remains native; annotations do not partially transform. |
 | C annotation-led mixed movement, expanded groups, H/V, absolute snapshots | Done. Snapshot/no-op/revert tests; native layout/group expansion live-only. |
 | C one native-pivot + per-owner annotation record; true Escape/focus/capture/document cancellation | Done. Commit-on-release and rollback; native undo dispatch live-only. |

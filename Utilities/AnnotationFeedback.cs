@@ -7,9 +7,12 @@ namespace hopperdraw
 {
     internal static class AnnotationFeedback
     {
+        // SystemFonts.* returns a new Font per access; the HUD repaints on every move while drawing.
+        private static Font _font;
+        private static Font HudFont => _font ?? (_font = new Font(SystemFonts.MessageBoxFont.FontFamily, 9));
         internal static void Hud(GH_Canvas canvas,HopperDraw owner)
         {
-            if(owner==null) return;
+            if(owner==null || canvas?.Graphics==null) return;
             var g=canvas.Graphics; var state=g.Save();
             try
             {
@@ -17,7 +20,7 @@ namespace hopperdraw
                 string tool=new[]{"Line","Polyline","Frame","Curve"}[owner.DrawMode];
                 string hint=!owner.Draft.Active ? "Click or drag to start · Esc" : owner.DrawMode==0 || owner.DrawMode==2 ? "Click to finish · Esc cancels" : "Click to add · Enter/double-click finishes · click start closes · Backspace · Esc";
                 string text=tool+"   "+hint;
-                using(var font=new Font(SystemFonts.MessageBoxFont.FontFamily,9))
+                var font=HudFont;
                 using(var background=new SolidBrush(Color.FromArgb(235,245,245,245)))
                 using(var ink=new SolidBrush(Color.FromArgb(45,45,45)))
                 using(var pen=new Pen(owner.PendingColorOverride??owner.BorderColor, System.Math.Min(6,owner.CurrentThicknessMultiplier*2)*dpi))
@@ -34,6 +37,7 @@ namespace hopperdraw
                     g.DrawString(text,font,ink,new RectangleF(box.X+46*dpi,box.Y+6*dpi,box.Width-48*dpi,box.Height-6*dpi));
                 }
             }
+            catch(System.Exception ex) { System.Diagnostics.Debug.WriteLine("HopperDraw HUD skipped: "+ex.Message); }
             finally { g.Restore(state); }
         }
     }

@@ -152,14 +152,29 @@ namespace hopperdraw
             if (repeat) return false;
             foreach (var owner in _owners.ToArray())
                 if (owner.Command?.Invoke(key | Control.ModifierKeys) == true)
-                { Reset(); _commandsDown.Add(key); return true; }
+                {
+                    // Notify every plugin hook before this layer consumes the key (same rule as WndProc).
+                    Observe(key, KeyDownMessage);
+                    Reset(); _commandsDown.Add(key); return true;
+                }
             return false;
+        }
+        private bool ReleaseCommand(Keys key)
+        {
+            if (!_commandsDown.Remove(key)) return false;
+            Observe(key, KeyUpMessage);
+            return true;
+        }
+        private void Observe(Keys key, int message)
+        {
+            if (_canvas.IsHandleCreated)
+                SendMessage(_canvas.Handle, KeyObservedMessage, new IntPtr((int)key), new IntPtr(message));
         }
         public bool PreFilterMessage(ref Message m)
         {
             if (m.HWnd != Handle) return false;
             if (m.Msg == KeyDownMessage && RouteCommand((Keys)m.WParam.ToInt32(), (m.LParam.ToInt64() & (1L << 30)) != 0)) return true;
-            if (m.Msg == KeyUpMessage && _commandsDown.Remove((Keys)m.WParam.ToInt32())) return true;
+            if (m.Msg == KeyUpMessage && ReleaseCommand((Keys)m.WParam.ToInt32())) return true;
             return false;
         }
         private void RouteMouse(int message, IntPtr location, bool after)
@@ -181,7 +196,7 @@ namespace hopperdraw
                 foreach (var registration in _owners.ToArray()) registration.Lost?.Invoke();
             }
             if (message.Msg == KeyDownMessage && RouteCommand((Keys)message.WParam.ToInt32(), (message.LParam.ToInt64() & (1L << 30)) != 0)) { message.Result = IntPtr.Zero; return; }
-            if (message.Msg == KeyUpMessage && _commandsDown.Remove((Keys)message.WParam.ToInt32())) { message.Result = IntPtr.Zero; return; }
+            if (message.Msg == KeyUpMessage && ReleaseCommand((Keys)message.WParam.ToInt32())) { message.Result = IntPtr.Zero; return; }
             if (message.Msg == KeyObservedMessage)
             {
                 var key = (Keys)message.WParam.ToInt32();

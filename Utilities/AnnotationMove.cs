@@ -35,11 +35,12 @@ namespace hopperdraw
         internal void Translate(PointF delta, bool native)
         {
             if (!Allowed || delta == _delta) return;
-            var proposals = _before.ToDictionary(p => p.Key, p => ShapeEditUndoAction.Snapshot(p.Value));
+            // Clone and move only the selected shapes; untouched shapes stay as they are (O(selection) per move).
+            var proposals = _before.ToDictionary(p => p.Key, p => _indices[p.Key].Select(i =>
+            { var copy = ShapeEditUndoAction.CloneForSnapshot(p.Value[i]); copy.Move(delta.X, delta.Y); return copy; }).ToArray());
+            if (proposals.Values.SelectMany(s => s).Any(s => !ValidGeometry(s))) return;
             foreach (var pair in proposals)
-                foreach (int index in _indices[pair.Key]) pair.Value[index].Move(delta.X, delta.Y);
-            if (proposals.Values.SelectMany(s => s).SelectMany(AnnotationGeometry.Strokes).Any(s => !ShapeRenderer.ValidPoints(s))) return;
-            foreach (var pair in proposals) pair.Key.Shapes = pair.Value;
+                for (int k = 0; k < pair.Value.Length; k++) pair.Key.Shapes[_indices[pair.Key][k]] = pair.Value[k];
             if (native) foreach (var pair in _pivots) SetPivot(pair.Key, new PointF(pair.Value.X + delta.X, pair.Value.Y + delta.Y));
             _delta = delta;
         }
@@ -64,7 +65,8 @@ namespace hopperdraw
             {
                 if (shift && points.Length > 1)
                 {
-                    int anchor = proposal is LineShape ? 1-handle : Math.Max(0,handle-1);
+                    bool closed = proposal is PolylineShape poly && poly.Closed || proposal is CurveShape curve && curve.Closed;
+                    int anchor = proposal is LineShape ? 1-handle : handle > 0 ? handle-1 : closed ? points.Length-1 : 1;
                     point = GeometryUtilities.SnapAngle(new Point3d(points[anchor].X,points[anchor].Y,0), point);
                 }
                 proposal.MovePoint(handle, point);
@@ -85,6 +87,8 @@ namespace hopperdraw
             if (document != null && document.UndoUtil.RecordEvent(Record) == Guid.Empty) { Revert(true); return; }
             foreach (var owner in _before.Keys) owner.Changed();
         }
+        private static bool ValidGeometry(DrawShape shape) => shape is DrawShapeGroup group
+            ? group.Children.All(ValidGeometry) : shape is OpaqueShape || ShapeRenderer.ValidPoints(shape.GetPoints());
         private static void SetPivot(IGH_DocumentObject obj, PointF point)
         { obj.Attributes.Pivot = point; obj.Attributes.ExpireLayout(); obj.Attributes.PerformLayout(); }
     }

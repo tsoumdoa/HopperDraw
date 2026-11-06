@@ -19,6 +19,9 @@ namespace hopperdraw
         private readonly bool _context;
         private AnnotationMove _move;
         private bool _done, _moving, _autoPan, _pressedHandled;
+        // The last context menu stays alive until the next one opens, so a modal "Custom..." colour dialog
+        // opened from a menu item never runs inside a disposed menu.
+        private static ContextMenuStrip _lastMenu;
         internal HopperDrawInteraction(CanvasAnnotationController controller, GH_Canvas canvas, GH_CanvasMouseEvent e,
             HopperDraw owner, int shape, int handle, HopperDraw drawing) : base(canvas,e,false)
         {
@@ -57,9 +60,10 @@ namespace hopperdraw
                 navigation.RespondToMouseMove(sender,e);
                 return GH_ObjectResponse.Handled;
             }
+            if (_moving && !_autoPan && (_move != null || _drawing?.Draft.Active == true && (_drawing.DrawMode == 0 || _drawing.DrawMode == 2)))
+            { sender.StartAutoPan(); _autoPan=true; }
             if (_moving && _move != null)
             {
-                if (!_autoPan) { sender.StartAutoPan(); _autoPan=true; }
                 if (_handle>=0) _move.Edit(_owner,_shape,_handle,Point(e.CanvasLocation),(Control.ModifierKeys & Keys.Shift)!=0);
                 else
                 {
@@ -83,9 +87,9 @@ namespace hopperdraw
                 var menu=new ContextMenuStrip();
                 if (_owner!=null) AnnotationMenuBuilder.Selection(menu.Items,_controller.Owners.ToArray());
                 else if (_drawing!=null) AnnotationMenuBuilder.Drawing(menu.Items,_drawing);
-                menu.Closed+=(s,a)=>menu.Dispose();
+                AnnotationMenuBuilder.Release(_lastMenu); _lastMenu=menu;
                 // Show only after GH has consumed this up and destroyed the interaction.
-                sender.BeginInvoke(new Action(() => { if (!sender.IsDisposed) menu.Show(sender,e.ControlLocation); else menu.Dispose(); }));
+                sender.BeginInvoke(new Action(() => { if (!sender.IsDisposed) menu.Show(sender,e.ControlLocation); }));
             }
             else if (_drawing!=null)
                 _drawing.CompleteDraft(_drawing.Draft.Up(_drawing.DrawMode,Point(e.CanvasLocation),e.ControlLocation,(Control.ModifierKeys & Keys.Shift)!=0,SystemInformation.DragSize));
@@ -96,7 +100,11 @@ namespace hopperdraw
         internal void Cancel()
         {
             if (_done) return;
-            _done=true; _move?.Revert(true); _drawing?.Draft.Cancel(); m_canvas?.Invalidate();
+            _done=true; _move?.Revert(true);
+            // A capture/focus change between polyline/curve clicks must not discard the whole draft; only the
+            // single-gesture shapes (line, frame) are part of this press.
+            if (_drawing != null && (_drawing.DrawMode == 0 || _drawing.DrawMode == 2)) _drawing.Draft.Cancel();
+            m_canvas?.Invalidate();
         }
         public override void Destroy()
         {

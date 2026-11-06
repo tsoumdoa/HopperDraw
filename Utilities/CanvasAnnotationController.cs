@@ -31,6 +31,9 @@ namespace hopperdraw
         private DateTime _pressed;
         private bool _releasing, _attached, _windowActive;
         private readonly HashSet<Guid> _seen = new HashSet<Guid>();
+        private HashSet<IGH_DocumentObject> _prePress;
+        private bool _cursorOwned;
+        private const GH_RelevantObjectFilter NativeFilter = GH_RelevantObjectFilter.Attributes | GH_RelevantObjectFilter.Grips;
         internal IEnumerable<HopperDraw> Owners => _canvas.Document?.Objects.OfType<HopperDraw>().Where(o => o.Eligible) ?? Enumerable.Empty<HopperDraw>();
         internal HopperDraw DrawingOwner => Owners.FirstOrDefault(o => o.DrawingModeEnabled);
         internal static CanvasAnnotationController Register(GH_Canvas canvas, HopperDraw owner)
@@ -67,6 +70,23 @@ namespace hopperdraw
         internal static IEnumerable<IGH_DocumentObject> NativeSelection(GH_Document doc) => doc.Objects.Where(o => o.Attributes.Selected)
             .SelectMany(o => o is GH_Group group ? group.ObjectsRecursive().Where(c => !(c is GH_Group)) : new[] { o }).Distinct();
         internal (HopperDraw owner, int shape, int handle) Hit(PointF p, bool handles) => AnnotationPicking.Hit(Owners,p,handles);
+        // Components, parameters and grips are native. A GH_Group picks its whole filled outline, but annotations are
+        // routinely drawn inside groups, so a group interior is empty canvas and only its edge band is native.
+        internal static bool OverObject(GH_Document doc, PointF p) => doc?.RelevantObjectAtPoint(p, NativeFilter) != null;
+        internal static bool OverNative(GH_Document doc, PointF p) => doc != null && (OverObject(doc, p) || OverGroupEdge(doc, p));
+        internal static bool OverGroupEdge(GH_Document doc, PointF p)
+        {
+            foreach (var group in doc.Objects.OfType<GH_Group>())
+            {
+                var attributes = group.Attributes; if (attributes == null) continue;
+                var b = attributes.Bounds;
+                if (!b.Contains(p) || !attributes.IsPickRegion(p)) continue;
+                if (p.X - b.Left < 12 || b.Right - p.X < 12 || p.Y - b.Top < 20 || b.Bottom - p.Y < 12) return true;
+            }
+            return false;
+        }
+        private HashSet<IGH_DocumentObject> SelectedTopLevel() =>
+            new HashSet<IGH_DocumentObject>(_canvas.Document?.Objects.Where(o => o.Attributes?.Selected == true) ?? Enumerable.Empty<IGH_DocumentObject>());
         private bool Eligible(Point client)
         {
             if (_canvas.Document == null || !_canvas.ModifiersEnabled || _canvas.ActiveInteraction != null || _canvas.ActiveWidget != null || _canvas.ActiveObject != null ||
@@ -82,32 +102,36 @@ namespace hopperdraw
         {
             if (!after && (message == 0x201 || message == 0x203 || message == 0x204))
             {
+                _prePress = null;
                 if (!Eligible(e.Location)) return;
                 _pressed = DateTime.UtcNow;
                 var mouse = new GH_CanvasMouseEvent(_canvas.Viewport,e);
-                var hit = Hit(mouse.CanvasLocation,true);
-                var native = _canvas.Document.RelevantObjectAtPoint(mouse.CanvasLocation);
-                if (hit.owner == null && native != null)
+                var p = mouse.CanvasLocation;
+                var hit = Hit(p,true);
+                if (hit.owner == null && !OverObject(_canvas.Document,p)) hit = Hit(p,false);
+                var drawing = DrawingOwner;
+                if (hit.owner == null && (drawing == null || OverNative(_canvas.Document,p)))
                 {
-                    if (e.Button == MouseButtons.Left && !native.TopLevelObject.Attributes.Selected && Control.ModifierKeys == Keys.None) Clear();
+                    // GH owns this press. Snapshot its selection: if GH replaces it, annotations are replaced too.
+                    if (e.Button == MouseButtons.Left) _prePress = SelectedTopLevel();
                     return;
                 }
-                if (hit.owner == null) hit = Hit(mouse.CanvasLocation,false);
-                var drawing = DrawingOwner;
-                if (hit.owner != null || drawing != null)
-                    _canvas.ActiveInteraction = new HopperDrawInteraction(this,_canvas,mouse,hit.owner,hit.shape,hit.handle,drawing);
+                _canvas.ActiveInteraction = new HopperDrawInteraction(this,_canvas,mouse,hit.owner,hit.shape,hit.handle,drawing);
             }
             if (after && (message == 0x201 || message == 0x203))
             {
+                // Grips, sliders, toggles etc. keep GH's selection; only a real replacement clears annotations.
+                if (_prePress != null && Control.ModifierKeys == Keys.None && _canvas.Document != null && !_prePress.SetEquals(SelectedTopLevel())) Clear();
+                _prePress = null;
                 _window = _canvas.ActiveInteraction as GH_WindowSelectInteraction;
                 if (_window != null) { _windowRect=Rectangle.Empty; _windowCrossing=false; }
-                _native = _canvas.ActiveInteraction as GH_DragInteraction;
-                if (_native != null && Owners.Any(o=>o.HasSelection))
+                var drag = _canvas.ActiveInteraction as GH_DragInteraction;
+                if (drag != null && Owners.Any(o=>o.HasSelection))
                 {
                     var natives = NativeSelection(_canvas.Document).ToArray();
                     _anchor = natives.FirstOrDefault();
-                    if (_anchor == null) { _native = null; return; }
-                    _anchorPoint = _anchor.Attributes.Pivot; _document = _canvas.Document;
+                    if (_anchor == null) return;
+                    _native = drag; _anchorPoint = _anchor.Attributes.Pivot; _document = _canvas.Document;
                     _follow = new AnnotationMove(Owners,Enumerable.Empty<IGH_DocumentObject>(),_document);
                     if (!_follow.Allowed) { EndFollow(true); return; }
                     _seen.Clear(); _document.UndoStateChanged += UndoChanged;
@@ -170,26 +194,33 @@ namespace hopperdraw
             if (_canvas.ActiveInteraction is HopperDrawInteraction interaction && interaction.Owns(owner) || _follow?.Actions.ContainsKey(owner)==true) Lost();
             owner.Draft.Cancel();
         }
+        // Focus/capture loss ends only gestures HopperDraw is part of. Multi-click drafts (polyline/curve) survive
+        // between clicks; an unrelated native drag is left to GH.
         private void Lost()
         {
             if (_releasing) return;
-            if (_canvas.ActiveInteraction is HopperDrawInteraction interaction) { interaction.Cancel(); _canvas.ActiveInteraction = null; }
-            if (_native != null && ReferenceEquals(_canvas.ActiveInteraction,_native))
+            bool changed = false;
+            if (_canvas.ActiveInteraction is HopperDrawInteraction interaction) { interaction.Cancel(); _canvas.ActiveInteraction = null; changed = true; }
+            if (_follow != null && _native != null && ReferenceEquals(_canvas.ActiveInteraction,_native))
             {
                 _native.RespondToKeyDown(_canvas,new KeyEventArgs(Keys.Escape));
-                _canvas.ActiveInteraction=null;
+                _canvas.ActiveInteraction=null; changed = true;
             }
-            EndFollow(true); _window = null;
-            foreach (var owner in Owners) owner.Draft.Cancel();
-            _canvas.Invalidate();
+            if (_follow != null) { EndFollow(true); changed = true; }
+            _window = null; _prePress = null;
+            if (changed) _canvas.Invalidate();
         }
-        private void DocumentChanged(object sender, GH_CanvasDocumentChangedEventArgs e) { Lost(); foreach (var owner in _registered) owner.ExitDrawing(); }
+        private void DocumentChanged(object sender, GH_CanvasDocumentChangedEventArgs e)
+        {
+            Lost();
+            foreach (var owner in _registered) { owner.Draft.Cancel(); owner.ExitDrawing(); }
+        }
         private void SyncPaint(GH_Canvas canvas) { SyncFollow(); } // Guarded absolute translation, before BOTH render channels; covers GH auto-pan.
         internal void Clear() { foreach (var owner in Owners) owner.ClearSelection(); _canvas.Invalidate(); }
         internal void Select(HopperDraw owner, int shape, bool shift, bool control)
         {
             AnnotationSelection.Press(owner.SelectedShapeIndices.Contains(shape),shift,control,
-                () => { Clear(); _canvas.Document.DeselectAll(); owner.SelectedShapeIndices.Add(shape); },
+                () => { Clear(); bool native = _canvas.Document.SelectedCount > 0; _canvas.Document.DeselectAll(); owner.SelectedShapeIndices.Add(shape); if (native) Instances.RedrawAll(); },
                 () => { if (!owner.SelectedShapeIndices.Contains(shape)) owner.SelectedShapeIndices.Add(shape); },
                 () => owner.SelectedShapeIndices.Remove(shape));
         }
@@ -203,6 +234,7 @@ namespace hopperdraw
             var drawing = DrawingOwner;
             if (key == Keys.Escape)
             {
+                if (_canvas.Document.PreviewBoundary != null) return false; // GH clears its preview boundary first.
                 switch (AnnotationEscape.Layer(drawing?.Draft.Active == true,drawing != null,Owners.Any(o=>o.HasSelection)))
                 {
                     case EscapeLayer.Gesture: drawing.Draft.Cancel(); break;
@@ -218,13 +250,13 @@ namespace hopperdraw
                 else if (drawing.DrawMode == 1 || drawing.DrawMode == 3) drawing.CompleteDraft(drawing.Draft.Finish(drawing.DrawMode,false));
                 _canvas.Invalidate(); return true;
             }
-            if (key == Keys.A && (mods == Keys.Control || mods == (Keys.Control|Keys.Shift)))
+            // Select All / Deselect All: extend GH's own commands to annotations, then let GH run them (return false).
+            if (key == Keys.A && mods == Keys.Control)
             {
-                bool clear = (mods & Keys.Shift) != 0;
-                foreach (var owner in Owners) { owner.ClearSelection(); if (!clear) for(int i=0;i<owner.Shapes.Count;i++) if (!(owner.Shapes[i] is OpaqueShape)) owner.SelectedShapeIndices.Add(i); }
-                foreach (var obj in _canvas.Document.Objects) obj.Attributes.Selected = !clear;
-                _canvas.Invalidate(); return true;
+                foreach (var owner in Owners) { owner.ClearSelection(); for(int i=0;i<owner.Shapes.Count;i++) if (!(owner.Shapes[i] is OpaqueShape)) owner.SelectedShapeIndices.Add(i); }
+                _canvas.Invalidate(); return false;
             }
+            if (key == Keys.D && mods == Keys.Control) { Clear(); return false; }
             if ((key == Keys.Delete || key == Keys.Back) && Owners.Any(o=>o.HasSelection))
             { AnnotationCommands.Delete(Owners,_canvas.Document,true); return true; }
             return false;
@@ -241,17 +273,28 @@ namespace hopperdraw
             if (_canvas.ActiveInteraction != null || _canvas.ActiveObject != null || _canvas.ActiveWidget != null) return;
             var previous = Owners.ToDictionary(o=>o,o=>(o.HoveredShapeIndex,o.HoveredPointIndex));
             foreach (var owner in previous.Keys) { owner.HoveredShapeIndex=-1; owner.HoveredPointIndex=-1; }
-            if (!Eligible(e.Location)) { if (previous.Any(pair=>pair.Value != (-1,-1))) _canvas.Invalidate(); return; }
-            var p = _canvas.Viewport.UnprojectPoint(e.Location); var hit = Hit(p,true);
-            if (hit.owner == null && _canvas.Document.RelevantObjectAtPoint(p) != null) { Instances.CursorServer.ResetCursor(_canvas); if (previous.Any(pair=>pair.Value != (-1,-1))) _canvas.Invalidate(); return; }
-            if (hit.owner == null) hit = Hit(p,false);
-            if (hit.owner != null)
-            { hit.owner.HoveredShapeIndex=hit.shape; hit.owner.HoveredPointIndex=hit.handle; }
-            if (hit.handle >= 0) _canvas.Cursor=Cursors.SizeAll;
-            else if (hit.owner != null) Instances.CursorServer.AttachCursor(_canvas,"GH_HandOpen");
-            else if (DrawingOwner != null) Instances.CursorServer.AttachCursor(_canvas,"GH_Pencil");
-            else Instances.CursorServer.ResetCursor(_canvas);
-            if (DrawingOwner != null || previous.Any(pair=>pair.Value != (pair.Key.HoveredShapeIndex,pair.Key.HoveredPointIndex))) _canvas.Invalidate();
+            string cursor = null;
+            var drawing = DrawingOwner;
+            if (Eligible(e.Location))
+            {
+                var p = _canvas.Viewport.UnprojectPoint(e.Location);
+                if (drawing != null) { if (!OverNative(_canvas.Document,p)) cursor = "GH_Pencil"; } // A press always draws.
+                else
+                {
+                    var hit = Hit(p,true);
+                    if (hit.owner == null && !OverObject(_canvas.Document,p)) hit = Hit(p,false);
+                    if (hit.owner != null)
+                    {
+                        hit.owner.HoveredShapeIndex=hit.shape; hit.owner.HoveredPointIndex=hit.handle;
+                        cursor = hit.handle >= 0 ? "" : "GH_HandOpen";
+                    }
+                }
+            }
+            // Only touch the cursor for HopperDraw targets; GH's own wire/slider/selection cursors stay intact.
+            if (cursor == "") { _canvas.Cursor = Cursors.SizeAll; _cursorOwned = true; }
+            else if (cursor != null) { Instances.CursorServer.AttachCursor(_canvas,cursor); _cursorOwned = true; }
+            else if (_cursorOwned) { Instances.CursorServer.ResetCursor(_canvas); _cursorOwned = false; }
+            if (drawing != null || previous.Any(pair=>pair.Value != (pair.Key.HoveredShapeIndex,pair.Key.HoveredPointIndex))) _canvas.Invalidate();
         }
         private void PaintHud(GH_Canvas canvas) { AnnotationFeedback.Hud(canvas,DrawingOwner); }
     }
