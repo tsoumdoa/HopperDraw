@@ -6,6 +6,7 @@
     <ShouldRemoveRhinoReferences>false</ShouldRemoveRhinoReferences>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../../HopperDraw.Session.cs" Link="HopperDraw.Session.cs" />
     <Compile Include="../../HopperDraw.cs" Link="HopperDraw.cs" />
     <Compile Include="../../HopperDrawUIAttributes.cs" Link="HopperDrawUIAttributes.cs" />
     <Compile Include="../../Shapes/*.cs" Link="Shapes/%(Filename)%(Extension)" />

@@ -55,13 +55,18 @@ namespace hopperdraw
                         graphics.FillRectangle(brush, pt.X - size / 2, pt.Y - size / 2, size, size);
                         graphics.DrawRectangle(pen, pt.X - size / 2, pt.Y - size / 2, size, size);
                     }
+                    if (!selected && drawOutline)
+                        foreach (var stroke in AnnotationGeometry.Strokes(shape))
+                            using (var hover = new Pen(Color.FromArgb(110, 30, 150, 80), 3 * scale)) graphics.DrawLines(hover,stroke);
                     if (selected && drawOutline && points.Length > 1)
                     {
-                        pen.Width = scale;
-                        pen.DashStyle = System.Drawing.Drawing2D.DashStyle.Dash;
-                        if (shape is DrawShapeGroup || shape is FrameShape || shape is PolylineShape poly && poly.Closed)
-                            graphics.DrawPolygon(pen, points);
-                        else graphics.DrawLines(pen, points);
+                        foreach (var stroke in AnnotationGeometry.Strokes(shape))
+                        {
+                            using (var halo = new Pen(Color.White, 4 * scale)) graphics.DrawLines(halo, stroke);
+                            pen.Color = Color.FromArgb(20, 150, 70); pen.Width = 2 * scale;
+                            pen.DashStyle = System.Drawing.Drawing2D.DashStyle.Dash;
+                            graphics.DrawLines(pen, stroke);
+                        }
                     }
                 }
             }

@@ -48,9 +48,23 @@ internal static class Program
         }
     }
 
+    // Records the shared key-observed broadcast without consuming anything.
+    private sealed class ObservingPeer : NativeWindow, IDisposable
+    {
+        private readonly int _observed = RegisterWindowMessage("Hopper.Grasshopper.CanvasShortcut.KeyObserved.v1");
+        internal readonly System.Collections.Generic.List<Keys> Seen = new System.Collections.Generic.List<Keys>();
+        internal ObservingPeer(Control canvas) { AssignHandle(canvas.Handle); }
+        public void Dispose() { ReleaseHandle(); }
+        protected override void WndProc(ref Message message)
+        {
+            if (message.Msg == _observed && message.LParam.ToInt32() == 0x100) Seen.Add((Keys)message.WParam.ToInt32());
+            base.WndProc(ref message);
+        }
+    }
+
     private sealed class Canvas : Control
     {
-        internal Canvas() { SetStyle(ControlStyles.Selectable, true); TabStop = true; }
+        internal Canvas() { SetStyle(ControlStyles.StandardClick | ControlStyles.StandardDoubleClick | ControlStyles.Selectable, true); TabStop = true; }
         internal void Recreate() { RecreateHandle(); }
         protected override bool IsInputKey(Keys keyData) { return true; }
     }
@@ -303,6 +317,101 @@ internal static class Program
                             canvas.Recreate(); canvas.Focus(); Tap(canvas, Keys.D);
                             Check(_activatedA == 0 && _forwarded == 0, "Recreated HWND lost hook or retained tap");
                             Tap(canvas, Keys.D); Check(_activatedA == 1, "Hook did not recover after recreation");
+                        }, a);
+                        Run("mouse hook precedes WinForms down and observes native double-click before trailing up", () =>
+                        {
+                            var log = new System.Collections.Generic.List<string>();
+                            MouseEventHandler down = (s,args) => log.Add("down:"+args.Clicks);
+                            MouseEventHandler dbl = (s,args) => log.Add("double");
+                            MouseEventHandler up = (s,args) => log.Add("up");
+                            canvas.MouseDown+=down; canvas.MouseDoubleClick+=dbl; canvas.MouseUp+=up;
+                            a.Mouse=(msg,args,after)=>{ if(!after && (msg==0x201 || msg==0x203)) { Check(args.X==5 && args.Y==25,"Signed coordinates lost"); log.Add("hook:"+args.Clicks); } };
+                            try
+                            {
+                                long location = (25L << 16) | 5;
+                                foreach(int msg in new[]{0x201,0x202,0x203,0x202}) PostMessage(canvas.Handle,msg,new IntPtr(msg==0x202?0:1),new IntPtr(location));
+                                Application.DoEvents();
+                                Check(string.Join(",",log)=="hook:1,down:1,up,hook:2,down:2,double,up","Incorrect native sequence: "+string.Join(",",log));
+                            }
+                            finally { a.Mouse=null; canvas.MouseDown-=down; canvas.MouseDoubleClick-=dbl; canvas.MouseUp-=up; }
+                        }, a);
+                        Run("annotation Delete and Ctrl+A preempt real menu preprocessing", () =>
+                        {
+                            int native=0, routed=0;
+                            using(var menu=new MenuStrip())
+                            {
+                                var del=new ToolStripMenuItem("Delete"){ShortcutKeys=Keys.Delete};
+                                var all=new ToolStripMenuItem("All"){ShortcutKeys=Keys.Control|Keys.A};
+                                del.Click+=(s,args)=>native++; all.Click+=(s,args)=>native++;
+                                menu.Items.Add(del); menu.Items.Add(all); form.Controls.Add(menu); form.MainMenuStrip=menu;
+                                a.Command=key=>{ if(key==Keys.Delete || key==(Keys.Control|Keys.A)) { routed++; return true; } return false; };
+                                var state=new byte[256]; GetKeyboardState(state);
+                                try
+                                {
+                                    Down(canvas,Keys.Delete); Down(canvas,Keys.Delete,true); Up(canvas,Keys.Delete); Application.DoEvents();
+                                    var modified=(byte[])state.Clone(); modified[(int)Keys.ControlKey]=0x80; SetKeyboardState(modified);
+                                    Tap(canvas,Keys.A);
+                                    Check(routed==2 && native==0,"Command reached GH menu or repeated");
+                                    text.Focus(); Tap(text,Keys.Delete); Check(routed==2,"Text editing intercepted"); canvas.Focus();
+                                }
+                                finally { SetKeyboardState(state); a.Command=null; form.MainMenuStrip=null; form.Controls.Remove(menu); }
+                            }
+                        }, a);
+                        Run("consumed annotation commands still notify peer hooks; declined Ctrl+A reaches GH's menu", () =>
+                        {
+                            int native=0;
+                            using(var peer=new ObservingPeer(canvas))
+                            using(var menu=new MenuStrip())
+                            {
+                                var all=new ToolStripMenuItem("All"){ShortcutKeys=Keys.Control|Keys.A};
+                                all.Click+=(s,args)=>native++;
+                                menu.Items.Add(all); form.Controls.Add(menu); form.MainMenuStrip=menu;
+                                // Mirrors the controller: Delete is consumed, Ctrl+A extends selection then falls through.
+                                a.Command=key=>key==Keys.Delete;
+                                var state=new byte[256]; GetKeyboardState(state);
+                                try
+                                {
+                                    Tap(canvas,Keys.Delete); Application.DoEvents();
+                                    Check(peer.Seen.Contains(Keys.Delete),"Consumed Delete was not broadcast to peer hooks");
+                                    var modified=(byte[])state.Clone(); modified[(int)Keys.ControlKey]=0x80; SetKeyboardState(modified);
+                                    Tap(canvas,Keys.A); Application.DoEvents();
+                                    Check(native==1,"Declined Ctrl+A did not reach GH's Select All menu");
+                                }
+                                finally { SetKeyboardState(state); a.Command=null; form.MainMenuStrip=null; form.Controls.Remove(menu); }
+                            }
+                        }, a);
+                        Run("physical Escape repeats cannot consume multiple layers", () =>
+                        {
+                            int layers=0; a.Command=key=>{ if(key!=Keys.Escape)return false; layers++; return true; };
+                            try
+                            {
+                                Down(canvas,Keys.Escape); Down(canvas,Keys.Escape,true); Up(canvas,Keys.Escape); Application.DoEvents();
+                                Check(layers==1,"One Escape consumed multiple layers"); Tap(canvas,Keys.Escape); Check(layers==2,"Second press lost");
+                            }
+                            finally { a.Command=null; }
+                        }, a);
+                        Run("right-drag transport preserves the threshold-crossing move for pan handoff", () =>
+                        {
+                            bool context=false, handed=false; int delivered=0;
+                            a.Mouse=(msg,args,after)=>
+                            {
+                                if(after)return;
+                                if(msg==0x204) context=true;
+                                if(msg==0x200 && context) { handed=true; delivered++; }
+                                if(msg==0x205) context=false;
+                            };
+                            try
+                            {
+                                foreach(int msg in new[]{0x204,0x200,0x205}) PostMessage(canvas.Handle,msg,new IntPtr(2),new IntPtr(msg==0x200?100:0));
+                                Application.DoEvents(); Check(handed && delivered==1 && !context,"Handoff move/up lost");
+                            }
+                            finally { a.Mouse=null; }
+                        }, a);
+                        Run("actual capture loss reaches the input cancellation boundary", () =>
+                        {
+                            int lost=0; a.Lost=()=>lost++;
+                            try { canvas.Capture=true; canvas.Capture=false; Application.DoEvents(); Check(lost>0,"Capture loss not observed"); }
+                            finally { a.Lost=null; }
                         }, a);
                         Run("disposing one owner retains remaining owner's hook", () =>
                         {

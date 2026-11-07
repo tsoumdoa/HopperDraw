@@ -18,7 +18,7 @@ using Grasshopper.Kernel.Undo;
 
 namespace hopperdraw
 {
-    public class HopperDraw : GH_Component, IGH_InstanceGuidDependent
+    public partial class HopperDraw : GH_Component, IGH_InstanceGuidDependent
     {
         private bool _isActivated;
         private bool _drawingModeEnabled;
@@ -37,8 +37,8 @@ namespace hopperdraw
         private Point3d _dragFrameOffset;
         private double _dragAspectRatio = 1.0;
 
-        private DateTime _lastClickTime = DateTime.MinValue;
-        private Point3d _lastClickPosition = Point3d.Unset;
+
+
 
         private GH_Canvas _canvas;
         private bool _eventsRegistered;
@@ -224,6 +224,7 @@ namespace hopperdraw
             System.Diagnostics.Debug.WriteLine($"[HopperDraw SolveInstance] Updating. Shapes count = {Shapes.Count}");
 #endif
             Visible = show && !this.Locked;
+            if (!Visible) _annotationController?.CancelOwner(this);
             if (!Visible && (_isDrawing || _drawingModeEnabled)) CancelDrawing();
             BorderColor = _borderColor;
             LineThickness = _lineThickness;
@@ -243,6 +244,7 @@ namespace hopperdraw
 
         private bool RecordShapeUndo(string name, bool includeMovedObjects = false)
         {
+            if (MenuTransaction) return true;
             if (!CanEditShapes) return false;
             var document = OnPingDocument();
             if (document == null) return true; // Detached model has no host undo server (also used by tests).
@@ -443,7 +445,10 @@ namespace hopperdraw
                 _canvas.MouseCaptureChanged += Canvas_MouseCaptureChanged;
                 _canvas.DocumentChanged += Canvas_DocumentChanged;
                 if (Environment.OSVersion.Platform == PlatformID.Win32NT)
+                {
                     _drawingShortcut = CanvasDrawingShortcut.Register(_canvas, CanActivateDrawingShortcut, EnterDrawingMode);
+                    _annotationController = CanvasAnnotationController.Register(_canvas, this);
+                }
                 _eventsRegistered = true;
 
             }
@@ -469,6 +474,8 @@ namespace hopperdraw
                 _canvas.MouseCaptureChanged -= Canvas_MouseCaptureChanged;
                 _canvas.DocumentChanged -= Canvas_DocumentChanged;
             }
+            _annotationController?.Remove(this);
+            _annotationController = null;
             _eventsRegistered = false;
             _canvas = null;
 
@@ -551,25 +558,8 @@ namespace hopperdraw
 
         private bool IsOverGrasshopperObject(Point3d point)
         {
-            if (_canvas?.Document == null) return false;
-            var location = new PointF((float)point.X, (float)point.Y);
-            foreach (var obj in _canvas.Document.Objects)
-            {
-                if (obj?.Attributes == null) continue;
-                var bounds = obj.Attributes.Bounds;
-                if (obj is Grasshopper.Kernel.Special.GH_Group)
-                {
-                    if (bounds.Contains(location) &&
-                        (location.X - bounds.Left < 12 || bounds.Right - location.X < 12 ||
-                         location.Y - bounds.Top < 20 || bounds.Bottom - location.Y < 12))
-                        return true;
-                    continue;
-                }
-                bounds.Inflate(12f, 12f);
-                if (bounds.Contains(location))
-                    return true;
-            }
-            return false;
+            // Group interiors are empty canvas for annotations; components, grips and group edges are native.
+            return CanvasAnnotationController.OverNative(_canvas?.Document, point.ToPointF());
         }
 
         internal sealed class DrawingCanvasValidator : GH_CanvasValidator
@@ -580,6 +570,9 @@ namespace hopperdraw
 
             public override bool CanShowComponentSearchBox(PointF point)
             {
+                if (_owner.Eligible && ReferenceEquals(Canvas?.Document, _owner.OnPingDocument()) &&
+                    !_owner.IsOverGrasshopperObject(new Point3d(point.X, point.Y, 0)) &&
+                    (_owner.DrawingModeEnabled || _owner.Shapes.Any(shape => AnnotationGeometry.Hit(shape, point, 5 * _owner.CanvasScale, _owner.LineThickness)))) return false;
                 return !_owner._drawingModeEnabled || !_owner.CanHandleCanvasEvent(Canvas) ||
                     (Control.ModifierKeys & (Keys.Control | Keys.Alt)) != Keys.None ||
                     _owner.IsOverGrasshopperObject(new Point3d(point.X, point.Y, 0));
@@ -588,6 +581,8 @@ namespace hopperdraw
 
         private void CancelDrawing()
         {
+            _annotationController?.CancelOwner(this);
+            Draft.Cancel();
             EndShapeGesture();
             if (ReferenceEquals(_capturingOwner, this)) _capturingOwner = null;
             _drawingModeEnabled = false;
@@ -597,7 +592,7 @@ namespace hopperdraw
             _isDrawing = false;
             _frameCornerCount = 0;
             _acceptDrawingMouseUp = false;
-            ResetNextShapeOverrides();
+            // The session pen is sticky until explicitly reset.
             _clickStartPt = Point3d.Unset;
             _isWindowSelecting = false;
             _isDragging = false;
@@ -624,8 +619,6 @@ namespace hopperdraw
             _isMultiDragging = false;
             _isWindowSelecting = false;
             ClearCapturedGHObjects();
-            _lastClickTime = DateTime.MinValue;
-            _lastClickPosition = Point3d.Unset;
             _drawingModeEnabled = true;
             _capturingOwner = this;
             _canvas.Focus();
@@ -679,6 +672,7 @@ namespace hopperdraw
 
         private void Canvas_MouseDown(object sender, MouseEventArgs e)
         {
+            if (_annotationController != null) return;
             // A mouse gesture between D presses starts a separate activation gesture.
             _drawingKeyGesture.Reset();
             _drawingShortcut?.Reset();
@@ -697,9 +691,7 @@ namespace hopperdraw
             if ((modifiers & (Keys.Control | Keys.Alt)) != Keys.None) return;
             bool startDrawing = _drawingModeEnabled && !_isDrawing;
 
-            var timeSinceLastClick = DateTime.Now - _lastClickTime;
-            bool isDoubleClick = (timeSinceLastClick.TotalMilliseconds < 500) &&
-                                (_lastClickPosition.DistanceTo(pt) < 10);
+            bool isDoubleClick = e.Clicks > 1;
 
             bool shiftPressed = (Control.ModifierKeys & Keys.Shift) == Keys.Shift;
 
@@ -707,7 +699,7 @@ namespace hopperdraw
             {
                 if (_isDrawing)
                 {
-                    Point3d endPt = shiftPressed ? GeometryUtilities.SnapOrthogonal(_drawStart, pt) : pt;
+                    Point3d endPt = shiftPressed ? GeometryUtilities.SnapAngle(_drawStart, pt) : pt;
                     var lineShape = new LineShape(_drawStart, endPt);
                     lineShape.ThicknessMultiplier = _currentThicknessMultiplier;
                     lineShape.OverrideColor = _pendingColorOverride;
@@ -716,7 +708,7 @@ namespace hopperdraw
                     Shapes.Add(lineShape);
                     MarkDocumentModified();
                     _isDrawing = false;
-                    ResetNextShapeOverrides();
+                    // The session pen is sticky until explicitly reset.
                     RequestCanvasRedraw();
                     return;
                 }
@@ -726,8 +718,8 @@ namespace hopperdraw
                     _drawEnd = pt;
                     _isDrawing = true;
                     _capturingOwner = this;
-                    _lastClickTime = DateTime.Now;
-                    _lastClickPosition = pt;
+
+
                     RequestCanvasRedraw();
                     return;
                 }
@@ -742,15 +734,15 @@ namespace hopperdraw
                         _isDrawing = true;
                         _capturingOwner = this;
                         _acceptDrawingMouseUp = true;
-                        _lastClickTime = DateTime.Now;
-                        _lastClickPosition = pt;
+
+
                         RequestCanvasRedraw();
                         return;
                     }
                 }
                 else if (_isDrawing && _currentPoints.Count >= 2 && isDoubleClick)
                 {
-                    var polyShape = new PolylineShape(new List<Point3d>(_currentPoints), true);
+                    var polyShape = new PolylineShape(new List<Point3d>(_currentPoints), false);
                     polyShape.ThicknessMultiplier = _currentThicknessMultiplier;
                     polyShape.OverrideColor = _pendingColorOverride;
                     polyShape.LineType = _currentLineType;
@@ -759,9 +751,9 @@ namespace hopperdraw
                     MarkDocumentModified();
                     _currentPoints.Clear();
                     _isDrawing = false;
-                    ResetNextShapeOverrides();
-                    _lastClickTime = DateTime.Now;
-                    _lastClickPosition = pt;
+                    // The session pen is sticky until explicitly reset.
+
+
                     RequestCanvasRedraw();
                     return;
                 }
@@ -776,15 +768,15 @@ namespace hopperdraw
                         _isDrawing = true;
                         _capturingOwner = this;
                         _acceptDrawingMouseUp = true;
-                        _lastClickTime = DateTime.Now;
-                        _lastClickPosition = pt;
+
+
                         RequestCanvasRedraw();
                         return;
                     }
                 }
                 else if (_isDrawing && _currentPoints.Count >= 2 && isDoubleClick)
                 {
-                    var curveShape = new CurveShape(new List<Point3d>(_currentPoints), true);
+                    var curveShape = new CurveShape(new List<Point3d>(_currentPoints), false);
                     curveShape.ThicknessMultiplier = _currentThicknessMultiplier;
                     curveShape.OverrideColor = _pendingColorOverride;
                     curveShape.LineType = _currentLineType;
@@ -793,9 +785,9 @@ namespace hopperdraw
                     MarkDocumentModified();
                     _currentPoints.Clear();
                     _isDrawing = false;
-                    ResetNextShapeOverrides();
-                    _lastClickTime = DateTime.Now;
-                    _lastClickPosition = pt;
+                    // The session pen is sticky until explicitly reset.
+
+
                     RequestCanvasRedraw();
                     return;
                 }
@@ -818,8 +810,8 @@ namespace hopperdraw
                     _frameCornerCount = 0;
                     _isDrawing = false;
                     CreateFrame(_frameFirstCorner, finalPt);
-                    _lastClickTime = DateTime.Now;
-                    _lastClickPosition = pt;
+
+
                     RequestCanvasRedraw();
                     return;
                 }
@@ -829,8 +821,8 @@ namespace hopperdraw
                     _frameCornerCount = 1;
                     _isDrawing = true;
                     _capturingOwner = this;
-                    _lastClickTime = DateTime.Now;
-                    _lastClickPosition = pt;
+
+
                     RequestCanvasRedraw();
                     return;
                 }
@@ -839,8 +831,8 @@ namespace hopperdraw
             if ((_drawMode == 1 || _drawMode == 3) && _isDrawing)
             {
                 _acceptDrawingMouseUp = true;
-                _lastClickTime = DateTime.Now;
-                _lastClickPosition = pt;
+
+
                 return;
             }
 
@@ -850,7 +842,7 @@ namespace hopperdraw
             {
                 bool isAlreadySelected = SelectedShapeIndices.Contains(shapeIdx);
                 bool multipleShapesSelected = SelectedShapeIndices.Count > 1;
-                
+
                 if (shiftPressed)
                 {
                     if (isAlreadySelected)
@@ -949,12 +941,13 @@ namespace hopperdraw
             if (!RecordShapeUndo("Create frame")) return;
             Shapes.Add(frameShape);
             MarkDocumentModified();
-            ResetNextShapeOverrides();
+            // The session pen is sticky until explicitly reset.
             RequestCanvasRedraw();
         }
 
         private void Canvas_MouseMove(object sender, MouseEventArgs e)
         {
+            if (_annotationController != null) return;
             if (!CanHandleCanvasEvent(sender))
                 return;
 
@@ -1032,6 +1025,7 @@ namespace hopperdraw
 
         private void Canvas_MouseUp(object sender, MouseEventArgs e)
         {
+            if (_annotationController != null) return;
             if (!CanHandleCanvasEvent(sender) || e.Button != MouseButtons.Left)
                 return;
 
@@ -1101,6 +1095,7 @@ namespace hopperdraw
         private void Canvas_KeyDown(object sender, KeyEventArgs e)
         {
             if (!ReferenceEquals(sender, _canvas)) return;
+            if (_annotationController != null || e.Handled) return;
             bool canHandle = CanHandleCanvasEvent(sender);
             bool doubleD = _drawingShortcut == null && _drawingKeyGesture.KeyDown(e.KeyCode,
                 canHandle && !e.Handled && e.Modifiers == Keys.None,
@@ -1109,7 +1104,8 @@ namespace hopperdraw
 
             if (e.KeyCode == Keys.Escape && (_drawingModeEnabled || _isDragging || _isMultiDragging))
             {
-                CancelDrawing();
+                if (_isDrawing) { _isDrawing = false; _currentPoints.Clear(); _frameCornerCount = 0; }
+                else CancelDrawing();
                 RequestCanvasRedraw();
                 e.SuppressKeyPress = true;
                 return;
@@ -1156,7 +1152,7 @@ namespace hopperdraw
                     MarkDocumentModified();
                     _currentPoints.Clear();
                     _isDrawing = false;
-                    ResetNextShapeOverrides();
+                    // The session pen is sticky until explicitly reset.
                     RequestCanvasRedraw();
                     e.SuppressKeyPress = true;
                 }
@@ -1213,49 +1209,7 @@ namespace hopperdraw
         public override bool AppendMenuItems(ToolStripDropDown menu)
         {
             base.AppendMenuItems(menu);
-            if (!CanEditShapes) return true;
-            menu.Items.Add(new ToolStripSeparator());
-            menu.Items.Add(new ToolStripMenuItem("Exit drawing mode", null, (s, e) =>
-            {
-                CancelDrawing();
-                _canvas?.Invalidate();
-            }) { Enabled = _drawingModeEnabled });
-            menu.Items.Add(new ToolStripSeparator());
-            menu.Items.Add(new ToolStripMenuItem("Select all HopperDraw shapes", null, (s, e) =>
-            {
-                SelectedShapeIndices.Clear();
-                for (int i = 0; i < Shapes.Count; i++) if (!(Shapes[i] is OpaqueShape)) SelectedShapeIndices.Add(i);
-                RequestCanvasRedraw();
-            }) { Enabled = Shapes.Count > 0 });
-
-            menu.Items.Add(new ToolStripMenuItem("Select unreadable annotation records", null, (s, e) =>
-            {
-                ClearSelection();
-                for (int i = 0; i < Shapes.Count; i++) if (Shapes[i] is OpaqueShape) SelectedShapeIndices.Add(i);
-                RequestCanvasRedraw();
-            }) { Enabled = Shapes.Any(shape => shape is OpaqueShape) });
-
-            var thicknessMenu = new ToolStripMenuItem("Shape thickness");
-            thicknessMenu.DropDownItems.Add("0.5x", null, (s, e) => SetThicknessMultiplier(0.5f));
-            thicknessMenu.DropDownItems.Add("1x", null, (s, e) => SetThicknessMultiplier(1.0f));
-            thicknessMenu.DropDownItems.Add("2x", null, (s, e) => SetThicknessMultiplier(2.0f));
-            thicknessMenu.DropDownItems.Add("3x", null, (s, e) => SetThicknessMultiplier(3.0f));
-            menu.Items.Add(thicknessMenu);
-            menu.Items.Add(new ToolStripMenuItem("Cycle line type", null, (s, e) => CycleLineType()));
-            menu.Items.Add(new ToolStripMenuItem("Set next shape color", null, (s, e) => ShowColorPickerForDrawing()));
-            menu.Items.Add(new ToolStripMenuItem("Set selected shape color", null, (s, e) => ShowColorPickerForSelected()) { Enabled = HasSelection });
-            menu.Items.Add(new ToolStripMenuItem("Duplicate selected shapes", null, (s, e) => DuplicateSelectedShapes()) { Enabled = HasSelection });
-            menu.Items.Add(new ToolStripMenuItem("Group selected shapes", null, (s, e) =>
-            {
-                GroupSelectedShapes();
-                RequestCanvasRedraw();
-            }) { Enabled = SelectedShapeIndices.Count > 1 });
-            menu.Items.Add(new ToolStripMenuItem("Ungroup selected shapes", null, (s, e) =>
-            {
-                UngroupSelectedGroups();
-                RequestCanvasRedraw();
-            }) { Enabled = SelectedShapeIndices.Any(idx => idx >= 0 && idx < Shapes.Count && Shapes[idx] is DrawShapeGroup) });
-            menu.Items.Add(new ToolStripMenuItem("Clear all HopperDraw shapes", null, (s, e) => ClearAll()) { Enabled = Shapes.Count > 0 || _componentLoadDiagnostics.Count > 0 });
+            if (CanEditShapes) AnnotationMenuBuilder.Component(menu, this);
             return true;
         }
 
@@ -1555,7 +1509,7 @@ namespace hopperdraw
             {
                 if (additive && SelectedShapeIndices.Contains(i))
                     continue;
-                    
+
                 var pts = Shapes[i].GetPoints();
                 bool inside = false;
                 foreach (var pt in pts)

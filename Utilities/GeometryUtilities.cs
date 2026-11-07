@@ -70,10 +70,10 @@ namespace hopperdraw
             double h = newPos.Y - corner.Y;
             double absW = Math.Abs(w);
             double absH = Math.Abs(h);
-            double signW = Math.Sign(w);
-            double signH = Math.Sign(h);
+            double signW = w < 0 ? -1 : 1;
+            double signH = h < 0 ? -1 : 1;
 
-            if (absW > 2 && absH > 2)
+            if (StyleValidation.Finite(aspectRatio) && aspectRatio > 0 && (absW > 0 || absH > 0))
             {
                 if (absW > absH * aspectRatio)
                 {

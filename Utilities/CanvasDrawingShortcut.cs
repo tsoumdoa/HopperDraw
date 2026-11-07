@@ -7,7 +7,7 @@ namespace hopperdraw
 {
     // One hook per canvas, shared by every HopperDraw component. The canvas HWND
     // receives the message before WinForms invokes the editor's KeyPreview handler.
-    internal sealed class CanvasDrawingShortcut : NativeWindow
+    internal sealed class CanvasDrawingShortcut : NativeWindow, IMessageFilter
     {
         private const int KeyDownMessage = 0x100;
         private const int KeyUpMessage = 0x101;
@@ -37,6 +37,10 @@ namespace hopperdraw
             private CanvasDrawingShortcut _hook;
             internal readonly Func<bool> CanActivate;
             internal readonly Action Activate;
+            internal Action<int, MouseEventArgs, bool> Mouse;
+            internal Func<Keys, bool> Command;
+            internal Action Lost;
+
 
             internal Registration(CanvasDrawingShortcut hook, Func<bool> canActivate, Action activate)
             {
@@ -71,6 +75,7 @@ namespace hopperdraw
         private CanvasDrawingShortcut(Control canvas)
         {
             _canvas = canvas;
+            Application.AddMessageFilter(this);
             canvas.HandleCreated += HandleCreated;
             canvas.HandleDestroyed += HandleDestroyed;
             canvas.Disposed += CanvasDisposed;
@@ -82,6 +87,8 @@ namespace hopperdraw
         private void HandleDestroyed(object sender, EventArgs args)
         {
             Reset(true);
+            _commandsDown.Clear();
+            foreach (var owner in _owners.ToArray()) owner.Lost?.Invoke();
             _ownedCharacters.Clear();
             if (Handle != IntPtr.Zero) ReleaseHandle();
         }
@@ -106,6 +113,7 @@ namespace hopperdraw
 
         private void Detach()
         {
+            Application.RemoveMessageFilter(this);
             Hooks.Remove(_canvas);
             _canvas.HandleCreated -= HandleCreated;
             _canvas.HandleDestroyed -= HandleDestroyed;
@@ -136,8 +144,59 @@ namespace hopperdraw
             return null;
         }
 
+        private readonly HashSet<Keys> _commandsDown = new HashSet<Keys>();
+        private bool RouteCommand(Keys key, bool repeat = false)
+        {
+            if (!_canvas.Focused) return false;
+            if (_commandsDown.Contains(key)) return true;
+            if (repeat) return false;
+            foreach (var owner in _owners.ToArray())
+                if (owner.Command?.Invoke(key | Control.ModifierKeys) == true)
+                {
+                    // Notify every plugin hook before this layer consumes the key (same rule as WndProc).
+                    Observe(key, KeyDownMessage);
+                    Reset(); _commandsDown.Add(key); return true;
+                }
+            return false;
+        }
+        private bool ReleaseCommand(Keys key)
+        {
+            if (!_commandsDown.Remove(key)) return false;
+            Observe(key, KeyUpMessage);
+            return true;
+        }
+        private void Observe(Keys key, int message)
+        {
+            if (_canvas.IsHandleCreated)
+                SendMessage(_canvas.Handle, KeyObservedMessage, new IntPtr((int)key), new IntPtr(message));
+        }
+        public bool PreFilterMessage(ref Message m)
+        {
+            if (m.HWnd != Handle) return false;
+            if (m.Msg == KeyDownMessage && RouteCommand((Keys)m.WParam.ToInt32(), (m.LParam.ToInt64() & (1L << 30)) != 0)) return true;
+            if (m.Msg == KeyUpMessage && ReleaseCommand((Keys)m.WParam.ToInt32())) return true;
+            return false;
+        }
+        private void RouteMouse(int message, IntPtr location, bool after)
+        {
+            if (message < 0x200 || message > 0x215) return;
+            int packed = unchecked((int)location.ToInt64());
+            var button = message >= 0x204 && message <= 0x206 ? MouseButtons.Right :
+                message >= 0x201 && message <= 0x203 ? MouseButtons.Left : Control.MouseButtons;
+            var args = new MouseEventArgs(button, message == 0x203 ? 2 : 1,
+                (short)(packed & 0xffff), (short)((packed >> 16) & 0xffff), 0);
+            foreach (var owner in _owners.ToArray()) owner.Mouse?.Invoke(message, args, after);
+        }
         protected override void WndProc(ref Message message)
         {
+            RouteMouse(message.Msg, message.LParam, false);
+            if (message.Msg == KillFocusMessage || message.Msg == 0x215 || message.Msg == 0x1f)
+            {
+                _commandsDown.Clear();
+                foreach (var registration in _owners.ToArray()) registration.Lost?.Invoke();
+            }
+            if (message.Msg == KeyDownMessage && RouteCommand((Keys)message.WParam.ToInt32(), (message.LParam.ToInt64() & (1L << 30)) != 0)) { message.Result = IntPtr.Zero; return; }
+            if (message.Msg == KeyUpMessage && ReleaseCommand((Keys)message.WParam.ToInt32())) { message.Result = IntPtr.Zero; return; }
             if (message.Msg == KeyObservedMessage)
             {
                 var key = (Keys)message.WParam.ToInt32();
@@ -207,6 +266,9 @@ namespace hopperdraw
                 Reset(); // Mouse presses or wheel movement separate gestures.
 
             base.WndProc(ref message);
+            RouteMouse(message.Msg, message.LParam, true);
+            if (message.Msg == KeyDownMessage || message.Msg == KeyUpMessage || message.Msg == SystemKeyDownMessage || message.Msg == SystemKeyUpMessage)
+                foreach (var registration in _owners.ToArray()) registration.Mouse?.Invoke(message.Msg, null, true);
         }
     }
 }
