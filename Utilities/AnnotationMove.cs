@@ -72,7 +72,7 @@ namespace hopperdraw
                 }
                 proposal.MovePoint(handle, point);
             }
-            if (!ShapeRenderer.ValidPoints(proposal.GetPoints())) return;
+            if (!ValidGeometry(proposal)) return;
             owner.Shapes[shape] = proposal;
             _edited = proposal is TextShape editedText ? !editedText.SameText((TextShape)_before[owner][shape]) : !proposal.GetPoints().SequenceEqual(_before[owner][shape].GetPoints());
         }
@@ -88,8 +88,9 @@ namespace hopperdraw
             if (document != null && document.UndoUtil.RecordEvent(Record) == Guid.Empty) { Revert(true); return; }
             foreach (var owner in _before.Keys) owner.Changed();
         }
-        private static bool ValidGeometry(DrawShape shape) => shape is DrawShapeGroup group
-            ? group.Children.All(ValidGeometry) : shape is OpaqueShape || ShapeRenderer.ValidPoints(shape.GetPoints());
+        internal static bool ValidGeometry(DrawShape shape) => shape is DrawShapeGroup group
+            ? group.Children.All(ValidGeometry) : shape is OpaqueShape || ShapeRenderer.ValidPoints(shape.GetPoints()) &&
+                (!(shape is TextShape text) || !text.BoxWidth.HasValue || TextShape.ValidBox(text.Anchor.X, text.BoxWidth.Value));
         private static void SetPivot(IGH_DocumentObject obj, PointF point)
         { obj.Attributes.Pivot = point; obj.Attributes.ExpireLayout(); obj.Attributes.PerformLayout(); }
     }

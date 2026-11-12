@@ -57,9 +57,9 @@ namespace hopperdraw
             if (!RecordShapeUndo("Create annotation")) return;
             Shapes.Add(shape); Changed();
         }
-        internal void CancelGesture()
+        internal void CancelGesture(bool commitText = false)
         {
-            _annotationController?.CancelOwner(this); Draft.Cancel();
+            _annotationController?.CancelOwner(this, commitText); Draft.Cancel();
             EndShapeGesture(); _isDrawing = false; _currentPoints.Clear();
             _frameCornerCount = 0; _acceptDrawingMouseUp = false; _clickStartPt = Point3d.Unset;
             _isWindowSelecting = _isDragging = _isMultiDragging = _isFrameDragging = false;
@@ -74,7 +74,7 @@ namespace hopperdraw
             var param = (Param_Integer)Params.Input[2];
             param.RecordUndoEvent("HopperDraw: Change drawing tool");
             param.PersistentData.Clear(); param.PersistentData.Append(new GH_Integer(mode));
-            CancelGesture(); _drawMode = mode; param.ExpireSolution(false); ExpireSolution(true); Redraw();
+            CancelGesture(true); _drawMode = mode; param.ExpireSolution(false); ExpireSolution(true); Redraw();
         }
     }
 }

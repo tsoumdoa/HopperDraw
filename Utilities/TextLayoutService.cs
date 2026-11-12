@@ -11,7 +11,14 @@ namespace hopperdraw
     {
         internal RectangleF Bounds;
         internal string[] Lines;
+        internal TextRun[][] Runs;
         internal float Em, Padding, LineHeight;
+    }
+
+    internal sealed class TextRun
+    {
+        internal string Text;
+        internal float Width;
     }
 
     // Single canvas-unit layout for paint, picking, bounds, handles and editor placement.
@@ -69,9 +76,16 @@ namespace hopperdraw
             if (!Shared.TryGetValue(key, out var basis))
             {
                 if (Shared.Count >= 512) Shared.Clear();
-                basis = Build(shape); Shared[key] = basis;
+                try { basis = Build(shape); }
+                catch (Exception)
+                {
+                    // Cache the fallback too: a broken font/GDI resource must not fail on every mouse move.
+                    basis = BuildLines(shape, text => text.Length * Em(shape) * 1.2f,
+                        c => Em(shape) * (c == '\t' ? 4.8f : 1.2f));
+                }
+                Shared[key] = basis;
             }
-            entry.Value = new TextLayout { Em = basis.Em, Padding = basis.Padding, LineHeight = basis.LineHeight, Lines = basis.Lines,
+            entry.Value = new TextLayout { Em = basis.Em, Padding = basis.Padding, LineHeight = basis.LineHeight, Lines = basis.Lines, Runs = basis.Runs,
                 Bounds = new RectangleF((float)shape.Anchor.X, (float)shape.Anchor.Y, basis.Bounds.Width, basis.Bounds.Height) };
             entry.Key = new TextShape { Text = shape.Text, Anchor = shape.Anchor, BoxWidth = shape.BoxWidth };
             shape.CopyTextStyleTo(entry.Key);
@@ -79,10 +93,6 @@ namespace hopperdraw
         }
         private static TextLayout Build(TextShape shape)
         {
-            float em = Em(shape), pad = .4f * em;
-            float available = shape.BoxWidth.HasValue ? (float)Math.Max(1, shape.BoxWidth.Value - 2 * pad) : float.MaxValue;
-            var lines = new List<string>();
-            float maxWidth = 0;
             using (var bitmap = new Bitmap(1, 1))
             using (var g = Graphics.FromImage(bitmap))
             using (var font = Font(shape))
@@ -95,39 +105,61 @@ namespace hopperdraw
                     { width = g.MeasureString(c == '\t' ? "    " : c.ToString(), font, int.MaxValue, format).Width; widths.Add(c, width); }
                     return width;
                 }
-                string text = shape.Text ?? "";
-                if (text.Length > MaxTextLength) text = text.Substring(0, MaxTextLength);
-                foreach (string paragraph in text.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n'))
+                return BuildLines(shape, text => g.MeasureString(text, font, int.MaxValue, format).Width, Width);
+            }
+        }
+        // GDI+ has paragraph length and fallback-font width limits. Use the same bounded runs for
+        // measuring and painting so unboxed bounds cannot silently cap below the painted extent.
+        private static IEnumerable<string> Chunks(string text)
+        {
+            for (int start = 0; start < text.Length;)
+            {
+                int count = Math.Min(1024, text.Length - start);
+                if (start + count < text.Length && char.IsHighSurrogate(text[start + count - 1]) &&
+                    char.IsLowSurrogate(text[start + count])) count--;
+                yield return text.Substring(start, count);
+                start += count;
+            }
+        }
+        private static TextLayout BuildLines(TextShape shape, Func<string, float> measure, Func<char, float> widthOf)
+        {
+            float em = Em(shape), pad = .4f * em;
+            float available = shape.BoxWidth.HasValue ? (float)Math.Max(em, shape.BoxWidth.Value - 2 * pad) : float.MaxValue;
+            var lines = new List<string>();
+            string text = shape.Text ?? "";
+            if (text.Length > MaxTextLength) text = text.Substring(0, MaxTextLength);
+            foreach (string paragraph in text.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n'))
+            {
+                if (lines.Count >= MaxLines) break;
+                if (!shape.BoxWidth.HasValue || paragraph.Length == 0) { lines.Add(paragraph); continue; }
+                int start = 0;
+                while (start < paragraph.Length && lines.Count < MaxLines)
                 {
-                    if (lines.Count >= MaxLines) break;
-                    if (!shape.BoxWidth.HasValue || paragraph.Length == 0) { lines.Add(paragraph); continue; }
-                    int start = 0;
-                    while (start < paragraph.Length && lines.Count < MaxLines)
+                    float width = 0;
+                    int lastBreak = -1, end = start;
+                    for (; end < paragraph.Length; end++)
                     {
-                        float width = 0; int lastBreak = -1, end = start;
-                        for (; end < paragraph.Length; end++)
-                        {
-                            char c = paragraph[end];
-                            float next = width + Width(c);
-                            // Spaces remain in the buffer/line but do not cause a wrap by themselves.
-                            if (!char.IsWhiteSpace(c) && next > available && end > start) break;
-                            width = next;
-                            if (char.IsWhiteSpace(c)) lastBreak = end + 1;
-                        }
-                        if (end < paragraph.Length && lastBreak > start) end = lastBreak;
-                        if (end == start) end++;
-                        // Never split a surrogate pair.
-                        if (end < paragraph.Length && char.IsHighSurrogate(paragraph[end - 1]) && char.IsLowSurrogate(paragraph[end])) end++;
-                        lines.Add(paragraph.Substring(start, end - start)); start = end;
+                        char c = paragraph[end];
+                        float next = width + widthOf(c);
+                        if (!char.IsWhiteSpace(c) && next > available && end > start) break;
+                        width = next;
+                        if (char.IsWhiteSpace(c)) lastBreak = end + 1;
                     }
+                    if (end < paragraph.Length && lastBreak > start) end = lastBreak;
+                    if (end == start) end++;
+                    if (end < paragraph.Length && char.IsHighSurrogate(paragraph[end - 1]) && char.IsLowSurrogate(paragraph[end])) end++;
+                    lines.Add(paragraph.Substring(start, end - start));
+                    start = end;
                 }
-                foreach (var line in lines)
-                    maxWidth = Math.Max(maxWidth, g.MeasureString(line.TrimEnd().Replace("\t", "    "), font, int.MaxValue, format).Width);
             }
             if (lines.Count == 0) lines.Add("");
-            return new TextLayout { Em = em, Padding = pad, LineHeight = 1.3f * em, Lines = lines.ToArray(),
+            var runs = lines.Select(line => Chunks(line.TrimEnd().Replace("\t", "    "))
+                .Select(chunk => new TextRun { Text = chunk, Width = measure(chunk) }).ToArray()).ToArray();
+            float maxWidth = runs.Max(line => line.Sum(run => run.Width));
+            return new TextLayout { Em = em, Padding = pad, LineHeight = 1.3f * em, Lines = lines.ToArray(), Runs = runs,
                 Bounds = new RectangleF((float)shape.Anchor.X, (float)shape.Anchor.Y,
-                    shape.BoxWidth.HasValue ? (float)shape.BoxWidth.Value : Math.Max(1, maxWidth) + 2 * pad, lines.Count * 1.3f * em + 2 * pad) };
+                    shape.BoxWidth.HasValue ? available + 2 * pad : Math.Max(1, maxWidth) + 2 * pad,
+                    lines.Count * 1.3f * em + 2 * pad) };
         }
         internal static bool Greek(float em, float zoom) => em * zoom < 3;
         internal static void Paint(Graphics g, TextShape shape, Color basis)
@@ -139,8 +171,7 @@ namespace hopperdraw
             var state = g.Save();
             try
             {
-                // A box narrower than a single glyph still wraps by character; clip that
-                // glyph to the available content width so paint stays inside its bounds.
+                // Stored narrow boxes get at least one em of content, including for clipping.
                 if (shape.BoxWidth.HasValue)
                     g.SetClip(new RectangleF(layout.Bounds.X + layout.Padding, layout.Bounds.Y + layout.Padding,
                         Math.Max(0, layout.Bounds.Width - 2 * layout.Padding), layout.Bounds.Height - 2 * layout.Padding), System.Drawing.Drawing2D.CombineMode.Intersect);
@@ -158,7 +189,16 @@ namespace hopperdraw
                                 g.FillRectangle(brush, layout.Bounds.X + layout.Padding, y + layout.Em * .3f,
                                     Math.Max(0, Math.Min(layout.Bounds.Width - 2 * layout.Padding, layout.Lines[i].TrimEnd().Length * layout.Em * .5f)), layout.Em * .4f);
                         }
-                        else g.DrawString(layout.Lines[i].Replace("\t", "    "), font, brush, layout.Bounds.X + layout.Padding, y, format);
+                        else
+                        {
+                            float x = layout.Bounds.X + layout.Padding;
+                            foreach (var run in layout.Runs[i])
+                            {
+                                if (x > clip.Right) break;
+                                if (x + run.Width >= clip.Left) g.DrawString(run.Text, font, brush, x, y, format);
+                                x += run.Width;
+                            }
+                        }
                     }
                 }
             }

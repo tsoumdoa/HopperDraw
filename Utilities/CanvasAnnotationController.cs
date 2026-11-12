@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Windows.Forms;
 using Grasshopper;
 using Grasshopper.GUI;
@@ -24,6 +25,10 @@ namespace hopperdraw
         private TextEditorControl _editor;
         private bool _endingText;
         private int _textEpoch;
+        private sealed class PlacementEpoch { internal int Value; }
+        private readonly ConditionalWeakTable<HopperDraw, PlacementEpoch> _ownerTextEpoch = new ConditionalWeakTable<HopperDraw, PlacementEpoch>();
+        private PlacementEpoch OwnerPlacement(HopperDraw owner) => _ownerTextEpoch.GetValue(owner, _ => new PlacementEpoch());
+        private int OwnerTextEpoch(HopperDraw owner) => OwnerPlacement(owner).Value;
         private GH_Document _textDocument;
         private void ObserveTextDocument()
         {
@@ -33,10 +38,10 @@ namespace hopperdraw
         }
         internal void PlaceTextAfterRelease(HopperDraw owner, TextShape shape)
         {
-            int epoch = _textEpoch; var document = _canvas.Document;
+            int epoch = _textEpoch, ownerEpoch = OwnerTextEpoch(owner); var document = _canvas.Document;
             _canvas.BeginInvoke(new Action(() =>
             {
-                if (!_canvas.IsDisposed && epoch == _textEpoch && ReferenceEquals(document,_canvas.Document)) BeginText(owner,shape,true);
+                if (!_canvas.IsDisposed && epoch == _textEpoch && ownerEpoch == OwnerTextEpoch(owner) && ReferenceEquals(document,_canvas.Document)) BeginText(owner,shape,true);
             }));
         }
         internal void BeginText(HopperDraw owner, TextShape shape, bool isNew)
@@ -46,22 +51,39 @@ namespace hopperdraw
             if (!isNew) { shape = TextEditSession.Find(owner.Shapes,shape.PersistentId); if (shape == null) return; }
             DrawingOwner?.Draft.Cancel();
             _hook.Reset(); owner.ResetTextKeys();
-            _text = new TextEditSession(owner, _canvas.Document, shape, isNew);
+            var session = new TextEditSession(owner, _canvas.Document, shape, isNew);
             var layout = shape.Layout;
             float zoom = (float)_canvas.Viewport.Zoom;
             var origin = _canvas.Viewport.ProjectPoint(new PointF(layout.Bounds.Left + layout.Padding, layout.Bounds.Top + layout.Padding));
-            // The model stores LF; a Win32 multiline EDIT control only breaks lines on CRLF.
-            _editor = new TextEditorControl { Text = EditorText(shape.Text), WordWrap = shape.BoxWidth.HasValue,
-                Font = TextLayoutService.Font(shape, zoom), ForeColor = shape.TextColorOverride ?? owner.BorderColor,
-                Location = new Point((int)Math.Ceiling(origin.X), (int)Math.Ceiling(origin.Y)),
-                Size = new Size(Math.Max(80, (int)Math.Min(10000, (layout.Bounds.Width - 2 * layout.Padding) * zoom + 12)),
-                    Math.Max(48, (int)Math.Min(10000, (layout.Bounds.Height - 2 * layout.Padding) * zoom + 12))) };
-            _editor.Commit = () => EndText(true);
-            _editor.LostFocus += EditorLostFocus;
-            _editor.TextChanged += EditorTextChanged;
-            _canvas.Controls.Add(_editor); _editor.BringToFront(); _editor.Focus(); _editor.SelectAll();
-            Application.AddMessageFilter(this);
-            FeedbackChanged(); _canvas.Invalidate();
+            var font = TextLayoutService.Font(shape, zoom);
+            TextEditorControl editor = null;
+            try
+            {
+                editor = new TextEditorControl();
+                editor.Font = font;
+                // The model stores LF; a Win32 multiline EDIT control only breaks lines on CRLF.
+                editor.Text = EditorText(shape.Text);
+                editor.WordWrap = shape.BoxWidth.HasValue;
+                editor.ForeColor = shape.TextColorOverride ?? owner.BorderColor;
+                editor.Location = new Point((int)Math.Ceiling(origin.X), (int)Math.Ceiling(origin.Y));
+                editor.Size = new Size(Math.Max(80, (int)Math.Min(10000, (layout.Bounds.Width - 2 * layout.Padding) * zoom + 12)),
+                    Math.Max(48, (int)Math.Min(10000, (layout.Bounds.Height - 2 * layout.Padding) * zoom + 12)));
+                _editor = editor;
+                _text = session;
+                editor.Commit = () => EndText(true);
+                editor.LostFocus += EditorLostFocus;
+                editor.TextChanged += EditorTextChanged;
+                _canvas.Controls.Add(editor);
+                editor.BringToFront(); editor.Focus(); editor.SelectAll();
+                Application.AddMessageFilter(this);
+                FeedbackChanged(); _canvas.Invalidate();
+            }
+            catch
+            {
+                if (_text == session) EndText(false);
+                else { editor?.Dispose(); font.Dispose(); }
+                throw;
+            }
         }
         private void EditorTextChanged(object sender, EventArgs e)
         {
@@ -75,7 +97,11 @@ namespace hopperdraw
         private void EditorLostFocus(object sender, EventArgs e) => EndText(true);
         private void TextUndoChanged(object sender, GH_DocUndoEventArgs e)
         { if (e.Operation == GH_UndoOperation.Undo || e.Operation == GH_UndoOperation.Redo) { _textEpoch++; EndText(false); } }
-        internal void AbortText(HopperDraw owner) { _textEpoch++; if (_text?.Owner == owner) EndText(false); }
+        internal void AbortText(HopperDraw owner)
+        {
+            OwnerPlacement(owner).Value++;
+            if (_text?.Owner == owner) EndText(false);
+        }
         private void EndText(bool commit)
         {
             if (_text == null || _endingText) return;
@@ -130,12 +156,22 @@ namespace hopperdraw
         private readonly HashSet<Guid> _seen = new HashSet<Guid>();
         private HashSet<IGH_DocumentObject> _prePress;
         private Cursor _ownedCursor;
-        private bool _refreshingCursor;
+        private bool _refreshingCursor, _cursorRefreshPending;
         private readonly DrawingCursorCache _cursors = new DrawingCursorCache();
         private readonly AnnotationHintClock _hints;
         internal void Notice(string text) { _hints.Update(DrawingOwner,DrawingOwner?.DrawMode??-1,DrawingOwner?.Draft.Active==true || _text!=null); _hints.Notice(text); }
         // Explicit state changes (tool, mode, DPI, editor) refresh hints and the stationary-pointer cursor.
-        internal void FeedbackChanged() { UpdateHints(); RefreshCursor(); }
+        internal void FeedbackChanged()
+        {
+            UpdateHints();
+            if (_cursorRefreshPending || _canvas.IsDisposed || !_canvas.IsHandleCreated) return;
+            _cursorRefreshPending = true;
+            _canvas.BeginInvoke(new Action(() =>
+            {
+                _cursorRefreshPending = false;
+                RefreshCursor();
+            }));
+        }
         // Paint and fade ticks only update hint state: they must never drive cursor or hover changes.
         private void UpdateHints()
         {
@@ -240,6 +276,15 @@ namespace hopperdraw
         }
         private void Message(int message, MouseEventArgs e, bool after)
         {
+            try { RouteMessage(message, e, after); }
+            catch (Exception)
+            {
+                _releasing = false; _window = null; _prePress = null;
+                EndFollow(true); ResetCursor();
+            }
+        }
+        private void RouteMessage(int message, MouseEventArgs e, bool after)
+        {
             if (!after && (message == 0x201 || message == 0x203 || message == 0x204 || message == 0x20a)) EndText(true);
             if (!after && (message == 0x201 || message == 0x203 || message == 0x204))
             {
@@ -330,8 +375,9 @@ namespace hopperdraw
             if (revert) _follow?.Revert(false);
             _follow = null; _native = null; _anchor = null; _document = null; _attached = false;
         }
-        internal void CancelOwner(HopperDraw owner)
+        internal void CancelOwner(HopperDraw owner, bool commitText = false)
         {
+            if (commitText && _text?.Owner == owner) EndText(true);
             AbortText(owner);
             if (_canvas.ActiveInteraction is HopperDrawInteraction interaction && interaction.Owns(owner) || _follow?.Actions.ContainsKey(owner)==true) Lost();
             owner.Draft.Cancel();
@@ -410,6 +456,11 @@ namespace hopperdraw
             return false;
         }
         private void Hover(object sender, MouseEventArgs e)
+        {
+            try { UpdateHover(sender, e); }
+            catch (Exception) { ResetCursor(); }
+        }
+        private void UpdateHover(object sender, MouseEventArgs e)
         {
             // Observe GH's actual last selection rectangle, including synthetic auto-pan moves.
             if (_window != null && ReferenceEquals(_canvas.ActiveInteraction,_window) && _window.IsActive)

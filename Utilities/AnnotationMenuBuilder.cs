@@ -131,10 +131,10 @@ namespace hopperdraw
             bool Same<T>(Func<TextShape,T> get) => texts.Length > 0 && texts.Select(get).Distinct().Count() == 1;
             var style = Sub(menu.DropDownItems,"Style");
             foreach (TextStylePreset value in Enum.GetValues(typeof(TextStylePreset)))
-                Item(style.DropDownItems,value.ToString(),()=>apply("Change text style",t=>t.SetPreset(value)),true,Same(t=>t.StylePreset) && texts[0].StylePreset==value);
+                Item(style.DropDownItems,value.ToString(),()=>apply("Change text style",t=>{ t.SetPreset(value); if (t.BoxWidth.HasValue) t.BoxWidth=t.ClampBoxWidth(t.BoxWidth.Value); }),true,Same(t=>t.StylePreset) && texts[0].StylePreset==value);
             var size = Sub(menu.DropDownItems,"Size");
             foreach (double value in new[]{.5,.75,1,1.5,2,3,4})
-                Item(size.DropDownItems,value.ToString("0.##",System.Globalization.CultureInfo.InvariantCulture)+"x",()=>apply("Change text size",t=>t.SizeMultiplier=value),true,Same(t=>t.SizeMultiplier) && texts[0].SizeMultiplier==value);
+                Item(size.DropDownItems,value.ToString("0.##",System.Globalization.CultureInfo.InvariantCulture)+"x",()=>apply("Change text size",t=>{ t.SizeMultiplier=value; if (t.BoxWidth.HasValue) t.BoxWidth=t.ClampBoxWidth(t.BoxWidth.Value); }),true,Same(t=>t.SizeMultiplier) && texts[0].SizeMultiplier==value);
             bool bold = Same(t=>t.Bold) && texts[0].Bold, italic = Same(t=>t.Italic) && texts[0].Italic;
             Item(menu.DropDownItems,"Bold",()=>apply("Change text bold",t=>t.Bold=!bold),true,bold);
             Item(menu.DropDownItems,"Italic",()=>apply("Change text italic",t=>t.Italic=!italic),true,italic);

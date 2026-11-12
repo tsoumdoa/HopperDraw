@@ -473,6 +473,33 @@ internal static class Program
                                 finally {SetKeyboardState(state);a.Command=null;form.KeyDown-=hostile;form.MainMenuStrip=null;form.Controls.Remove(menu);form.Controls.Remove(editor);canvas.Focus();}
                             }
                         },a);
+                        Run("inline editor word delete stays local and rejects DEL characters", () =>
+                        {
+                            using (var editor = new TextEditorControl { Location = new Point(0, 40), Text = "one two three" })
+                            {
+                                form.Controls.Add(editor);
+                                editor.Focus();
+                                var state = new byte[256];
+                                GetKeyboardState(state);
+                                try
+                                {
+                                    var modified = (byte[])state.Clone();
+                                    modified[(int)Keys.ControlKey] = 0x80;
+                                    editor.SelectionStart = editor.TextLength;
+                                    SetKeyboardState(modified);
+                                    Tap(editor, Keys.Back);
+                                    Check(editor.Text == "one two ", "Ctrl+Backspace did not delete word: " + editor.Text);
+                                    editor.SelectionStart = 4;
+                                    SetKeyboardState(modified);
+                                    Tap(editor, Keys.Delete);
+                                    Check(editor.Text == "one  ", "Ctrl+Delete did not delete word: " + editor.Text);
+                                    PostMessage(editor.Handle, 0x102, new IntPtr(127), IntPtr.Zero);
+                                    Application.DoEvents();
+                                    Check(!editor.Text.Contains(((char)127).ToString()), "DEL inserted into buffer");
+                                }
+                                finally { SetKeyboardState(state); form.Controls.Remove(editor); canvas.Focus(); }
+                            }
+                        }, a);
                         Run("inline editor clipboard and arrow commands stay local ahead of parent shortcuts", () =>
                         {
                             var clipboard=Clipboard.GetDataObject();

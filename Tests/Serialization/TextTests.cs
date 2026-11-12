@@ -18,6 +18,7 @@ internal static class TextTests
     private static ToolStripMenuItem Find(ToolStripItemCollection items,string name) => items.OfType<ToolStripMenuItem>().Single(i=>i.Name==name);
     internal static void Run()
     {
+        ReviewRegressionTests.Run();
         Program.Test("review fixes: editor CRLF, narrow boxes, box width bounds and shared layout",()=>
         {
             // Existing multi-line text must open as separate editor lines (Win32 EDIT breaks only on CRLF).
