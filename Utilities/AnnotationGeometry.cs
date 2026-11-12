@@ -15,10 +15,10 @@ namespace hopperdraw
         private sealed class StrokeCache { internal PointF[] Key; internal bool Closed; internal PointF[] Stroke; internal RectangleF Bounds; }
         private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<DrawShape, StrokeCache> Cache =
             new System.Runtime.CompilerServices.ConditionalWeakTable<DrawShape, StrokeCache>();
-        private static bool IsClosed(DrawShape shape) => shape is FrameShape || shape is PolylineShape p && p.Closed || shape is CurveShape c && c.Closed;
+        private static bool IsClosed(DrawShape shape) => shape is TextShape || shape is FrameShape || shape is PolylineShape p && p.Closed || shape is CurveShape c && c.Closed;
         private static StrokeCache Leaf(DrawShape shape)
         {
-            var points = shape.GetPoints();
+            var points = BoundaryPoints(shape);
             bool closed = IsClosed(shape);
             var cache = Cache.GetValue(shape, _ => new StrokeCache());
             if (cache.Key != null && cache.Closed == closed && cache.Key.SequenceEqual(points)) return cache;
@@ -26,6 +26,12 @@ namespace hopperdraw
             cache.Stroke = points.Length < 2 || !ShapeRenderer.ValidPoints(points) ? null : Flatten(shape);
             cache.Bounds = Bounds(cache.Stroke);
             return cache;
+        }
+        internal static PointF[] BoundaryPoints(DrawShape shape)
+        {
+            if (!(shape is TextShape)) return shape.GetPoints();
+            var b = shape.LayoutBounds;
+            return new[] { new PointF(b.Left,b.Top), new PointF(b.Right,b.Top), new PointF(b.Right,b.Bottom), new PointF(b.Left,b.Bottom) };
         }
         private static RectangleF Bounds(PointF[] stroke)
         {
@@ -49,7 +55,7 @@ namespace hopperdraw
         internal static GraphicsPath Boundary(DrawShape shape)
         {
             var path = new GraphicsPath(FillMode.Winding);
-            var points = shape.GetPoints();
+            var points = BoundaryPoints(shape);
             if (points.Length < 2 || !ShapeRenderer.ValidPoints(points)) return path;
             if (shape is CurveShape curve)
             {
@@ -72,7 +78,7 @@ namespace hopperdraw
         }
         // Non-zero winding over the cached flattened boundary: the same winding rule and geometry as paint,
         // without rebuilding a GraphicsPath on every hover/pick.
-        internal static bool Interior(DrawShape shape, PointF point) => shape.VisibleFill && Interior(Leaf(shape), point);
+        internal static bool Interior(DrawShape shape, PointF point) => (shape is TextShape || shape.VisibleFill) && Interior(Leaf(shape), point);
         private static bool Interior(StrokeCache leaf, PointF p)
         {
             var s = leaf.Stroke; var b = leaf.Bounds;
@@ -102,7 +108,7 @@ namespace hopperdraw
             float reach = tolerance + (shape.StrokeVisible ? effectiveWidth / 2 : 0);
             var b = leaf.Bounds;
             if (point.X < b.Left - reach || point.X > b.Right + reach || point.Y < b.Top - reach || point.Y > b.Bottom + reach) return false;
-            if (interior && shape.VisibleFill && Interior(leaf, point)) return true;
+            if (interior && (shape is TextShape || shape.VisibleFill) && Interior(leaf, point)) return true;
             var s = leaf.Stroke;
             for (int i = 1; i < s.Length; i++)
                 if (GeometryUtilities.DistanceToSegment(point, s[i - 1], s[i]) <= reach) return true;
@@ -116,6 +122,11 @@ namespace hopperdraw
                 return children.Length>0 && (crossing ? children.Any(c=>InRectangle(c,rect,true,baseWidth,interior)) : children.All(c=>InRectangle(c,rect,false,baseWidth,interior)));
             }
             float half=baseWidth<=0 || !shape.StrokeVisible ? 0 : StyleValidation.EffectiveWidth(baseWidth,shape.ThicknessMultiplier)/2;
+            if (shape is TextShape)
+            {
+                var bounds = shape.LayoutBounds; bounds.Inflate(half, half);
+                return crossing ? rect.IntersectsWith(bounds) || rect.Contains(bounds) : rect.Contains(bounds);
+            }
             if (!crossing && (rect.Width<2*half || rect.Height<2*half)) return false;
             if (crossing && interior && new[] { new PointF(rect.Left,rect.Top), new PointF(rect.Right,rect.Top), new PointF(rect.Right,rect.Bottom), new PointF(rect.Left,rect.Bottom) }.Any(p => Interior(shape,p))) return true;
             rect.Inflate(crossing?half:-half,crossing?half:-half);
@@ -155,7 +166,7 @@ namespace hopperdraw
                     if (handles)
                     {
                         if (!o.SelectedShapeIndices.Contains(i) || o.Shapes[i] is DrawShapeGroup) continue;
-                        var points = o.Shapes[i].GetPoints();
+                        var points = o.Shapes[i].EditHandles;
                         for (int j=0;j<points.Length;j++) if (GeometryUtilities.Distance(p,points[j]) <= 6 * o.CanvasScale) return (o,i,j);
                     }
                     else if (AnnotationGeometry.Hit(o.Shapes[i],p,5*o.CanvasScale,o.LineThickness,o.DrawOrder!=0)) return (o,i,-1);

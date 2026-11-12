@@ -17,7 +17,7 @@ namespace hopperdraw
             try
             {
                 g.ResetTransform(); float dpi=g.DpiX/96f;
-                string text=DrawingTool.Get(owner.DrawMode).Name+"   "+
+                string text=DrawingTool.Get(owner.DrawMode).Name+" ["+DrawingTool.Get(owner.DrawMode).Key+"]   "+
                     (owner.PenNoticeUntil > System.DateTime.UtcNow ? owner.PenNotice : DrawingTool.Get(owner.DrawMode).Hint);
                 var font=HudFont;
                 using(var background=new SolidBrush(Color.FromArgb(235,245,245,245)))

@@ -46,18 +46,23 @@ internal static class Program
         return shape.GetType().Name + shape.PersistentId + ":" + shape.ThicknessMultiplier + ":" + shape.LineType + ":" + shape.OverrideColor?.ToArgb() +
             ":" + shape.StrokeVisible + ":" + shape.FillColor?.ToArgb() + ":" + shape.FillOpacity + ":" + shape.Hatch + ":" + shape.HatchScale + ":" + shape.HatchBackground?.ToArgb() +
             (shape is DrawShapeGroup g ? string.Join(";", g.Children.Select(Fingerprint)) : string.Join(";", shape.GetPoints().Select(p => p.ToString()))) +
+            (shape is TextShape t ? t.Text+":"+t.BoxWidth+":"+t.StylePreset+":"+t.SizeMultiplier+":"+t.Bold+":"+t.Italic+":"+t.TextColorOverride?.ToArgb() : "") +
             (shape is CurveShape c ? c.Closed.ToString() : shape is PolylineShape l ? l.Closed.ToString() : "");
     }
     private static DrawShape RandomShape(Random random, int depth)
     {
         Point3d P() => new Point3d(random.NextDouble() * 2000, random.NextDouble() * 2000, 0);
         DrawShape result;
-        switch (random.Next(depth > 4 ? 4 : 5))
+        switch (random.Next(depth > 4 ? 5 : 6))
         {
             case 0: result = new LineShape(P(), P()); break;
             case 1: result = new PolylineShape(Enumerable.Range(0, random.Next(2, 15)).Select(_ => P()).ToList(), random.Next(2) == 0); break;
             case 2: result = new FrameShape(P(), P(), P(), P()); break;
             case 3: result = new CurveShape(Enumerable.Range(0, random.Next(2, 15)).Select(_ => P()).ToList(), random.Next(2) == 0); break;
+            case 4: result = new TextShape { Text = "Random text "+random.Next()+"\nSecond line   ", Anchor=P(),
+                BoxWidth=random.Next(2)==0 ? (double?)null : random.Next(20,300), StylePreset=(TextStylePreset)random.Next(3),
+                SizeMultiplier=new[]{.5,.75,1,1.5,2,3,4}[random.Next(7)], Bold=random.Next(2)==0, Italic=random.Next(2)==0,
+                TextColorOverride=random.Next(2)==0 ? (Color?)null : Color.FromArgb(random.Next()) }; break;
             default:
                 var group = new DrawShapeGroup();
                 group.Children.AddRange(Enumerable.Range(0, random.Next(1, 5)).Select(_ => RandomShape(random, depth + 1)));
@@ -247,6 +252,7 @@ internal static class Program
         Review2Tests.Run();
         CanvasMenuTests.Run();
         FillHatchTests.Run();
+        TextTests.Run();
         return Finish();
     }
     private static int Finish()

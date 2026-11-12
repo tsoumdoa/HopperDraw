@@ -24,7 +24,20 @@ namespace hopperdraw
         private static extern int RegisterWindowMessage(string name);
         [DllImport("user32.dll")]
         private static extern IntPtr SendMessage(IntPtr window, int message, IntPtr wParam, IntPtr lParam);
+        [DllImport("user32.dll")] private static extern bool TranslateMessage(ref Message message);
 
+        [StructLayout(LayoutKind.Sequential)]
+        private struct GuiThreadInfo
+        {
+            internal int Size, Flags;
+            internal IntPtr Active, Focus, Capture, MenuOwner, MoveSize, Caret;
+            internal System.Drawing.Rectangle CaretRect;
+        }
+        [DllImport("user32.dll")] private static extern bool GetGUIThreadInfo(uint thread, ref GuiThreadInfo info);
+        internal static bool MenuActive
+        {
+            get { var info = new GuiThreadInfo { Size = Marshal.SizeOf(typeof(GuiThreadInfo)) }; return GetGUIThreadInfo(0, ref info) && (info.Flags & 0x1c) != 0; }
+        }
         private readonly Control _canvas;
         private readonly List<Registration> _owners = new List<Registration>();
         private readonly DrawingKeyGesture _gesture = new DrawingKeyGesture();
@@ -137,7 +150,7 @@ namespace hopperdraw
 
         private Registration InputOwner()
         {
-            if (!_canvas.Focused || Control.ModifierKeys != Keys.None ||
+            if (!_canvas.Focused || MenuActive || Control.ModifierKeys != Keys.None ||
                 Control.MouseButtons != MouseButtons.None) return null;
             foreach (var owner in _owners)
                 if (owner.CanActivate()) return owner;
@@ -170,10 +183,33 @@ namespace hopperdraw
             if (_canvas.IsHandleCreated)
                 SendMessage(_canvas.Handle, KeyObservedMessage, new IntPtr((int)key), new IntPtr(message));
         }
+        private void OwnCommandCharacter(Keys key, IntPtr flags)
+        {
+            if (!(key >= Keys.A && key <= Keys.Z) && key != Keys.Back && key != Keys.Enter && key != Keys.Escape && key != Keys.Space) return;
+            int scan = (int)(flags.ToInt64() & 0xff0000);
+            int count = Math.Max(1, (int)(flags.ToInt64() & 0xffff));
+            _ownedCharacters.TryGetValue(scan, out int pending);
+            _ownedCharacters[scan] = (int)Math.Min(int.MaxValue, (long)pending + count);
+        }
+        private bool ReleaseCharacter(Message message)
+        {
+            if (message.Msg != CharacterMessage && message.Msg != SystemCharacterMessage) return false;
+            int scan = (int)(message.LParam.ToInt64() & 0xff0000);
+            if (!_ownedCharacters.TryGetValue(scan, out int pending)) return false;
+            int count = Math.Max(1, (int)(message.LParam.ToInt64() & 0xffff));
+            if (pending <= count) _ownedCharacters.Remove(scan); else _ownedCharacters[scan] = pending - count;
+            return true;
+        }
         public bool PreFilterMessage(ref Message m)
         {
             if (m.HWnd != Handle) return false;
-            if (m.Msg == KeyDownMessage && RouteCommand((Keys)m.WParam.ToInt32(), (m.LParam.ToInt64() & (1L << 30)) != 0)) return true;
+            if (ReleaseCharacter(m)) return true; // Before dialog/mnemonic preprocessing, too.
+            if (m.Msg == KeyDownMessage && RouteCommand((Keys)m.WParam.ToInt32(), (m.LParam.ToInt64() & (1L << 30)) != 0))
+            {
+                OwnCommandCharacter((Keys)m.WParam.ToInt32(), m.LParam);
+                TranslateMessage(ref m); // Filtered downs otherwise never get their WM_CHAR from the loop.
+                return true;
+            }
             if (m.Msg == KeyUpMessage && ReleaseCommand((Keys)m.WParam.ToInt32())) return true;
             return false;
         }
@@ -195,7 +231,7 @@ namespace hopperdraw
                 _commandsDown.Clear();
                 foreach (var registration in _owners.ToArray()) registration.Lost?.Invoke();
             }
-            if (message.Msg == KeyDownMessage && RouteCommand((Keys)message.WParam.ToInt32(), (message.LParam.ToInt64() & (1L << 30)) != 0)) { message.Result = IntPtr.Zero; return; }
+            if (message.Msg == KeyDownMessage && RouteCommand((Keys)message.WParam.ToInt32(), (message.LParam.ToInt64() & (1L << 30)) != 0)) { OwnCommandCharacter((Keys)message.WParam.ToInt32(), message.LParam); message.Result = IntPtr.Zero; return; }
             if (message.Msg == KeyUpMessage && ReleaseCommand((Keys)message.WParam.ToInt32())) { message.Result = IntPtr.Zero; return; }
             if (message.Msg == KeyObservedMessage)
             {
@@ -249,14 +285,9 @@ namespace hopperdraw
                     return;
                 }
             }
-            else if ((message.Msg == CharacterMessage || message.Msg == SystemCharacterMessage) &&
-                _ownedCharacters.TryGetValue((int)(message.LParam.ToInt64() & 0xff0000), out int pending))
+            else if (ReleaseCharacter(message))
             {
                 // TranslateMessage may enqueue WM_CHAR after the corresponding key-up.
-                int scan = (int)(message.LParam.ToInt64() & 0xff0000);
-                int count = Math.Max(1, (int)(message.LParam.ToInt64() & 0xffff));
-                if (pending <= count) _ownedCharacters.Remove(scan);
-                else _ownedCharacters[scan] = pending - count;
                 message.Result = IntPtr.Zero;
                 return;
             }

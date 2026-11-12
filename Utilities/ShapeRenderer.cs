@@ -35,6 +35,7 @@ namespace hopperdraw
                             if (boundary.PointCount > 0) graphics.DrawPath(pen,boundary);
                         }
                 }
+                if (shape is TextShape text) TextLayoutService.Paint(graphics, text, baseColor);
             }
             catch (Exception ex)
             {
@@ -77,7 +78,7 @@ namespace hopperdraw
         {
             try
             {
-                var points = shape.GetPoints();
+                var points = shape.EditHandles;
                 if (!ValidPoints(points)) return;
                 float size = 8 * scale;
                 using (var brush = new SolidBrush(selected ? Color.White : Color.FromArgb(100, 0, 120, 215)))

@@ -123,6 +123,7 @@ internal static class Program
     [STAThread]
     private static int Main()
     {
+        Application.SetUnhandledExceptionMode(UnhandledExceptionMode.ThrowException);
         if (Array.IndexOf(Environment.GetCommandLineArgs(), "--failure-exit-probe") >= 0)
         {
             Run("intentional failure exit probe", () => Check(false, "Intentional failure to verify process exit status."));
@@ -390,6 +391,115 @@ internal static class Program
                             }
                             finally { a.Command=null; }
                         }, a);
+                        Run("DDT immediately switches tool and consumes repeat, key-up and delayed characters", () =>
+                        {
+                            int mode=0,changes=0;
+                            a.Command=key=>_activatedA>0 && ToolShortcut.Route(key,mode,false,m=>{mode=m;changes++;},()=>{});
+                            try
+                            {
+                                Down(canvas,Keys.D);Up(canvas,Keys.D);Down(canvas,Keys.D);Up(canvas,Keys.D);
+                                Down(canvas,Keys.T);Down(canvas,Keys.T,true);Up(canvas,Keys.T);Application.DoEvents();
+                                Check(_activatedA==1 && mode==5 && changes==1 && _forwarded==0 && _characters==0,"DDT leaked or repeated");
+                                Tap(canvas,Keys.T);Check(changes==1 && _characters==0,"reselection changed or leaked");
+                                _activatedA=0;Tap(canvas,Keys.T);Check(_forwarded==1 && _characters==1,"letter outside mode swallowed or stale character credit");
+                            }
+                            finally {a.Command=null;}
+                        },a);
+                        Run("tool letters preempt parent menus and notify peers, with independent scan credits", () =>
+                        {
+                            int mode=0,native=0;
+                            using(var peer=new ObservingPeer(canvas)) using(var menu=new MenuStrip())
+                            {
+                                var item=new ToolStripMenuItem("Text tool"){ShortcutKeys=Keys.Control|Keys.T};item.Click+=(s,args)=>native++;
+                                menu.Items.Add(item);form.Controls.Add(menu);form.MainMenuStrip=menu;
+                                a.Command=key=>ToolShortcut.Route(key,mode,false,m=>mode=m,()=>{});
+                                try
+                                {
+                                    foreach(var key in new[]{Keys.T,Keys.L,Keys.P,Keys.R,Keys.C,Keys.F}) {Down(canvas,key);Up(canvas,key);}
+                                    Application.DoEvents();Check(mode==4 && native==0 && _forwarded==0 && _characters==0 && peer.Seen.Contains(Keys.T) && peer.Seen.Contains(Keys.F),"tool routing/menu/peer failure");
+                                    a.Command=null;Tap(canvas,Keys.L);Check(_characters==1,"character credits outlived commands");
+                                }
+                                finally {a.Command=null;form.MainMenuStrip=null;form.Controls.Remove(menu);}
+                            }
+                        },a);
+                        Run("inline editor bypasses hostile KeyPreview and menus while letters and editing stay native", () =>
+                        {
+                            int previews=0,native=0,commands=0;
+                            using(var editor=new TextEditorControl{Location=new Point(0,40),Size=new Size(190,80)})
+                            using(var menu=new MenuStrip())
+                            {
+                                foreach(var shortcut in new[]{Keys.Delete,Keys.Control|Keys.A,Keys.Control|Keys.Z,Keys.Control|Keys.C,Keys.Control|Keys.V,Keys.Control|Keys.X,Keys.Control|Keys.T})
+                                {var item=new ToolStripMenuItem("Native "+shortcut){ShortcutKeys=shortcut};item.Click+=(s,args)=>native++;menu.Items.Add(item);}
+                                form.Controls.Add(menu);form.MainMenuStrip=menu;form.Controls.Add(editor);editor.BringToFront();
+                                KeyEventHandler hostile=(s,args)=>{if(editor.Focused){previews++;args.Handled=true;}};
+                                form.KeyDown+=hostile;
+                                a.Command=key=>{commands++;return true;};
+                                var state=new byte[256];GetKeyboardState(state);
+                                try
+                                {
+                                    editor.Focus();Check(editor.Focused,"editor cannot focus");
+                                    foreach(var key in new[]{Keys.T,Keys.D,Keys.D,Keys.L})Tap(editor,key);
+                                    Check(editor.Text=="tddl" && _activatedA==0 && previews==0 && native==0 && commands==0,"editor letters reached parent/menu/commands: "+editor.Text);
+                                    var modified=(byte[])state.Clone();modified[(int)Keys.ControlKey]=0x80;SetKeyboardState(modified);
+                                    Tap(editor,Keys.A);Check(editor.SelectionLength==4,"Ctrl+A not native");
+                                    SetKeyboardState(state);Tap(editor,Keys.Delete);Check(editor.Text=="","Delete not native");
+                                    SetKeyboardState(modified);Tap(editor,Keys.Z);SetKeyboardState(state);
+                                    Check(editor.Text=="tddl" && previews==0 && native==0,"local undo routed to parent");
+                                    editor.SelectionStart=editor.TextLength;editor.SelectionLength=0;Tap(editor,Keys.Back);Check(editor.Text=="tdd","Backspace not native");
+                                    Tap(editor,Keys.Enter);Tap(editor,Keys.T);Check(editor.Text.Replace("\r\n","\n")=="tdd\nt","Enter not newline");
+                                }
+                                finally {SetKeyboardState(state);a.Command=null;form.KeyDown-=hostile;form.MainMenuStrip=null;form.Controls.Remove(menu);form.Controls.Remove(editor);canvas.Focus();}
+                            }
+                        },a);
+                        Run("inline editor clipboard and arrow commands stay local ahead of parent shortcuts", () =>
+                        {
+                            var clipboard=Clipboard.GetDataObject();
+                            int native=0;
+                            using(var editor=new TextEditorControl{Location=new Point(0,40),Text="abc"})
+                            using(var menu=new MenuStrip())
+                            {
+                                foreach(var key in new[]{Keys.C,Keys.X,Keys.V})
+                                {var item=new ToolStripMenuItem(key.ToString()){ShortcutKeys=Keys.Control|key};item.Click+=(s,args)=>native++;menu.Items.Add(item);}
+                                form.Controls.Add(menu);form.MainMenuStrip=menu;form.Controls.Add(editor);editor.Focus();
+                                var state=new byte[256];GetKeyboardState(state);
+                                try
+                                {
+                                    var modified=(byte[])state.Clone();modified[(int)Keys.ControlKey]=0x80;SetKeyboardState(modified);
+                                    Tap(editor,Keys.A);SetKeyboardState(modified);Tap(editor,Keys.C);
+                                    Check(Clipboard.ContainsText() && Clipboard.GetText()=="abc","native copy did not run");
+                                    SetKeyboardState(modified);Tap(editor,Keys.X);
+                                    Check(editor.Text=="","native cut did not run: "+editor.Text+" selected="+editor.SelectionLength+" modifiers="+Control.ModifierKeys+" menus="+native);
+                                    SetKeyboardState(modified);Tap(editor,Keys.V);Check(editor.Text=="abc" && native==0,"paste/clipboard hit parent menu");
+                                    SetKeyboardState(state);editor.SelectionStart=3;editor.SelectionLength=0;Tap(editor,Keys.Left);
+                                    Check(editor.SelectionStart==2,"arrow did not remain local");
+                                }
+                                finally
+                                {
+                                    SetKeyboardState(state);form.MainMenuStrip=null;form.Controls.Remove(menu);form.Controls.Remove(editor);canvas.Focus();
+                                    if(clipboard!=null)Clipboard.SetDataObject(clipboard,true);else Clipboard.Clear();
+                                }
+                            }
+                        },a);
+                        Run("inline editor Escape and Ctrl+Enter commit once without trailing newline", () =>
+                        {
+                            foreach(var key in new[]{Keys.Escape,Keys.Enter})
+                            using(var editor=new TextEditorControl{Location=new Point(0,40),Text="buffer"})
+                            {
+                                int commits=0;editor.Commit=()=>commits++;form.Controls.Add(editor);editor.BringToFront();editor.Focus();
+                                var state=new byte[256];GetKeyboardState(state);
+                                try
+                                {
+                                    if(key==Keys.Enter){var modified=(byte[])state.Clone();modified[(int)Keys.ControlKey]=0x80;SetKeyboardState(modified);}
+                                    Down(editor,key);Down(editor,key,true);Up(editor,key);
+                                    // A host may have translated before our filter; consume that delayed char too.
+                                    long flags=1|((long)MapVirtualKey((uint)key,0)<<16);
+                                    PostMessage(editor.Handle,0x102,new IntPtr(key==Keys.Enter ? 13 : 27),new IntPtr(flags));
+                                    Application.DoEvents();
+                                    Check(commits==1 && editor.Text=="buffer","commit repeated or inserted character");
+                                }
+                                finally {SetKeyboardState(state);form.Controls.Remove(editor);canvas.Focus();}
+                            }
+                        },a);
                         Run("right-drag transport preserves the threshold-crossing move for pan handoff", () =>
                         {
                             bool context=false, handed=false; int delivered=0;

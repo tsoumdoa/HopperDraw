@@ -204,7 +204,7 @@ internal static class ReliabilityTests
             {
                 var c = new HopperDraw();
                 solve.Invoke(c, new object[] { new FakeAccess(false, true, 99, Color.Black, width, -1, 99) });
-                Program.Check(c.DrawMode == 4 && c.DrawOrder == 1 && StyleValidation.ValidWidth(c.LineThickness), "unsafe input");
+                Program.Check(c.DrawMode == DrawingTool.Maximum && c.DrawOrder == 1 && StyleValidation.ValidWidth(c.LineThickness), "unsafe input");
                 Program.Check(c.RuntimeMessages(GH_RuntimeMessageLevel.Warning).Count >= 4, "missing input warnings");
             }
         });

@@ -87,7 +87,7 @@ namespace hopperdraw
         {
             if (shape is OpaqueShape opaque) { CopyChunk(opaque.Payload, writer); return; }
             if (shape.Extensions != null) CopyChunk(shape.Extensions, writer);
-            int kind = shape is LineShape ? 0 : shape is PolylineShape ? 1 : shape is FrameShape ? 2 : shape is CurveShape ? 3 : 4;
+            int kind = shape is LineShape ? 0 : shape is PolylineShape ? 1 : shape is FrameShape ? 2 : shape is CurveShape ? 3 : shape is DrawShapeGroup ? 4 : shape is TextShape ? 5 : throw new ArgumentException("Unsupported shape type.");
             writer.SetInt32("Kind", kind);
             writer.SetGuid("Id", shape.PersistentId);
             writer.SetDouble("ThickMult", shape.ThicknessMultiplier);
@@ -104,7 +104,19 @@ namespace hopperdraw
             if (shape.OverrideColor.HasValue) writer.SetInt32("Color", shape.OverrideColor.Value.ToArgb());
             if (shape is DrawShapeGroup group) { WriteShapeList(writer, "Children", group.Children, group.ChildrenExtensions); return; }
             IEnumerable<Point3d> points;
-            if (shape is LineShape line) points = new[] { line.Start, line.End };
+            if (shape is TextShape text)
+            {
+                points = new[] { text.Anchor };
+                writer.SetString("Text", text.Text);
+                writer.SetBoolean("HasBoxWidth", text.BoxWidth.HasValue);
+                if (text.BoxWidth.HasValue) writer.SetDouble("BoxWidth", text.BoxWidth.Value);
+                writer.SetInt32("StylePreset", (int)text.StylePreset);
+                writer.SetDouble("SizeMultiplier", text.SizeMultiplier);
+                writer.SetBoolean("Bold", text.Bold); writer.SetBoolean("Italic", text.Italic);
+                writer.SetBoolean("HasTextColor", text.TextColorOverride.HasValue);
+                if (text.TextColorOverride.HasValue) writer.SetInt32("TextColor", text.TextColorOverride.Value.ToArgb());
+            }
+            else if (shape is LineShape line) points = new[] { line.Start, line.End };
             else if (shape is FrameShape frame) points = new[] { frame.TopLeft, frame.TopRight, frame.BottomRight, frame.BottomLeft };
             else if (shape is PolylineShape poly) { points = poly.Points; writer.SetBoolean("Closed", poly.Closed); }
             else { var curve = (CurveShape)shape; points = curve.Points; writer.SetBoolean("Closed", curve.Closed); }
@@ -165,7 +177,7 @@ namespace hopperdraw
         {
             int kind = -1;
             if (!reader.TryGetInt32("Kind", ref kind)) throw new FormatException("Missing required shape kind.");
-            if (kind < 0 || kind > 4) throw new FormatException("Unknown shape kind " + kind + ".");
+            if (kind < 0 || kind > 5) throw new FormatException("Unknown shape kind " + kind + ".");
             Guid id = reader.GetGuid("Id");
             if (id == Guid.Empty || !budget.Ids.Add(id)) throw new FormatException("Missing/duplicate shape ID.");
             DrawShape shape;
@@ -180,7 +192,7 @@ namespace hopperdraw
             {
                 var xs = reader.GetDoubleArray("X");
                 var ys = reader.GetDoubleArray("Y");
-                if (xs == null || ys == null || xs.Length != ys.Length || xs.Length < 2 ||
+                if (xs == null || ys == null || xs.Length != ys.Length || (kind == 5 ? xs.Length != 1 : xs.Length < 2) ||
                     (kind == 0 && xs.Length != 2) || (kind == 2 && xs.Length != 4))
                     throw new FormatException("Required geometry is missing or mismatched.");
                 if (xs.Length > MaxPoints - budget.Points) throw new FormatException("Point budget exceeded.");
@@ -196,18 +208,21 @@ namespace hopperdraw
                     throw new FormatException("Missing required Closed geometry flag.");
                 switch (kind)
                 {
+                    case 5: shape = ReadText(reader, points[0]); break;
                     case 0: shape = new LineShape(points[0], points[1]); break;
                     case 1: shape = new PolylineShape(points, closed); break;
                     case 2: shape = new FrameShape(points[0], points[1], points[2], points[3]); break;
-                    default: shape = new CurveShape(points, closed); break;
+                    case 3: shape = new CurveShape(points, closed); break;
+                    default: throw new FormatException("Unsupported leaf kind.");
                 }
             }
             var knownItems = new List<string> { "Kind", "Id", "ThickMult", "LineType", "HasColor", "Color", "StrokeVisible", "HasFillColor", "FillColor", "FillOpacity", "Hatch", "HatchScale", "HasHatchBackground", "HatchBackground" };
             if (kind != 4) knownItems.AddRange(new[] { "X", "Y" });
             if (kind == 1 || kind == 3) knownItems.Add("Closed");
+            if (kind == 5) knownItems.AddRange(new[] { "Text", "HasBoxWidth", "BoxWidth", "StylePreset", "SizeMultiplier", "Bold", "Italic", "HasTextColor", "TextColor" });
             shape.Extensions = Residual(reader, knownItems, kind == 4 ? new[] { "Children" } : new string[0]);
             foreach (string field in new[] { "ThickMult", "LineType", "HasColor" })
-                if (!reader.ItemExists(field))
+                if (kind != 5 && !reader.ItemExists(field))
                 {
                     string message = "Annotation " + id + ": missing optional " + field + "; default used.";
                     shape.LoadDiagnostics.Add(message);
@@ -230,7 +245,7 @@ namespace hopperdraw
                 if (!reader.TryGetInt32("Color", ref color)) throw new FormatException("Missing override color.");
                 shape.OverrideColor = Color.FromArgb(color);
             }
-            bool stroke = true, hasFill = false, hasBackground = false;
+            bool stroke = kind != 5, hasFill = false, hasBackground = false;
             double opacity = 1, scale = 1; int hatch = 0, fill = 0, background = 0;
             if (reader.ItemExists("StrokeVisible") && !reader.TryGetBoolean("StrokeVisible", ref stroke) ||
                 reader.ItemExists("HasFillColor") && !reader.TryGetBoolean("HasFillColor", ref hasFill) ||
@@ -248,6 +263,29 @@ namespace hopperdraw
             shape.FillOpacity = opacity; shape.Hatch = (HatchPattern)hatch; shape.HatchScale = scale;
             shape.HatchBackground = hasBackground ? Color.FromArgb(background) : (Color?)null;
             return shape;
+        }
+
+        private static TextShape ReadText(GH_IReader reader, Point3d anchor)
+        {
+            string text = null;
+            if (!reader.TryGetString("Text", ref text) || text == null || text.Length > TextLayoutService.MaxTextLength)
+                throw new FormatException("Missing or oversized text.");
+            bool hasWidth = false, bold = false, italic = false, hasColor = false;
+            double width = 1, size = 1; int preset = (int)TextStylePreset.Body, color = 0;
+            if (reader.ItemExists("HasBoxWidth") && !reader.TryGetBoolean("HasBoxWidth", ref hasWidth) ||
+                reader.ItemExists("BoxWidth") && !reader.TryGetDouble("BoxWidth", ref width) ||
+                reader.ItemExists("StylePreset") && !reader.TryGetInt32("StylePreset", ref preset) ||
+                reader.ItemExists("SizeMultiplier") && !reader.TryGetDouble("SizeMultiplier", ref size) ||
+                reader.ItemExists("Bold") && !reader.TryGetBoolean("Bold", ref bold) ||
+                reader.ItemExists("Italic") && !reader.TryGetBoolean("Italic", ref italic) ||
+                reader.ItemExists("HasTextColor") && !reader.TryGetBoolean("HasTextColor", ref hasColor) ||
+                reader.ItemExists("TextColor") && !reader.TryGetInt32("TextColor", ref color) ||
+                hasWidth && !reader.ItemExists("BoxWidth") || hasColor && !reader.ItemExists("TextColor") ||
+                double.IsNaN(width) || double.IsInfinity(width) || width <= 0 || !TextShape.ValidSize(size) || preset < 0 || preset > 2)
+                throw new FormatException("Invalid text style or box width.");
+            return new TextShape { Text = text, Anchor = anchor, BoxWidth = hasWidth ? width : (double?)null,
+                StylePreset = (TextStylePreset)preset, SizeMultiplier = size, Bold = bold, Italic = italic,
+                TextColorOverride = hasColor ? Color.FromArgb(color) : (Color?)null };
         }
 
         internal static bool ValidCoordinate(double value) => !double.IsNaN(value) && !double.IsInfinity(value) && Math.Abs(value) <= 10000000;

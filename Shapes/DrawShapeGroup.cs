@@ -37,7 +37,7 @@ namespace hopperdraw
             bool found = false;
             float minX = 0, minY = 0, maxX = 0, maxY = 0;
             foreach (var child in Children)
-                foreach (var point in child.GetPoints())
+                foreach (var point in AnnotationGeometry.BoundaryPoints(child))
                 {
                     if (!ShapeSerializer.ValidCoordinate(point.X) || !ShapeSerializer.ValidCoordinate(point.Y)) continue;
                     if (!found) { minX = maxX = point.X; minY = maxY = point.Y; found = true; }

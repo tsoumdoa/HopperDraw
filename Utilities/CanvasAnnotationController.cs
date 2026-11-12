@@ -14,12 +14,102 @@ using Grasshopper.Kernel.Undo.Actions;
 
 namespace hopperdraw
 {
-    internal sealed class CanvasAnnotationController
+    internal sealed class CanvasAnnotationController : IMessageFilter
     {
         private static readonly Dictionary<GH_Canvas, CanvasAnnotationController> Controllers = new Dictionary<GH_Canvas, CanvasAnnotationController>();
         private readonly GH_Canvas _canvas;
         private readonly HashSet<HopperDraw> _registered = new HashSet<HopperDraw>();
         private readonly CanvasDrawingShortcut.Registration _hook;
+        private TextEditSession _text;
+        private TextEditorControl _editor;
+        private bool _endingText;
+        private int _textEpoch;
+        private GH_Document _textDocument;
+        private void ObserveTextDocument()
+        {
+            if (_textDocument != null) _textDocument.UndoStateChanged -= TextUndoChanged;
+            _textDocument = _canvas.Document;
+            if (_textDocument != null) _textDocument.UndoStateChanged += TextUndoChanged;
+        }
+        internal void PlaceTextAfterRelease(HopperDraw owner, TextShape shape)
+        {
+            int epoch = _textEpoch; var document = _canvas.Document;
+            _canvas.BeginInvoke(new Action(() =>
+            {
+                if (!_canvas.IsDisposed && epoch == _textEpoch && ReferenceEquals(document,_canvas.Document)) BeginText(owner,shape,true);
+            }));
+        }
+        internal void BeginText(HopperDraw owner, TextShape shape, bool isNew)
+        {
+            EndText(true);
+            if (!owner.Eligible || !ReferenceEquals(owner.OnPingDocument(), _canvas.Document)) return;
+            if (!isNew) { shape = TextEditSession.Find(owner.Shapes,shape.PersistentId); if (shape == null) return; }
+            DrawingOwner?.Draft.Cancel();
+            _hook.Reset(); owner.ResetTextKeys();
+            _text = new TextEditSession(owner, _canvas.Document, shape, isNew);
+            var layout = shape.Layout;
+            float zoom = (float)_canvas.Viewport.Zoom;
+            var origin = _canvas.Viewport.ProjectPoint(new PointF(layout.Bounds.Left + layout.Padding, layout.Bounds.Top + layout.Padding));
+            _editor = new TextEditorControl { Text = shape.Text, WordWrap = shape.BoxWidth.HasValue,
+                Font = TextLayoutService.Font(shape, zoom), ForeColor = shape.TextColorOverride ?? owner.BorderColor,
+                Location = new Point((int)Math.Ceiling(origin.X), (int)Math.Ceiling(origin.Y)),
+                Size = new Size(Math.Max(80, (int)Math.Min(10000, (layout.Bounds.Width - 2 * layout.Padding) * zoom + 12)),
+                    Math.Max(48, (int)Math.Min(10000, (layout.Bounds.Height - 2 * layout.Padding) * zoom + 12))) };
+            _editor.Commit = () => EndText(true);
+            _editor.LostFocus += EditorLostFocus;
+            _editor.TextChanged += EditorTextChanged;
+            _canvas.Controls.Add(_editor); _editor.BringToFront(); _editor.Focus(); _editor.SelectAll();
+            Application.AddMessageFilter(this);
+        }
+        private void EditorTextChanged(object sender, EventArgs e)
+        {
+            if (_text == null || _editor == null) return;
+            _text.Buffer = _editor.Text; _text.Draft.Text = _editor.Text;
+            var b = _text.Draft.Layout;
+            float zoom = (float)_canvas.Viewport.Zoom;
+            _editor.Size = new Size(Math.Max(80, (int)Math.Min(10000, (b.Bounds.Width - 2*b.Padding)*zoom+12)),
+                Math.Max(48, (int)Math.Min(10000, (b.Bounds.Height - 2*b.Padding)*zoom+12)));
+        }
+        private void EditorLostFocus(object sender, EventArgs e) => EndText(true);
+        private void TextUndoChanged(object sender, GH_DocUndoEventArgs e)
+        { if (e.Operation == GH_UndoOperation.Undo || e.Operation == GH_UndoOperation.Redo) { _textEpoch++; EndText(false); } }
+        internal void AbortText(HopperDraw owner) { _textEpoch++; if (_text?.Owner == owner) EndText(false); }
+        private void EndText(bool commit)
+        {
+            if (_text == null || _endingText) return;
+            _endingText = true;
+            var session = _text; var editor = _editor;
+            _text = null; _editor = null;
+            try
+            {
+                Application.RemoveMessageFilter(this);
+                try
+                {
+                    session.Buffer = editor.Text;
+                    bool eligible = session.Owner.Eligible && Owners.Contains(session.Owner);
+                    if (commit) session.Commit(_canvas.Document, eligible); else session.Abort();
+                }
+                finally
+                {
+                    editor.LostFocus -= EditorLostFocus; editor.TextChanged -= EditorTextChanged;
+                    // Remove immediately; defer disposal until after this message/filter has returned.
+                    _canvas.Controls.Remove(editor);
+                    if (!_canvas.IsDisposed && _canvas.IsHandleCreated) _canvas.BeginInvoke(new Action(() => { var font = editor.Font; editor.Dispose(); font.Dispose(); }));
+                    else { var font = editor.Font; editor.Dispose(); font.Dispose(); }
+                    _hook.Reset(); session.Owner.ResetTextKeys(); _canvas.Invalidate();
+                }
+            }
+            finally { _endingText = false; }
+        }
+        public bool PreFilterMessage(ref Message m)
+        {
+            if (_text == null) return false;
+            if (!_text.Owner.Eligible || !ReferenceEquals(_text.Document,_canvas.Document) || !Owners.Contains(_text.Owner)) EndText(false);
+            else if ((m.Msg == 0x201 || m.Msg == 0x204 || m.Msg == 0x207 || m.Msg == 0x20b) && m.HWnd != _editor.Handle ||
+                m.Msg == 0x20a && m.HWnd == _canvas.Handle) EndText(true);
+            return false;
+        }
+        private void ViewportChanged(object sender, GH_CanvasViewportChangedEventArgs e) => EndText(true);
         private GH_WindowSelectInteraction _window;
         private Rectangle _windowRect;
         private bool _windowCrossing;
@@ -48,6 +138,8 @@ namespace hopperdraw
             _hook = CanvasDrawingShortcut.Register(canvas, () => false, () => {});
             _hook.Mouse = Message; _hook.Command = Command; _hook.Lost = Lost;
             canvas.DocumentChanged += DocumentChanged;
+            canvas.ViewportChanged += ViewportChanged;
+            ObserveTextDocument();
             canvas.Disposed += Disposed;
             canvas.MouseMove += Hover;
             canvas.KeyDown += NativeKey; canvas.KeyUp += NativeKey;
@@ -56,11 +148,13 @@ namespace hopperdraw
         }
         internal void Remove(HopperDraw owner)
         {
-            Lost(); _registered.Remove(owner);
+            AbortText(owner); Lost(); _registered.Remove(owner);
             if (_registered.Count != 0) return;
+            if (_textDocument != null) _textDocument.UndoStateChanged -= TextUndoChanged;
+            _textDocument = null;
             _hook.Dispose(); Controllers.Remove(_canvas);
             _canvas.Disposed -= Disposed;
-            _canvas.DocumentChanged -= DocumentChanged; _canvas.MouseMove -= Hover;
+            _canvas.ViewportChanged -= ViewportChanged; _canvas.DocumentChanged -= DocumentChanged; _canvas.MouseMove -= Hover;
             _canvas.KeyDown -= NativeKey; _canvas.KeyUp -= NativeKey;
             _canvas.CanvasPrePaintGroups -= SyncPaint; _canvas.CanvasPostPaintOverlay -= PaintHud;
             if (!_canvas.IsDisposed) Instances.CursorServer.ResetCursor(_canvas);
@@ -100,6 +194,7 @@ namespace hopperdraw
         }
         private void Message(int message, MouseEventArgs e, bool after)
         {
+            if (!after && (message == 0x201 || message == 0x203 || message == 0x204 || message == 0x20a)) EndText(true);
             if (!after && (message == 0x201 || message == 0x203 || message == 0x204))
             {
                 _prePress = null;
@@ -191,6 +286,7 @@ namespace hopperdraw
         }
         internal void CancelOwner(HopperDraw owner)
         {
+            AbortText(owner);
             if (_canvas.ActiveInteraction is HopperDrawInteraction interaction && interaction.Owns(owner) || _follow?.Actions.ContainsKey(owner)==true) Lost();
             owner.Draft.Cancel();
         }
@@ -212,10 +308,10 @@ namespace hopperdraw
         }
         private void DocumentChanged(object sender, GH_CanvasDocumentChangedEventArgs e)
         {
-            Lost();
+            _textEpoch++; EndText(false); ObserveTextDocument(); Lost();
             foreach (var owner in _registered) { owner.Draft.Cancel(); owner.ExitDrawing(); }
         }
-        private void SyncPaint(GH_Canvas canvas) { SyncFollow(); } // Guarded absolute translation, before BOTH render channels; covers GH auto-pan.
+        private void SyncPaint(GH_Canvas canvas) { if (_text != null && (!_text.Owner.Eligible || !Owners.Contains(_text.Owner))) EndText(false); SyncFollow(); } // Guarded absolute translation, before BOTH render channels; covers GH auto-pan.
         internal void Clear() { foreach (var owner in Owners) owner.ClearSelection(); _canvas.Invalidate(); }
         internal void Select(HopperDraw owner, int shape, bool shift, bool control)
         {
@@ -227,9 +323,14 @@ namespace hopperdraw
         private bool Command(Keys data)
         {
             Keys key = data & Keys.KeyCode, mods = data & Keys.Modifiers;
-            if (!Owners.Any() || _canvas.Document == null || _canvas.ActiveWidget != null || _canvas.ActiveObject != null) return false;
+            if (_text != null || !Owners.Any() || _canvas.Document == null || _canvas.ActiveWidget != null || _canvas.ActiveObject != null) return false;
             // GH clears its preview boundary before dispatching Escape to any interaction.
             if (key == Keys.Escape && _canvas.Document.PreviewBoundary != null) return false;
+            var toolOwner = DrawingOwner;
+            if (toolOwner != null && Control.MouseButtons == MouseButtons.None && _canvas.Focused && !CanvasDrawingShortcut.MenuActive &&
+                (_canvas.ActiveInteraction == null || _canvas.ActiveInteraction is HopperDrawInteraction) &&
+                ToolShortcut.Route(data, toolOwner.DrawMode, toolOwner.Params.Input[2].SourceCount > 0,
+                    toolOwner.SetTool, () => { toolOwner.PenNotice = "Disconnect M to switch tools"; toolOwner.PenNoticeUntil = DateTime.UtcNow.AddSeconds(3); _canvas.Invalidate(); })) return true;
             if (_canvas.ActiveInteraction is HopperDrawInteraction active)
             { if (key == Keys.Escape) { active.Cancel(true); _canvas.ActiveInteraction = null; return true; } return false; }
             if (_canvas.ActiveInteraction != null) return false;
