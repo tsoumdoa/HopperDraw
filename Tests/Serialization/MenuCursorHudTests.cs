@@ -154,17 +154,37 @@ internal static class MenuCursorHudTests
                 }
             }
         });
+        Program.Test("GH's own component menu is tracked as open without changing its renderer; root shows its letter",()=>
+        {
+            var owner=new HopperDraw();
+            using(var host=new ContextMenuStrip())
+            {
+                var renderer=host.Renderer;
+                AnnotationMenuBuilder.Component(host,owner);
+                var root=host.Items.OfType<ToolStripMenuItem>().Single(i=>i.Name=="HopperDraw");
+                Program.Check(ReferenceEquals(host.Renderer,renderer),"host renderer replaced");
+                Program.Check(root.ShortcutKeyDisplayString==AnnotationMenuKeys.Mnemonic(root.Text).ToString() && root.ShortcutKeys==Keys.None,"root letter not displayed or bound as a shortcut");
+                host.Show(new System.Drawing.Point(0,0)); Application.DoEvents();
+                Program.Check(AnnotationMenuKeys.Active && CanvasDrawingShortcut.MenuActive,"open host menu not detected");
+                host.Close(); Application.DoEvents();
+                Program.Check(!AnnotationMenuKeys.Active,"closed host menu still active");
+            }
+        });
         Program.Test("hint clock starts on notice holds draft fades stops and disposes with last controller",()=>
         {
             var now=DateTime.UtcNow; int invalidated=0; var token=new object();
             using(var clock=new AnnotationHintClock(()=>invalidated++,()=>now))
             {
-                clock.Update(token,0,false); Program.Check(clock.Running && clock.Alpha==1,"Entry hint did not start");
-                now=now.AddSeconds(3.25); clock.Tick(null,EventArgs.Empty); Program.Check(Math.Abs(clock.Alpha-.5)<.01,"No fade");
+                clock.Update(token,0,false); Program.Check(clock.Running && clock.Alpha==1 && clock.Interval>=2900,"Entry hint not armed once for the fade start: "+clock.Interval);
+                int armed=clock.Interval; now=now.AddSeconds(1); clock.Update(token,0,false); clock.Update(token,0,false);
+                Program.Check(clock.Running && clock.Interval==armed,"hover updates re-armed (postponed) the steady timer: "+clock.Interval);
+                now=now.AddSeconds(2.25); clock.Tick(null,EventArgs.Empty); Program.Check(Math.Abs(clock.Alpha-.5)<.01 && clock.Running && clock.Interval==40,"No 40 ms fade ticks");
                 now=now.AddSeconds(1); clock.Tick(null,EventArgs.Empty); Program.Check(!clock.Running && clock.Alpha==0,"Timer kept running");
                 clock.Notice("notice"); Program.Check(clock.Running && clock.Text("hint")=="notice","Notice did not restart");
-                now=now.AddSeconds(4); clock.Update(token,0,true); Program.Check(clock.Running && clock.Alpha==1 && clock.Text("hint")=="hint","Draft hint not held");
-                clock.Update(token,1,false); Program.Check(clock.Running && clock.Alpha==1,"Tool hint did not restart");
+                now=now.AddSeconds(4); clock.Update(token,0,true); Program.Check(!clock.Running && clock.Alpha==1 && clock.Text("hint")=="hint","Held hint must stay visible with the timer stopped");
+                clock.Notice("held notice"); Program.Check(clock.Running && clock.Interval>=2900,"Notice during hold not scheduled");
+                now=now.AddSeconds(4); clock.Tick(null,EventArgs.Empty); Program.Check(!clock.Running && clock.Alpha==1,"Faded notice left the held timer running");
+                clock.Update(token,1,false); Program.Check(clock.Running && clock.Alpha==1 && clock.Interval>=2900,"Tool hint did not restart");
                 clock.Update(null,-1,false); Program.Check(!clock.Running,"Timer runs outside drawing mode");
                 clock.Dispose(); clock.Notice("after dispose"); Program.Check(clock.IsDisposed && !clock.Running && invalidated>0,"Clock disposal");
             }

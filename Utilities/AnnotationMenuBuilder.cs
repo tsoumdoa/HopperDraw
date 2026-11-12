@@ -227,6 +227,10 @@ namespace hopperdraw
             menu.Items.Add(new ToolStripSeparator());
             var used=new HashSet<char>(menu.Items.Cast<ToolStripItem>().Select(i=>AnnotationMenuKeys.Mnemonic(i.Text)));
             var root=Sub(menu.Items,"HopperDraw"); root.Text=AnnotationMenuKeys.Label(root.Name,used);
+            // GH's renderer hides mnemonic underlines without Alt; show the entry letter in the shortcut column
+            // instead (display text only, not a ShortcutKeys binding) and leave the host renderer untouched.
+            root.ShortcutKeyDisplayString=AnnotationMenuKeys.Mnemonic(root.Text).ToString();
+            AnnotationMenuKeys.Track(menu);
             var items=root.DropDownItems;
             var drawing=Sub(items,"Drawing");
             Item(drawing.DropDownItems,"Enter drawing mode",owner.EnterDrawingMode,!owner.DrawingModeEnabled && owner.Eligible);

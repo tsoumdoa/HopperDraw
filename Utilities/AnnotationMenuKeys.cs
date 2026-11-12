@@ -58,12 +58,20 @@ namespace hopperdraw
             foreach(char c in "1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ") if(used.Add(c)) return name+" (&"+c+")";
             throw new InvalidOperationException("No mnemonic available for "+name);
         }
+        private static readonly HashSet<ToolStrip> Tracked = new HashSet<ToolStrip>();
+        // Visibility tracking only: any menu that hosts HopperDraw items (including GH's own component menu,
+        // whose renderer we never touch) counts as open, so menu keys win over canvas commands while it shows.
+        internal static void Track(ToolStrip menu)
+        {
+            if(menu==null || !Tracked.Add(menu)) return;
+            menu.VisibleChanged+=(s,e)=>{ if(menu.Visible) Open.Add(menu); else Open.Remove(menu); };
+            menu.Disposed+=(s,e)=>{ Open.Remove(menu); Tracked.Remove(menu); };
+            if(menu.Visible) Open.Add(menu);
+        }
         internal static void Configure(ToolStrip menu)
         {
-            if(ReferenceEquals(menu.Renderer,Renderer)) return;
-            menu.Renderer=Renderer;
-            menu.VisibleChanged+=(s,e)=>{ if(menu.Visible) Open.Add(menu); else Open.Remove(menu); };
-            menu.Disposed+=(s,e)=>Open.Remove(menu);
+            Track(menu);
+            if(!ReferenceEquals(menu.Renderer,Renderer)) menu.Renderer=Renderer;
         }
         internal static void Apply(ToolStripItemCollection items)
         {

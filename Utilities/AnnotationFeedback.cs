@@ -28,6 +28,32 @@ namespace hopperdraw
     }
     internal static class AnnotationFeedback
     {
+        // The chip repaints on every pointer move in drawing mode: all typography, brushes, formats, measurements and
+        // chip paths are cached (per DPI where size-dependent) instead of being allocated per paint. UI-thread only.
+        private sealed class DpiResources { internal Font Font, Small; internal readonly System.Collections.Generic.Dictionary<int,(float name,float key)> Widths=new System.Collections.Generic.Dictionary<int,(float,float)>(); }
+        private static readonly System.Collections.Generic.Dictionary<int,DpiResources> Resources=new System.Collections.Generic.Dictionary<int,DpiResources>();
+        private static readonly SolidBrush Ink=new SolidBrush(Color.FromArgb(48,48,48)), Muted=new SolidBrush(Color.FromArgb(130,130,130)),
+            Background=new SolidBrush(Color.FromArgb(245,247,247,247)), Shadow=new SolidBrush(Color.FromArgb(24,0,0,0)), HintInk=new SolidBrush(Color.Gray);
+        private static readonly StringFormat LabelFormat=new StringFormat{LineAlignment=StringAlignment.Center,Trimming=StringTrimming.EllipsisCharacter,FormatFlags=StringFormatFlags.NoWrap};
+        private static readonly StringFormat HintFormat=new StringFormat{Alignment=StringAlignment.Center,LineAlignment=StringAlignment.Center,Trimming=StringTrimming.EllipsisCharacter,FormatFlags=StringFormatFlags.NoWrap};
+        private static RectangleF _pathChip; private static float _pathRadius; private static GraphicsPath _chipPath, _shadowPath;
+        private static readonly FrameShape Sample=new FrameShape();
+        internal static int CachedDpiCount => Resources.Count;
+        private static DpiResources For(float dpi)
+        {
+            int key=(int)Math.Round(dpi);
+            if(Resources.TryGetValue(key,out var r)) return r;
+            float s=key/96f; string family; using(var system=SystemFonts.MessageBoxFont) family=system.FontFamily.Name;
+            r=new DpiResources{Font=new Font(family,12*s,FontStyle.Regular,GraphicsUnit.Pixel),Small=new Font(family,11*s,FontStyle.Regular,GraphicsUnit.Pixel)};
+            Resources[key]=r; return r;
+        }
+        private static void ChipPaths(RectangleF chip,float radius,float s)
+        {
+            if(_chipPath!=null && chip==_pathChip && radius==_pathRadius) return;
+            _chipPath?.Dispose(); _shadowPath?.Dispose();
+            var shade=chip; shade.Offset(0,2*s);
+            _chipPath=Rounded(chip,radius); _shadowPath=Rounded(shade,radius); _pathChip=chip; _pathRadius=radius;
+        }
         private static GraphicsPath Rounded(RectangleF b,float radius)
         {
             var p=new GraphicsPath(); float d=Math.Min(radius*2,Math.Min(b.Width,b.Height));
@@ -43,30 +69,25 @@ namespace hopperdraw
             {
                 g.ResetTransform(); g.SmoothingMode=SmoothingMode.AntiAlias; float s=g.DpiX/96f;
                 // Pixel fonts are explicitly measured at the actual target DPI, without double scaling GDI+ points.
-                using(var system=SystemFonts.MessageBoxFont)
-                using(var font=new Font(system.FontFamily,12*s,FontStyle.Regular,GraphicsUnit.Pixel))
-                using(var small=new Font(system.FontFamily,11*s,FontStyle.Regular,GraphicsUnit.Pixel))
-                using(var ink=new SolidBrush(Color.FromArgb(48,48,48)))
-                using(var muted=new SolidBrush(Color.FromArgb(130,130,130)))
-                using(var bg=new SolidBrush(Color.FromArgb(245,247,247,247)))
-                using(var shadow=new SolidBrush(Color.FromArgb(24,0,0,0)))
+                var res=For(g.DpiX); var font=res.Font; var small=res.Small;
+                var tool=DrawingTool.Get(owner.DrawMode); var pen=owner.DrawMode==5 ? owner.TextPen : owner.PenStyle;
+                if(!res.Widths.TryGetValue(tool.Index,out var widths))
+                { widths=(g.MeasureString(tool.Name,font).Width,g.MeasureString(tool.Key.ToString(),small).Width); res.Widths[tool.Index]=widths; }
+                var layout=HudLayout.Measure(canvas.ClientSize,g.DpiX,widths.name,widths.key,pen.FillColor.HasValue,!pen.StrokeVisible,pen.Hatch!=HatchPattern.None);
+                if(layout.Chip.Width<1 || layout.Chip.Height<1) return;
+                ChipPaths(layout.Chip,8*s,s);
+                g.FillPath(Shadow,_shadowPath); g.FillPath(Background,_chipPath);
+                var clip=g.Save(); g.SetClip(layout.Chip);
+                ToolGlyph.Draw(g,tool.Index,layout.Glyph,Color.FromArgb(55,55,55),s);
+                DrawSwatch(g,owner,pen,layout,s);
+                if(layout.Name.Width>0) g.DrawString(tool.Name,font,Ink,layout.Name,LabelFormat);
+                if(layout.Key.Width>0) g.DrawString(tool.Key.ToString(),small,Muted,layout.Key,LabelFormat);
+                g.Restore(clip);
+                float alpha=clock.Alpha;
+                if(alpha>0)
                 {
-                    var tool=DrawingTool.Get(owner.DrawMode); var pen=owner.DrawMode==5 ? owner.TextPen : owner.PenStyle;
-                    var layout=HudLayout.Measure(canvas.ClientSize,g.DpiX,g.MeasureString(tool.Name,font).Width,g.MeasureString(tool.Key.ToString(),small).Width,pen.FillColor.HasValue,!pen.StrokeVisible,pen.Hatch!=HatchPattern.None);
-                    if(layout.Chip.Width<1 || layout.Chip.Height<1) return;
-                    var shade=layout.Chip; shade.Offset(0,2*s);
-                    using(var path=Rounded(shade,8*s)) g.FillPath(shadow,path);
-                    using(var path=Rounded(layout.Chip,8*s)) g.FillPath(bg,path);
-                    var clip=g.Save(); g.SetClip(layout.Chip);
-                    ToolGlyph.Draw(g,tool.Index,layout.Glyph,Color.FromArgb(55,55,55),s);
-                    DrawSwatch(g,owner,pen,layout,s);
-                    using(var format=new StringFormat{LineAlignment=StringAlignment.Center,Trimming=StringTrimming.EllipsisCharacter,FormatFlags=StringFormatFlags.NoWrap})
-                    { if(layout.Name.Width>0) g.DrawString(tool.Name,font,ink,layout.Name,format); if(layout.Key.Width>0) g.DrawString(tool.Key.ToString(),small,muted,layout.Key,format); }
-                    g.Restore(clip);
-                    float alpha=clock.Alpha;
-                    if(alpha>0) using(var hintInk=new SolidBrush(Color.FromArgb((int)(alpha*190),65,65,65)))
-                    using(var format=new StringFormat{Alignment=StringAlignment.Center,LineAlignment=StringAlignment.Center,Trimming=StringTrimming.EllipsisCharacter,FormatFlags=StringFormatFlags.NoWrap})
-                        g.DrawString(clock.Text(editing ? "Type text - Esc / Ctrl+Enter commits" : tool.Hint),small,hintInk,layout.Hint,format);
+                    HintInk.Color=Color.FromArgb((int)(alpha*190),65,65,65);
+                    g.DrawString(clock.Text(editing ? "Type text - Esc / Ctrl+Enter commits" : tool.Hint),small,HintInk,layout.Hint,HintFormat);
                 }
             }
             catch(Exception ex) { System.Diagnostics.Debug.WriteLine("HopperDraw HUD skipped: "+ex.Message); }
@@ -79,7 +100,9 @@ namespace hopperdraw
             if(layout.Fill)
             {
                 var square=new RectangleF(b.Right-12*s,b.Top+2*s,12*s,12*s);
-                var sample=new FrameShape(new Rhino.Geometry.Point3d(square.Left,square.Top,0),new Rhino.Geometry.Point3d(square.Right,square.Top,0),new Rhino.Geometry.Point3d(square.Right,square.Bottom,0),new Rhino.Geometry.Point3d(square.Left,square.Bottom,0));
+                var sample=Sample;
+                sample.TopLeft=new Rhino.Geometry.Point3d(square.Left,square.Top,0); sample.TopRight=new Rhino.Geometry.Point3d(square.Right,square.Top,0);
+                sample.BottomRight=new Rhino.Geometry.Point3d(square.Right,square.Bottom,0); sample.BottomLeft=new Rhino.Geometry.Point3d(square.Left,square.Bottom,0);
                 pen.CopyStyleTo(sample); sample.StrokeVisible=false; sample.HatchScale=.4*s;
                 using(var path=AnnotationGeometry.Boundary(sample)) HatchRenderer.Paint(g,sample,path);
                 g.DrawRectangle(Pens.DarkGray,square.X,square.Y,square.Width,square.Height);

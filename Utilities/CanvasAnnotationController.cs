@@ -134,12 +134,15 @@ namespace hopperdraw
         private readonly DrawingCursorCache _cursors = new DrawingCursorCache();
         private readonly AnnotationHintClock _hints;
         internal void Notice(string text) { _hints.Update(DrawingOwner,DrawingOwner?.DrawMode??-1,DrawingOwner?.Draft.Active==true || _text!=null); _hints.Notice(text); }
-        internal void FeedbackChanged()
+        // Explicit state changes (tool, mode, DPI, editor) refresh hints and the stationary-pointer cursor.
+        internal void FeedbackChanged() { UpdateHints(); RefreshCursor(); }
+        // Paint and fade ticks only update hint state: they must never drive cursor or hover changes.
+        private void UpdateHints()
         {
             var owner=DrawingOwner;
             _hints.Update(owner,owner?.DrawMode??-1,owner?.Draft.Active==true || _text!=null);
-            RefreshCursor();
         }
+        [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern IntPtr WindowFromPoint(Point point);
         private void DpiChanged(object sender,EventArgs e) { FeedbackChanged(); _canvas.Invalidate(); }
         internal void AssignCursor(Cursor cursor) { _ownedCursor=cursor; _canvas.Cursor=cursor; }
         internal void ResetCursor()
@@ -156,6 +159,9 @@ namespace hopperdraw
         internal void RefreshCursor()
         {
             if(_refreshingCursor || _cursors.IsDisposed || _canvas.IsDisposed || !_canvas.IsHandleCreated) return;
+            // Only when the canvas window itself is under the pointer: never over the inline editor (a child),
+            // a context menu, a colour dialog or any popup overlapping the canvas rectangle.
+            if(WindowFromPoint(Cursor.Position)!=_canvas.Handle) return;
             _refreshingCursor=true;
             try { var p=_canvas.PointToClient(Control.MousePosition); Hover(_canvas,new MouseEventArgs(MouseButtons.None,0,p.X,p.Y,0)); }
             finally { _refreshingCursor=false; }
@@ -172,7 +178,7 @@ namespace hopperdraw
         private CanvasAnnotationController(GH_Canvas canvas)
         {
             _canvas = canvas;
-            _hints = new AnnotationHintClock(() => { if(!_canvas.IsDisposed) { FeedbackChanged(); _canvas.Invalidate(); } });
+            _hints = new AnnotationHintClock(() => { if(!_canvas.IsDisposed) { UpdateHints(); _canvas.Invalidate(); } });
             _hook = CanvasDrawingShortcut.Register(canvas, () => false, () => {});
             _hook.Mouse = Message; _hook.Command = Command; _hook.Lost = Lost;
             canvas.DocumentChanged += DocumentChanged;
@@ -447,6 +453,6 @@ namespace hopperdraw
             if (!_refreshingCursor && (drawing != null || previous.Any(pair=>pair.Value != (pair.Key.HoveredShapeIndex,pair.Key.HoveredPointIndex)))) _canvas.Invalidate();
         }
         private static bool ContainsTextAt(DrawShape shape,PointF p) => shape is TextShape text && AnnotationGeometry.Hit(text,p,0,0) || shape is DrawShapeGroup group && group.Children.Any(c=>ContainsTextAt(c,p));
-        private void PaintHud(GH_Canvas canvas) { FeedbackChanged(); AnnotationFeedback.Hud(canvas,DrawingOwner,_hints,_text!=null); }
+        private void PaintHud(GH_Canvas canvas) { UpdateHints(); AnnotationFeedback.Hud(canvas,DrawingOwner,_hints,_text!=null); }
     }
 }
