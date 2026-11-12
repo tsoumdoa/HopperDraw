@@ -18,17 +18,42 @@ namespace hopperdraw
             internal double Length => Lines.Sum(l => Enumerable.Range(1,l.Length-1).Sum(i => Math.Sqrt(Math.Pow(l[i].X-l[i-1].X,2)+Math.Pow(l[i].Y-l[i-1].Y,2))));
         }
         internal const float LineWidth = .75f, DotRadius = .65f;
-        // GDI+ antialiasing paints sub-pixel lines at roughly this effective width, not their geometric width.
-        internal const double MinLinePixels = .8;
-        // Fraction of a cell covered by ink as actually rasterized at the tint threshold (screen cell = MinScreenCell).
-        // The sub-pixel tint uses this so the mean tone is continuous where the pattern turns into a tint, and stays
-        // at that tone when zooming further out instead of darkening as rasterized lines would merge.
-        internal static double Coverage(HatchPattern pattern, double scale)
+        // Mean ink coverage of the pattern as actually composited at the tint threshold (screen cell = MinScreenCell),
+        // measured by rasterizing a patch with the same primitives and smoothing mode, so overlaps and GDI+ sub-pixel
+        // line widths are included. The tint uses it so the tone is continuous where the pattern becomes a tint, and
+        // stays at that tone when zooming further out. Cached per pattern, exact scale and smoothing mode.
+        private static readonly Dictionary<(int pattern,long scale,SmoothingMode mode),double> CoverageCache = new Dictionary<(int,long,SmoothingMode),double>();
+        internal static double Coverage(HatchPattern pattern, double scale, SmoothingMode mode = SmoothingMode.Default)
         {
-            int index=(int)pattern; if(index<1 || index>=Motifs.Length || !(scale>0)) return 0;
-            var m=Motifs[index]; double cell=MinScreenCell, zoom=cell/(12*scale);
-            double width=Math.Max(LineWidth*zoom,MinLinePixels), radius=DotRadius*zoom;
-            return Math.Min(1,(m.Length/12*cell*width + m.Dots.Count*Math.PI*radius*radius)/(cell*cell));
+            int index=(int)pattern; if(index<1 || index>=Motifs.Length || !(scale>0) || double.IsInfinity(scale)) return 0;
+            if(mode==SmoothingMode.Invalid) mode=SmoothingMode.Default;
+            var key=(index,BitConverter.DoubleToInt64Bits(scale),mode);
+            if(CoverageCache.TryGetValue(key,out double cached)) return cached;
+            if(CoverageCache.Count>=256) CoverageCache.Clear();
+            const int cells=32; double cell=12*scale; float zoom=(float)(MinScreenCell/cell);
+            int size=(int)Math.Round(cells*MinScreenCell);
+            long sum=0;
+            using(var bitmap=new Bitmap(size,size,System.Drawing.Imaging.PixelFormat.Format32bppArgb))
+            {
+                using(var g=Graphics.FromImage(bitmap))
+                {
+                    g.Clear(Color.Transparent); g.SmoothingMode=mode; g.ScaleTransform(zoom,zoom);
+                    Vectors(g,Motifs[index],Color.Black,new RectangleF(0,0,(float)(cells*cell),(float)(cells*cell)),cell,scale,cells+2,cells+2);
+                }
+                var data=bitmap.LockBits(new Rectangle(0,0,size,size),System.Drawing.Imaging.ImageLockMode.ReadOnly,System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+                try
+                {
+                    var row=new byte[size*4];
+                    for(int y=0;y<size;y++)
+                    {
+                        System.Runtime.InteropServices.Marshal.Copy(IntPtr.Add(data.Scan0,y*data.Stride),row,0,row.Length);
+                        for(int x=0;x<size;x++) sum+=row[x*4+3];
+                    }
+                }
+                finally { bitmap.UnlockBits(data); }
+            }
+            double coverage=Math.Min(1,sum/(255.0*size*size));
+            CoverageCache[key]=coverage; return coverage;
         }
         private static readonly Motif[] Motifs = Build();
         private static Motif[] Build()
@@ -54,7 +79,7 @@ namespace hopperdraw
         internal const int VectorCellBudget = 4000, LineBudget = 20000, MaxTile = 256, MaxCachedTiles = 48;
         
         private sealed class Tile { internal Bitmap Image; internal TextureBrush Brush; }
-        private static readonly Dictionary<(int pattern,int size,int argb,long scale),Tile> Tiles = new Dictionary<(int,int,int,long),Tile>();
+        private static readonly Dictionary<(int pattern,int size,int argb,long scale,SmoothingMode mode),Tile> Tiles = new Dictionary<(int,int,int,long,SmoothingMode),Tile>();
         internal static int CachedTileCount => Tiles.Count;
         internal static Color Ink(Color color,double opacity) => Color.FromArgb((int)Math.Round(color.A*Math.Max(0,Math.Min(1,opacity))),color);
         private static Color Tint(Color ink,double coverage) => Color.FromArgb((int)Math.Round(ink.A*Math.Max(0,Math.Min(1,coverage))),ink);
@@ -85,7 +110,7 @@ namespace hopperdraw
                     if(double.IsNaN(scale) || double.IsInfinity(scale) || scale<=0) return;
                     int index=(int)shape.Hatch; if(index<1 || index>=Motifs.Length) return;
                     double cell=12*scale; float zoom=ScreenScale(g); double screenCell=cell*zoom;
-                    double coverage=Coverage(shape.Hatch,scale);
+                    double coverage=Coverage(shape.Hatch,scale,g.SmoothingMode);
                     if(!(screenCell>=MinScreenCell)) { Tinted(g,inkColor,coverage,boundary); return; }
                     double columns=Math.Ceiling(bounds.Width/cell)+2, rows=Math.Ceiling(bounds.Height/cell)+2;
                     var motif=Motifs[index];
@@ -110,7 +135,7 @@ namespace hopperdraw
                         return;
                     }
                     if(columns*rows<=VectorCellBudget || screenCell>MaxTile) { Vectors(g,motif,inkColor,bounds,cell,scale,columns,rows); return; }
-                    var tile=TileFor(index,motif,(int)Math.Round(screenCell),inkColor,scale);
+                    var tile=TileFor(index,motif,(int)Math.Round(screenCell),inkColor,scale,g.SmoothingMode);
                     tile.Brush.ResetTransform();
                     float unit=(float)(cell/tile.Image.Width); tile.Brush.ScaleTransform(unit,unit);
                     g.FillPath(tile.Brush,boundary);
@@ -150,10 +175,11 @@ namespace hopperdraw
         // The bitmap is stretched from `size` px to the true screen cell, so primitives are sized in tile pixels
         // (size / canvas cell), not screen pixels: after the brush transform they match the vector path exactly.
         // The key holds every rasterization input: pattern, tile size, ink and exact hatch scale.
-        private static Tile TileFor(int index,Motif motif,int size,Color inkColor,double scale)
+        private static Tile TileFor(int index,Motif motif,int size,Color inkColor,double scale,SmoothingMode mode)
         {
             size=Math.Max(1,Math.Min(MaxTile,size));
-            var key=(index,size,inkColor.ToArgb(),BitConverter.DoubleToInt64Bits(scale));
+            if(mode==SmoothingMode.Invalid) mode=SmoothingMode.Default;
+            var key=(index,size,inkColor.ToArgb(),BitConverter.DoubleToInt64Bits(scale),mode);
             if(Tiles.TryGetValue(key,out var tile)) return tile;
             if(Tiles.Count>=MaxCachedTiles) ClearTiles(); // Paint is single-threaded: no brush is in use here.
             var image=new Bitmap(size,size,System.Drawing.Imaging.PixelFormat.Format32bppPArgb);
@@ -162,7 +188,7 @@ namespace hopperdraw
             using(var pen=new Pen(inkColor,LineWidth*perUnit))
             using(var brush=new SolidBrush(inkColor))
             {
-                tg.Clear(Color.Transparent); tg.SmoothingMode=SmoothingMode.AntiAlias;
+                tg.Clear(Color.Transparent); tg.SmoothingMode=mode; // same rasterization as the vector path and Coverage()
                 float r=DotRadius*perUnit;
                 for(int dy=-1;dy<=1;dy++) for(int dx=-1;dx<=1;dx++)
                 {
