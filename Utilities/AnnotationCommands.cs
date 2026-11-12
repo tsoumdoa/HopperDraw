@@ -9,11 +9,11 @@ namespace hopperdraw
 {
     internal static class AnnotationCommands
     {
-        internal static bool Apply(IEnumerable<HopperDraw> owners, string name, Func<DrawShape,bool> differs, Action<DrawShape> edit)
+        internal static bool Apply(IEnumerable<HopperDraw> owners, string name, Func<DrawShape,bool> differs, Action<DrawShape> edit, Func<HopperDraw[],string,bool> record = null)
         {
             var changed=owners.Where(o=>o.CanEditShapes && o.SelectionLeaves.Any(differs)).ToArray();
             if (changed.Length==0) return false;
-            if (!Record(changed,name)) return false;
+            if (!(record ?? Record)(changed,name)) return false;
             foreach(var owner in changed) { foreach(var leaf in owner.SelectionLeaves.Where(differs)) edit(leaf); owner.Changed(); }
             return true;
         }

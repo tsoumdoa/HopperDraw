@@ -23,7 +23,7 @@ namespace hopperdraw
             var cache = Cache.GetValue(shape, _ => new StrokeCache());
             if (cache.Key != null && cache.Closed == closed && cache.Key.SequenceEqual(points)) return cache;
             cache.Key = points; cache.Closed = closed;
-            cache.Stroke = points.Length < 2 || !ShapeRenderer.ValidPoints(points) ? null : Flatten(shape, points);
+            cache.Stroke = points.Length < 2 || !ShapeRenderer.ValidPoints(points) ? null : Flatten(shape);
             cache.Bounds = Bounds(cache.Stroke);
             return cache;
         }
@@ -45,32 +45,51 @@ namespace hopperdraw
             var cached = Leaf(shape).Stroke;
             if (cached != null) yield return cached;
         }
-        private static PointF[] Flatten(DrawShape shape, PointF[] points)
+        // Every consumer uses the identical GDI+ cardinal spline and winding rule.
+        internal static GraphicsPath Boundary(DrawShape shape)
         {
-            using (var path = new GraphicsPath())
+            var path = new GraphicsPath(FillMode.Winding);
+            var points = shape.GetPoints();
+            if (points.Length < 2 || !ShapeRenderer.ValidPoints(points)) return path;
+            if (shape is CurveShape curve)
             {
-                if (shape is CurveShape curve)
-                {
-                    if (curve.Closed && points.Length > 2) path.AddClosedCurve(points, .5f);
-                    else path.AddCurve(points, .5f);
-                }
-                else if (shape is FrameShape || shape is PolylineShape poly && poly.Closed) path.AddPolygon(points);
-                else path.AddLines(points);
+                if (curve.Closed && points.Length > 2) path.AddClosedCurve(points, .5f);
+                else path.AddCurve(points, .5f);
+            }
+            else if (shape.SupportsFill && points.Length > 2) path.AddPolygon(points);
+            else path.AddLines(points);
+            return path;
+        }
+        private static PointF[] Flatten(DrawShape shape)
+        {
+            using (var path = Boundary(shape))
+            {
                 path.Flatten(null, .2f);
                 var stroke = path.PathPoints;
-                if ((path.PathTypes.Last() & 128) != 0) stroke = stroke.Concat(new[] { stroke[0] }).ToArray();
+                if (stroke.Length > 0 && (path.PathTypes.Last() & 128) != 0) stroke = stroke.Concat(new[] { stroke[0] }).ToArray();
                 return stroke;
             }
+        }
+        internal static bool Interior(DrawShape shape, PointF point)
+        {
+            if (!shape.VisibleFill) return false;
+            using (var path = Boundary(shape)) return path.IsVisible(point);
         }
         internal static bool Hit(DrawShape shape, PointF point, float tolerance, float width)
         {
             if (shape is DrawShapeGroup group) return group.Children.Any(c => Hit(c, point, tolerance, width));
             if (shape is OpaqueShape) return false;
+            return HitLeaf(shape,point,tolerance,StyleValidation.EffectiveWidth(width,shape.ThicknessMultiplier));
+        }
+        // Public shape HitTest receives an already-effective width; controller picking receives a base width.
+        internal static bool HitLeaf(DrawShape shape, PointF point, float tolerance, float effectiveWidth)
+        {
             var leaf = Leaf(shape);
             if (leaf.Stroke == null) return false;
-            float reach = tolerance + StyleValidation.EffectiveWidth(width, shape.ThicknessMultiplier) / 2;
+            float reach = tolerance + (shape.StrokeVisible ? effectiveWidth / 2 : 0);
             var b = leaf.Bounds;
             if (point.X < b.Left - reach || point.X > b.Right + reach || point.Y < b.Top - reach || point.Y > b.Bottom + reach) return false;
+            if (Interior(shape, point)) return true;
             var s = leaf.Stroke;
             for (int i = 1; i < s.Length; i++)
                 if (GeometryUtilities.DistanceToSegment(point, s[i - 1], s[i]) <= reach) return true;
@@ -83,8 +102,9 @@ namespace hopperdraw
                 var children=group.Children.Where(c=>Strokes(c).Any()).ToArray();
                 return children.Length>0 && (crossing ? children.Any(c=>InRectangle(c,rect,true,baseWidth)) : children.All(c=>InRectangle(c,rect,false,baseWidth)));
             }
-            float half=baseWidth<=0 ? 0 : StyleValidation.EffectiveWidth(baseWidth,shape.ThicknessMultiplier)/2;
+            float half=baseWidth<=0 || !shape.StrokeVisible ? 0 : StyleValidation.EffectiveWidth(baseWidth,shape.ThicknessMultiplier)/2;
             if (!crossing && (rect.Width<2*half || rect.Height<2*half)) return false;
+            if (crossing && new[] { new PointF(rect.Left,rect.Top), new PointF(rect.Right,rect.Top), new PointF(rect.Right,rect.Bottom), new PointF(rect.Left,rect.Bottom) }.Any(p => Interior(shape,p))) return true;
             rect.Inflate(crossing?half:-half,crossing?half:-half);
             var strokes = Strokes(shape).ToArray();
             if (strokes.Length == 0) return false;

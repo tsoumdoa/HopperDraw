@@ -117,7 +117,7 @@ namespace hopperdraw
         {
             pManager.AddBooleanParameter("Active", "A", "Enable annotation editing and double-D drawing activation. Existing annotations remain visible when inactive", GH_ParamAccess.item, true);
             pManager.AddBooleanParameter("Show", "S", "Show annotations on the Grasshopper canvas", GH_ParamAccess.item, true);
-            pManager.AddIntegerParameter("DrawMode", "M", "Drawing mode: 0=Line, 1=Polyline, 2=Frame, 3=Curve", GH_ParamAccess.item, 0);
+            pManager.AddIntegerParameter("DrawMode", "M", DrawingTool.Description, GH_ParamAccess.item, 0);
             pManager.AddColourParameter("Color", "C", "Default annotation color. Use the component menu for per-shape color overrides", GH_ParamAccess.item, Color.Black);
             pManager.AddNumberParameter("Thickness", "T", "Base annotation thickness (0.1-1000 canvas units, default 8). Effective width is capped at 1000; use the menu for per-shape multipliers", GH_ParamAccess.item, 8.0);
             pManager.AddIntegerParameter("LineType", "L", "Annotation line type: 0=Solid, 1=Dash, 2=Dot, 3=DashDot, 4=DashDotDot. Use the component menu for per-shape line type", GH_ParamAccess.item, 0);
@@ -129,10 +129,7 @@ namespace hopperdraw
             var drawModeParam = Params.Input[2] as Param_Integer;
             if (drawModeParam != null)
             {
-                drawModeParam.AddNamedValue("Line", 0);
-                drawModeParam.AddNamedValue("Polyline", 1);
-                drawModeParam.AddNamedValue("Frame", 2);
-                drawModeParam.AddNamedValue("Curve", 3);
+                foreach (var tool in DrawingTool.All) drawModeParam.AddNamedValue(tool.Name, tool.Index);
             }
 
             var lineTypeParam = Params.Input[5] as Param_Integer;
@@ -184,7 +181,7 @@ namespace hopperdraw
             int drawOrder = 1;
             DA.GetData(6, ref drawOrder);
 
-            drawMode = ValidateRange("DrawMode", drawMode, 0, 3);
+            drawMode = ValidateRange("DrawMode", drawMode, 0, DrawingTool.Maximum);
             lineType = ValidateRange("LineType", lineType, 0, 4);
             drawOrder = ValidateRange("DrawOrder", drawOrder, 0, 1);
             if (!StyleValidation.ValidWidth(thickness))
@@ -503,7 +500,7 @@ namespace hopperdraw
             if (!ReferenceEquals(_canvas, Instances.ActiveCanvas) || !CanHandleCanvasEvent(_canvas) ||
                 !_canvas.ModifiersEnabled || _canvas.ActiveInteraction != null ||
                 _canvas.ActiveWidget != null || _canvas.ActiveObject != null ||
-                _drawMode < 0 || _drawMode > 3) return false;
+                !DrawingTool.Valid(_drawMode)) return false;
 
             // Respect custom Grasshopper navigation and menu bindings for plain D.
             if (GH_Canvas.NavigationPanLeft == Keys.D || GH_Canvas.NavigationPanRight == Keys.D ||
@@ -608,7 +605,7 @@ namespace hopperdraw
             EndShapeGesture();
             if (!CanEditShapes || !_isActivated || Locked || !Visible || _canvas?.Document == null ||
                 !ReferenceEquals(_canvas.Document, OnPingDocument()) ||
-                _drawMode < 0 || _drawMode > 3) return;
+                !DrawingTool.Valid(_drawMode)) return;
 
             if (_capturingOwner != null && !ReferenceEquals(_capturingOwner, this))
                 _capturingOwner.CancelDrawing();
@@ -1060,7 +1057,7 @@ namespace hopperdraw
                 float minY = (float)Math.Min(_windowSelectStart.Y, pt.Y);
                 float maxY = (float)Math.Max(_windowSelectStart.Y, pt.Y);
                 RectangleF rect = new RectangleF(minX, minY, maxX - minX, maxY - minY);
-                SelectShapesInRectangle(rect, _additiveSelection);
+                SelectShapesInRectangle(rect, _additiveSelection, pt.X < _windowSelectStart.X);
                 _isWindowSelecting = false;
                 RequestCanvasRedraw();
             }
@@ -1499,7 +1496,7 @@ namespace hopperdraw
             return (-1, -1);
         }
 
-        public void SelectShapesInRectangle(RectangleF rect, bool additive = false)
+        public void SelectShapesInRectangle(RectangleF rect, bool additive = false, bool crossing = false)
         {
             if (!additive)
             {
@@ -1510,17 +1507,7 @@ namespace hopperdraw
                 if (additive && SelectedShapeIndices.Contains(i))
                     continue;
 
-                var pts = Shapes[i].GetPoints();
-                bool inside = false;
-                foreach (var pt in pts)
-                {
-                    if (rect.Contains(pt))
-                    {
-                        inside = true;
-                        break;
-                    }
-                }
-                if (inside)
+                if (AnnotationGeometry.InRectangle(Shapes[i], rect, crossing, LineThickness))
                 {
                     SelectedShapeIndices.Add(i);
                 }

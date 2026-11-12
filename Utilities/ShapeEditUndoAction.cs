@@ -71,9 +71,7 @@ namespace hopperdraw
             result.LoadDiagnostics.AddRange(shape.LoadDiagnostics);
             result.Id = shape.Id;
             result.PersistentId = shape.PersistentId;
-            result.ThicknessMultiplier = shape.ThicknessMultiplier;
-            result.OverrideColor = shape.OverrideColor;
-            result.LineType = shape.LineType;
+            shape.CopyStyleTo(result);
             return result;
         }
     }

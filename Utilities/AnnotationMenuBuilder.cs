@@ -10,7 +10,6 @@ namespace hopperdraw
     internal static class AnnotationMenuBuilder
     {
         private static readonly List<Color> Recent=new List<Color>();
-        private static readonly string[] ToolNames={"Line","Polyline","Frame","Curve"};
         private static readonly string[] DashNames={"Solid","Dash","Dot","Dash-dot","Dash-dot-dot"};
         private static readonly Color[] Colors={Color.Black,Color.FromArgb(70,70,70),Color.White,Color.Red,Color.Orange,Color.Yellow,Color.Green,Color.Teal,Color.Blue,Color.Purple,Color.HotPink};
         private static readonly string[] ColorNames={"Black","Dark grey","White","Red","Orange","Yellow","Green","Teal","Blue","Purple","Pink"};
@@ -65,6 +64,46 @@ namespace hopperdraw
             var line=Sub(items,"Line type");
             for(int i=0;i<5;i++) { var value=(DashStyle)i; Item(line.DropDownItems,DashNames[i],()=>setDash(value),true,dash==value,Preview(Color.Black,2,value)); }
         }
+        private static void Palette(ToolStripItemCollection items,Color? color,bool uniform,Action<Color?> choose,bool none)
+        {
+            if(none) Item(items,"None",()=>choose(null),true,uniform && !color.HasValue);
+            for(int i=0;i<Colors.Length;i++)
+            {
+                var c=Colors[i]; Item(items,ColorNames[i],()=>choose(c),true,uniform && color?.ToArgb()==c.ToArgb(),Preview(c,1,DashStyle.Solid,true));
+            }
+            var recent=Sub(items,"Recent colors"); recent.Enabled=Recent.Count>0;
+            foreach(var c in Recent.ToArray()) Item(recent.DropDownItems,"#"+c.ToArgb().ToString("X8"),()=>choose(c),true,uniform && color?.ToArgb()==c.ToArgb(),Preview(c,1,DashStyle.Solid,true));
+            Item(items,"Custom…",()=>{ using(var dialog=new ColorDialog{Color=color??Color.Black,FullOpen=true}) if(dialog.ShowDialog()==DialogResult.OK) choose(dialog.Color); });
+        }
+        private static void Fill(ToolStripItemCollection items,DrawShape[] eligible,Action<string,Action<DrawShape>> apply,bool enabled,string hint)
+        {
+            var fill=Sub(items,"Fill"); fill.Enabled=enabled; fill.ToolTipText=hint;
+            bool Same<T>(Func<DrawShape,T> get) => eligible.Length>0 && eligible.Select(get).Distinct().Count()==1;
+            Color? color=eligible.FirstOrDefault()?.FillColor;
+            Palette(fill.DropDownItems,color,Same(l=>l.FillColor?.ToArgb()),c=>
+            {
+                if(c.HasValue) { Recent.RemoveAll(r=>r.ToArgb()==c.Value.ToArgb()); Recent.Insert(0,c.Value); if(Recent.Count>5) Recent.RemoveAt(5); }
+                apply("Change fill color",l=>l.FillColor=c);
+            },true);
+            var opacity=Sub(fill.DropDownItems,"Opacity");
+            foreach(double value in new[]{.1,.25,.5,.75,1}) Item(opacity.DropDownItems,(value*100).ToString("0")+"%",()=>apply("Change fill opacity",l=>l.FillOpacity=value),true,Same(l=>l.FillOpacity) && eligible[0].FillOpacity==value);
+            var hatch=Sub(fill.DropDownItems,"Hatch");
+            foreach(HatchPattern value in Enum.GetValues(typeof(HatchPattern)))
+            {
+                var bitmap=new Bitmap(48,24);
+                using(var g=Graphics.FromImage(bitmap))
+                {
+                    g.Clear(Color.White); var shape=new FrameShape(new Rhino.Geometry.Point3d(0,0,0),new Rhino.Geometry.Point3d(48,0,0),new Rhino.Geometry.Point3d(48,24,0),new Rhino.Geometry.Point3d(0,24,0)) { FillColor=Color.Black,Hatch=value,StrokeVisible=false,HatchScale=.75 };
+                    using(var path=AnnotationGeometry.Boundary(shape)) HatchRenderer.Paint(g,shape,path);
+                }
+                Item(hatch.DropDownItems,value.ToString(),()=>apply("Change hatch",l=>l.Hatch=value),true,Same(l=>l.Hatch) && eligible[0].Hatch==value,bitmap);
+            }
+            var scale=Sub(fill.DropDownItems,"Hatch scale");
+            foreach(double value in new[]{.5,1,2,4}) Item(scale.DropDownItems,value.ToString("0.#",System.Globalization.CultureInfo.InvariantCulture)+"x",()=>apply("Change hatch scale",l=>l.HatchScale=value),true,Same(l=>l.HatchScale) && eligible[0].HatchScale==value);
+            var background=Sub(fill.DropDownItems,"Hatch background");
+            Item(background.DropDownItems,"Light grey",()=>apply("Change hatch background",l=>l.HatchBackground=Color.LightGray),true,Same(l=>l.HatchBackground?.ToArgb()) && eligible[0].HatchBackground?.ToArgb()==Color.LightGray.ToArgb(),Preview(Color.LightGray,1,DashStyle.Solid,true));
+            Palette(background.DropDownItems,eligible.FirstOrDefault()?.HatchBackground,Same(l=>l.HatchBackground?.ToArgb()),c=>apply("Change hatch background",l=>l.HatchBackground=c),true);
+        }
         internal static void Selection(ToolStripItemCollection items,HopperDraw[] owners)
         {
             var selected=owners.Where(o=>o.HasSelection).ToArray();
@@ -73,20 +112,27 @@ namespace hopperdraw
             var widths=leaves.Select(l=>l.ThicknessMultiplier).Distinct().ToArray();
             var dashes=leaves.Select(l=>l.LineType).Distinct().ToArray();
             int first=items.Count;
-            Styles(items,colors.Length==1 && colors[0].HasValue ? Color.FromArgb(colors[0].Value) : (Color?)null,
+            var stroke=Sub(items,"Stroke");
+            Styles(stroke.DropDownItems,colors.Length==1 && colors[0].HasValue ? Color.FromArgb(colors[0].Value) : (Color?)null,
                 widths.Length==1 ? widths[0] : (float?)null,dashes.Length==1 ? dashes[0] : (DashStyle?)null,
                 c=>AnnotationCommands.Apply(selected,"Change color",l=>l.OverrideColor?.ToArgb()!=c?.ToArgb(),l=>l.OverrideColor=c),
                 w=>AnnotationCommands.Apply(selected,"Change thickness",l=>l.ThicknessMultiplier!=w,l=>l.ThicknessMultiplier=w),
                 d=>AnnotationCommands.Apply(selected,"Change line type",l=>l.LineType!=d,l=>l.LineType=d));
             // Null means component default only for a uniform selection, never for a mixed selection.
-            if(colors.Length!=1) foreach(ToolStripMenuItem item in ((ToolStripMenuItem)items[first]).DropDownItems.OfType<ToolStripMenuItem>()) item.Checked=false;
+            if(colors.Length!=1) foreach(ToolStripMenuItem item in ((ToolStripMenuItem)stroke.DropDownItems[0]).DropDownItems.OfType<ToolStripMenuItem>()) item.Checked=false;
             for(int i=first;i<items.Count;i++) items[i].Enabled=leaves.Length>0;
+            stroke.DropDownItems.Add(new ToolStripSeparator());
+            var visibility=leaves.Select(l=>l.StrokeVisible).Distinct().ToArray();
+            Item(stroke.DropDownItems,"None",()=>AnnotationCommands.Apply(selected,"Change stroke visibility",l=>l.StrokeVisible!=(visibility.Length==1 && !visibility[0]),l=>l.StrokeVisible=visibility.Length==1 && !visibility[0]),leaves.Length>0,visibility.Length==1 && !visibility[0]);
+            Fill(items,leaves.Where(l=>l.SupportsFill).ToArray(),(name,change)=>AnnotationCommands.Apply(selected,name,
+                l=> { if(!l.SupportsFill) return false; var candidate=new LineShape(); l.CopyStyleTo(candidate); change(candidate); return !l.SameStyle(candidate); },change),
+                leaves.Any(l=>l.SupportsFill),"Close the shape to fill it.");
             items.Add(new ToolStripSeparator());
             Item(items,"Use selection style for drawing",()=>
             {
                 var target=owners.FirstOrDefault(o=>o.DrawingModeEnabled)??selected.FirstOrDefault();
-                target?.Pen(leaves[0].OverrideColor,widths[0],dashes[0]);
-            },leaves.Length>0 && colors.Length==1 && widths.Length==1 && dashes.Length==1);
+                target?.PenFrom(leaves[0]);
+            },leaves.Length>0 && leaves.All(l=>l.SameStyle(leaves[0])));
             items.Add(new ToolStripSeparator());
             Item(items,"Bring to front",()=>AnnotationCommands.Arrange(selected,true),selected.Length>0);
             Item(items,"Send to back",()=>AnnotationCommands.Arrange(selected,false),selected.Length>0);
@@ -107,12 +153,19 @@ namespace hopperdraw
         internal static void Drawing(ToolStripItemCollection items,HopperDraw owner)
         {
             var tools=Sub(items,"Tool"); bool wired=owner.Params.Input[2].SourceCount>0;
-            for(int i=0;i<4;i++) { int mode=i; var item=Item(tools.DropDownItems,ToolNames[i],()=>owner.SetTool(mode),!wired,owner.DrawMode==i); if(wired) item.ToolTipText="Disconnect the M input to choose a tool here."; }
+            foreach(var tool in DrawingTool.All) { int mode=tool.Index; var item=Item(tools.DropDownItems,tool.Name,()=>owner.SetTool(mode),!wired,owner.DrawMode==mode); if(wired) item.ToolTipText="Disconnect the M input to choose a tool here."; }
             var pen=Sub(items,"Pen");
-            Styles(pen.DropDownItems,owner.PendingColorOverride,owner.CurrentThicknessMultiplier,owner.CurrentLineType,
+            var stroke=Sub(pen.DropDownItems,"Stroke");
+            Styles(stroke.DropDownItems,owner.PendingColorOverride,owner.CurrentThicknessMultiplier,owner.CurrentLineType,
                 c=>owner.Pen(c,owner.CurrentThicknessMultiplier,owner.CurrentLineType),
                 w=>owner.Pen(owner.PendingColorOverride,w,owner.CurrentLineType),
                 d=>owner.Pen(owner.PendingColorOverride,owner.CurrentThicknessMultiplier,d));
+            stroke.DropDownItems.Add(new ToolStripSeparator());
+            Item(stroke.DropDownItems,"None",()=>{owner.PenStyle.StrokeVisible=!owner.PenStyle.StrokeVisible; owner.Redraw();},true,!owner.PenStyle.StrokeVisible);
+            Fill(pen.DropDownItems,new[]{owner.PenStyle},(name,change)=>{change(owner.PenStyle); owner.Redraw();},owner.DrawMode!=0,"Applies when the shape is closed.");
+            var smoothing=Sub(pen.DropDownItems,"Smoothing");
+            foreach(SmoothingLevel value in Enum.GetValues(typeof(SmoothingLevel)))
+                Item(smoothing.DropDownItems,value.ToString(),()=>{owner.Smoothing=value; owner.Redraw();},true,owner.Smoothing==value);
             Item(items,"Reset pen to component defaults",owner.ResetPen);
             Item(items,"Exit drawing mode",owner.ExitDrawing,owner.DrawingModeEnabled);
         }
