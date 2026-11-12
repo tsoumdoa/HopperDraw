@@ -125,6 +125,21 @@ internal static class FillHatchTests
             Program.Check(owner.HasSelection,"fallback window diverges from shared geometry");
             frame.StrokeVisible=true; Program.Check(!AnnotationGeometry.InRectangle(frame,new RectangleF(20,20,80,80),false,8),"visible stroke omitted from envelope");
         });
+        Program.Test("backdrop layer filled interiors stay empty canvas; outline and overlay interiors pick",()=>
+        {
+            var frame=Frame(); frame.FillColor=Color.Blue; var center=new PointF(55,55); var edge=new PointF(20,55);
+            var owner=Owner(frame); owner.DrawOrder=0;
+            Program.Check(AnnotationPicking.Hit(new[]{owner},center,false).owner==null,"backdrop interior captured the press");
+            Program.Check(AnnotationPicking.Hit(new[]{owner},edge,false).owner==owner,"backdrop outline not pickable");
+            Program.Check(owner.HitTest(center).shapeIndex<0 && owner.HitTest(edge).shapeIndex==0,"fallback picking ignores backdrop rule");
+            Program.Check(!AnnotationGeometry.InRectangle(frame,new RectangleF(45,45,10,10),true,8,false),"crossing inside backdrop selected it");
+            owner.ClearSelection(); owner.SelectShapesInRectangle(new RectangleF(45,45,10,10),false,true);
+            Program.Check(!owner.HasSelection,"fallback crossing inside backdrop selected it");
+            var group=new DrawShapeGroup(); group.Children.Add(frame.Clone()); owner.Shapes[0]=group;
+            Program.Check(AnnotationPicking.Hit(new[]{owner},center,false).owner==null,"grouped backdrop interior captured the press");
+            owner.Shapes[0]=frame; owner.DrawOrder=1;
+            Program.Check(AnnotationPicking.Hit(new[]{owner},center,false).owner==owner,"overlay interior not pickable");
+        });
         Program.Test("self intersecting closed spline paint and pick share winding boundary",()=>
         {
             var curve=new CurveShape(new[]{new Point3d(25,25,0),new Point3d(100,100,0),new Point3d(25,100,0),new Point3d(100,25,0),new Point3d(60,115,0)}.ToList(),true) { StrokeVisible=false,FillColor=Color.Red };

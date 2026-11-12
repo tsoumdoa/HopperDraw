@@ -149,7 +149,7 @@ namespace hopperdraw
                     if (mods != Keys.Shift && mods != Keys.Control) Clear();
                     if (_windowActive)
                         foreach (var owner in Owners)
-                            for (int i=0;i<owner.Shapes.Count;i++) if (AnnotationGeometry.InRectangle(owner.Shapes[i],rect,_windowCrossing,owner.LineThickness))
+                            for (int i=0;i<owner.Shapes.Count;i++) if (AnnotationGeometry.InRectangle(owner.Shapes[i],rect,_windowCrossing,owner.LineThickness,owner.DrawOrder!=0))
                             { if (mods == Keys.Control) owner.SelectedShapeIndices.Remove(i); else if (!owner.SelectedShapeIndices.Contains(i)) owner.SelectedShapeIndices.Add(i); }
                     _window = null;
                 }

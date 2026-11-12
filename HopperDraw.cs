@@ -569,7 +569,7 @@ namespace hopperdraw
             {
                 if (_owner.Eligible && ReferenceEquals(Canvas?.Document, _owner.OnPingDocument()) &&
                     !_owner.IsOverGrasshopperObject(new Point3d(point.X, point.Y, 0)) &&
-                    (_owner.DrawingModeEnabled || _owner.Shapes.Any(shape => AnnotationGeometry.Hit(shape, point, 5 * _owner.CanvasScale, _owner.LineThickness)))) return false;
+                    (_owner.DrawingModeEnabled || _owner.Shapes.Any(shape => AnnotationGeometry.Hit(shape, point, 5 * _owner.CanvasScale, _owner.LineThickness, _owner.DrawOrder != 0)))) return false;
                 return !_owner._drawingModeEnabled || !_owner.CanHandleCanvasEvent(Canvas) ||
                     (Control.ModifierKeys & (Keys.Control | Keys.Alt)) != Keys.None ||
                     _owner.IsOverGrasshopperObject(new Point3d(point.X, point.Y, 0));
@@ -1491,6 +1491,9 @@ namespace hopperdraw
             {
                 float width = Shapes[i] is DrawShapeGroup ? LineThickness : StyleValidation.EffectiveWidth(LineThickness, Shapes[i].ThicknessMultiplier);
                 var (hit, ptIdx) = Shapes[i].HitTest(point, HitTolerance * CanvasScale, width);
+                // Backdrop layer: filled interiors stay empty canvas, matching the Windows controller.
+                if (hit && ptIdx < 0 && DrawOrder == 0 &&
+                    !AnnotationGeometry.Hit(Shapes[i], point, HitTolerance * CanvasScale, LineThickness, false)) continue;
                 if (hit) return (i, ptIdx);
             }
             return (-1, -1);
@@ -1507,7 +1510,7 @@ namespace hopperdraw
                 if (additive && SelectedShapeIndices.Contains(i))
                     continue;
 
-                if (AnnotationGeometry.InRectangle(Shapes[i], rect, crossing, LineThickness))
+                if (AnnotationGeometry.InRectangle(Shapes[i], rect, crossing, LineThickness, DrawOrder != 0))
                 {
                     SelectedShapeIndices.Add(i);
                 }

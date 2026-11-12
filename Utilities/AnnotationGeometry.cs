@@ -87,36 +87,37 @@ namespace hopperdraw
             }
             return winding != 0;
         }
-        internal static bool Hit(DrawShape shape, PointF point, float tolerance, float width)
+        // interior=false: backdrop layer (DrawOrder 0) is picked by its outline only, so GH window selection can start over it.
+        internal static bool Hit(DrawShape shape, PointF point, float tolerance, float width, bool interior = true)
         {
-            if (shape is DrawShapeGroup group) return group.Children.Any(c => Hit(c, point, tolerance, width));
+            if (shape is DrawShapeGroup group) return group.Children.Any(c => Hit(c, point, tolerance, width, interior));
             if (shape is OpaqueShape) return false;
-            return HitLeaf(shape,point,tolerance,StyleValidation.EffectiveWidth(width,shape.ThicknessMultiplier));
+            return HitLeaf(shape,point,tolerance,StyleValidation.EffectiveWidth(width,shape.ThicknessMultiplier),interior);
         }
         // Public shape HitTest receives an already-effective width; controller picking receives a base width.
-        internal static bool HitLeaf(DrawShape shape, PointF point, float tolerance, float effectiveWidth)
+        internal static bool HitLeaf(DrawShape shape, PointF point, float tolerance, float effectiveWidth, bool interior = true)
         {
             var leaf = Leaf(shape);
             if (leaf.Stroke == null) return false;
             float reach = tolerance + (shape.StrokeVisible ? effectiveWidth / 2 : 0);
             var b = leaf.Bounds;
             if (point.X < b.Left - reach || point.X > b.Right + reach || point.Y < b.Top - reach || point.Y > b.Bottom + reach) return false;
-            if (shape.VisibleFill && Interior(leaf, point)) return true;
+            if (interior && shape.VisibleFill && Interior(leaf, point)) return true;
             var s = leaf.Stroke;
             for (int i = 1; i < s.Length; i++)
                 if (GeometryUtilities.DistanceToSegment(point, s[i - 1], s[i]) <= reach) return true;
             return false;
         }
-        internal static bool InRectangle(DrawShape shape, RectangleF rect, bool crossing, float baseWidth = 0)
+        internal static bool InRectangle(DrawShape shape, RectangleF rect, bool crossing, float baseWidth = 0, bool interior = true)
         {
             if (shape is DrawShapeGroup group)
             {
                 var children=group.Children.Where(c=>Strokes(c).Any()).ToArray();
-                return children.Length>0 && (crossing ? children.Any(c=>InRectangle(c,rect,true,baseWidth)) : children.All(c=>InRectangle(c,rect,false,baseWidth)));
+                return children.Length>0 && (crossing ? children.Any(c=>InRectangle(c,rect,true,baseWidth,interior)) : children.All(c=>InRectangle(c,rect,false,baseWidth,interior)));
             }
             float half=baseWidth<=0 || !shape.StrokeVisible ? 0 : StyleValidation.EffectiveWidth(baseWidth,shape.ThicknessMultiplier)/2;
             if (!crossing && (rect.Width<2*half || rect.Height<2*half)) return false;
-            if (crossing && new[] { new PointF(rect.Left,rect.Top), new PointF(rect.Right,rect.Top), new PointF(rect.Right,rect.Bottom), new PointF(rect.Left,rect.Bottom) }.Any(p => Interior(shape,p))) return true;
+            if (crossing && interior && new[] { new PointF(rect.Left,rect.Top), new PointF(rect.Right,rect.Top), new PointF(rect.Right,rect.Bottom), new PointF(rect.Left,rect.Bottom) }.Any(p => Interior(shape,p))) return true;
             rect.Inflate(crossing?half:-half,crossing?half:-half);
             var strokes = Strokes(shape).ToArray();
             if (strokes.Length == 0) return false;
@@ -157,7 +158,7 @@ namespace hopperdraw
                         var points = o.Shapes[i].GetPoints();
                         for (int j=0;j<points.Length;j++) if (GeometryUtilities.Distance(p,points[j]) <= 6 * o.CanvasScale) return (o,i,j);
                     }
-                    else if (AnnotationGeometry.Hit(o.Shapes[i],p,5*o.CanvasScale,o.LineThickness)) return (o,i,-1);
+                    else if (AnnotationGeometry.Hit(o.Shapes[i],p,5*o.CanvasScale,o.LineThickness,o.DrawOrder!=0)) return (o,i,-1);
                 }
             return (null,-1,-1);
         }
