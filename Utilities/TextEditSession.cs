@@ -28,7 +28,12 @@ namespace hopperdraw
             for (int i = 0; i < shapes.Count; i++)
             {
                 if (shapes[i].PersistentId == id) { shapes.RemoveAt(i); return true; }
-                if (shapes[i] is DrawShapeGroup g && Remove(g.Children, id)) return true;
+                if (shapes[i] is DrawShapeGroup g && Remove(g.Children, id))
+                {
+                    // A group emptied by deleting its last text would be invisible and unpickable but persist forever.
+                    if (g.Children.Count == 0) shapes.RemoveAt(i);
+                    return true;
+                }
             }
             return false;
         }

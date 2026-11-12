@@ -9,6 +9,7 @@ using Rhino.Geometry;
 
 internal static class TextTests
 {
+    [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern IntPtr SendMessage(IntPtr window,int message,IntPtr w,IntPtr l);
     private static TextShape Text(string value = "Hello world") => new TextShape { Anchor = new Point3d(20,20,0), Text = value };
     private static GH_LooseChunk Save(TextShape text)
     { var chunk = new GH_LooseChunk("Root"); ShapeSerializer.WriteShapeList(chunk,"Shapes",new DrawShape[]{text}); return chunk; }
@@ -17,7 +18,46 @@ internal static class TextTests
     private static ToolStripMenuItem Find(ToolStripItemCollection items,string name) => items.OfType<ToolStripMenuItem>().Single(i=>i.Text==name);
     internal static void Run()
     {
-        Program.Test("text v1 roundtrip includes independent glyph and box styles",()=>
+        Program.Test("review fixes: editor CRLF, narrow boxes, box width bounds and shared layout",()=>
+        {
+            // Existing multi-line text must open as separate editor lines (Win32 EDIT breaks only on CRLF).
+            Program.Check(CanvasAnnotationController.EditorText("a\nb\r\nc")=="a\r\nb\r\nc","editor text not CRLF");
+            using(var editor=new TextEditorControl{Text=CanvasAnnotationController.EditorText("alpha\nbeta\ngamma")})
+            {
+                var handle=editor.Handle; int lines=(int)SendMessage(handle,0xBA,IntPtr.Zero,IntPtr.Zero);
+                Program.Check(lines==3,"editor shows "+lines+" lines for three-line text");
+            }
+            // A jittered click (drag of a few units) becomes point text at the press, never a 1-unit sliver.
+            var draft=new AnnotationDraft(); var press=new Point3d(100,100,0);
+            draft.Down(5,press,new System.Drawing.Point(100,100),1,false,1); draft.Up(5,new Point3d(101,103,0),new System.Drawing.Point(101,103),false,new Size(4,4));
+            var narrow=new TextShape(); draft.TakePlacement().Fit(narrow);
+            Program.Check(narrow.BoxWidth==null && narrow.Anchor==press,"jittered click created a box: "+narrow.BoxWidth);
+            draft.Down(5,press,new System.Drawing.Point(100,100),1,false,1); draft.Up(5,new Point3d(300,140,0),new System.Drawing.Point(300,140),false,new Size(4,4));
+            var wide=new TextShape(); draft.TakePlacement().Fit(wide);
+            Program.Check(wide.BoxWidth==200 && wide.Anchor==press,"real drag lost its box");
+            // The width handle clamps to the minimum box and the coordinate budget.
+            var text=Text(); text.BoxWidth=200; text.MovePoint(0,new Point3d(text.Anchor.X-50,0,0));
+            Program.Check(text.BoxWidth==text.MinBoxWidth && text.MinBoxWidth>2*text.Layout.Padding,"width handle made a zero-content box");
+            text.MovePoint(0,new Point3d(9999999,0,0));
+            Program.Check(text.BoxWidth<=TextShape.MaxBoxWidth && ShapeSerializer.ValidCoordinate(text.Anchor.X+text.BoxWidth.Value),"width handle exceeded bounds");
+            // Oversized persisted widths stay opaque instead of loading an unpaintable live record.
+            foreach(double bad in new[]{1e30,TextShape.MaxBoxWidth*2})
+            {
+                var boxed=Text(); boxed.BoxWidth=100; var chunk=Save(boxed); var r=Record(chunk); r.RemoveItem("BoxWidth"); r.SetDouble("BoxWidth",bad);
+                Program.Check(Read(chunk) is OpaqueShape,"oversized BoxWidth "+bad+" loaded live");
+            }
+            var edge=Text(); edge.Anchor=new Point3d(9999990,0,0); edge.BoxWidth=50; var edgeChunk=Save(edge);
+            Program.Check(Read(edgeChunk) is OpaqueShape,"box right edge past the coordinate budget loaded live");
+            // Line layout is shared by content: a moved clone reuses it and is only re-positioned.
+            var source=Text("Shared layout\nacross clones"); source.BoxWidth=180; var first=source.Layout;
+            var clone=(TextShape)source.Clone(); clone.Move(37,11);
+            Program.Check(ReferenceEquals(clone.Layout.Lines,first.Lines) && Math.Abs(clone.Layout.Bounds.X-first.Bounds.X-37)<.001 && Math.Abs(clone.Layout.Bounds.Y-first.Bounds.Y-11)<.001,"clone re-measured or mispositioned");
+            Program.Check(ReferenceEquals(TextLayoutService.PaintFont(source),TextLayoutService.PaintFont(clone)),"paint font not cached");
+            // Deleting the last text of a group removes the empty group in the same transaction.
+            var owner=new HopperDraw(); var only=Text(); var g=new DrawShapeGroup(); g.Children.Add(only); var keep=new DrawShapeGroup(); keep.Children.Add(Text("keep")); keep.Children.Add(only.Clone());
+            owner.Shapes.Add(g); owner.Shapes.Add(keep); var doc=new object(); int records=0;
+            var s=new TextEditSession(owner,doc,only,false); s.Buffer=""; Program.Check(s.Commit(doc,true,n=>{records++;return true;}) && records==1 && owner.Shapes.Count==1 && owner.Shapes[0]==keep,"empty group survived");
+        });        Program.Test("text v1 roundtrip includes independent glyph and box styles",()=>
         {
             var owner = new HopperDraw(); var text=Text("αβ\nTitle   "); text.SetPreset(TextStylePreset.Title);
             text.SizeMultiplier=1.5; text.BoxWidth=230; text.Italic=true; text.TextColorOverride=Color.Blue;
@@ -101,7 +141,9 @@ internal static class TextTests
             Program.Check(AnnotationGeometry.Hit(text,centre,0,1) && !AnnotationGeometry.Hit(text,centre,0,1,false),"interior/backdrop rule wrong");
             Program.Check(AnnotationGeometry.Hit(text,new PointF(b.Left,b.Top+5),1,1,false),"backdrop edge not pickable");
             Program.Check(AnnotationGeometry.InRectangle(text,b,false) && !AnnotationGeometry.InRectangle(text,new RectangleF(b.Left,b.Top,b.Width-1,b.Height),false),"window ignores layout bounds");
-            Program.Check(AnnotationGeometry.InRectangle(text,new RectangleF(centre,new SizeF(1,1)),true,0,false),"crossing inside layout missed");
+            Program.Check(AnnotationGeometry.InRectangle(text,new RectangleF(centre,new SizeF(1,1)),true,0,true),"crossing inside overlay text missed");
+            Program.Check(!AnnotationGeometry.InRectangle(text,new RectangleF(centre,new SizeF(1,1)),true,0,false),"crossing wholly inside backdrop text selected it");
+            Program.Check(AnnotationGeometry.InRectangle(text,new RectangleF(b.Left-5,centre.Y,10,2),true,0,false),"crossing over backdrop text edge missed");
             var inner=new DrawShapeGroup();inner.Children.Add(text);var outer=new DrawShapeGroup();outer.Children.Add(inner);
             Program.Check(Math.Abs(outer.GetBoundingBox().Width-b.Width)<.001 && Math.Abs(outer.GetBoundingBox().Height-b.Height)<.001 && text.EditHandles.Length==1,"group bounds or width handle wrong: " + outer.GetBoundingBox() + " => " + b);
             text.Text+=" long extension";Program.Check(outer.GetBoundingBox().Width>b.Width,"text change did not invalidate bounds");
@@ -137,7 +179,7 @@ internal static class TextTests
             owner.Shapes=ShapeEditUndoAction.Snapshot(owner.Shapes);owner.Shapes[0].Move(50,40);
             Program.Check(session.Commit(doc,true,record) && records==1 && !session.Commit(doc,true,record),"changed edit not exactly once");
             var resolved=TextEditSession.Find(owner.Shapes,text.PersistentId);Program.Check(resolved.Text=="new text" && text.Text=="Hello world" && resolved.Anchor==new Point3d(70,60,0),"stale object written or geometry overwritten");
-            session=new TextEditSession(owner,doc,resolved,false);session.Buffer="  \r\n";Program.Check(session.Commit(doc,true,record) && records==2 && group.Children.Count==1 && ((DrawShapeGroup)owner.Shapes[0]).Children.Count==0,"clear did not delete exactly once");
+            session=new TextEditSession(owner,doc,resolved,false);session.Buffer="  \r\n";Program.Check(session.Commit(doc,true,record) && records==2 && group.Children.Count==1 && owner.Shapes.Count==0,"clear did not delete exactly once or left an empty group");
         });
         Program.Test("blank new text and aborted undo/document/owner edits record nothing",()=>
         {

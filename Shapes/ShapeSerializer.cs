@@ -281,7 +281,8 @@ namespace hopperdraw
                 reader.ItemExists("HasTextColor") && !reader.TryGetBoolean("HasTextColor", ref hasColor) ||
                 reader.ItemExists("TextColor") && !reader.TryGetInt32("TextColor", ref color) ||
                 hasWidth && !reader.ItemExists("BoxWidth") || hasColor && !reader.ItemExists("TextColor") ||
-                double.IsNaN(width) || double.IsInfinity(width) || width <= 0 || !TextShape.ValidSize(size) || preset < 0 || preset > 2)
+                hasWidth && !TextShape.ValidBox(anchor.X, width) || double.IsNaN(width) || double.IsInfinity(width) || width <= 0 ||
+                !TextShape.ValidSize(size) || preset < 0 || preset > 2)
                 throw new FormatException("Invalid text style or box width.");
             return new TextShape { Text = text, Anchor = anchor, BoxWidth = hasWidth ? width : (double?)null,
                 StylePreset = (TextStylePreset)preset, SizeMultiplier = size, Bold = bold, Italic = italic,

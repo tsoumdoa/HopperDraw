@@ -12,7 +12,13 @@ namespace hopperdraw
     {
         internal sealed class TextPlacement
         {
-            internal Point3d Anchor; internal double? Width;
+            internal Point3d Anchor, Press; internal double? Width;
+            // A drag narrower than the style's minimum box (padding + one em) is a jittered click: point text at the press.
+            internal void Fit(TextShape text)
+            {
+                if (Width.HasValue && Width.Value < text.MinBoxWidth) { Anchor = Press; Width = null; }
+                text.Anchor = Anchor; text.BoxWidth = Width.HasValue ? text.ClampBoxWidth(Width.Value) : (double?)null;
+            }
         }
         internal TextPlacement Placement { get; private set; }
         internal TextPlacement TakePlacement() { var result = Placement; Placement = null; return result; }
@@ -75,7 +81,7 @@ namespace hopperdraw
                 if (!_started || !Active) return null;
                 var a = Points[0]; bool box = Moved(_press, screen, threshold);
                 Cancel();
-                Placement = new TextPlacement { Anchor = box ? new Point3d(Math.Min(a.X,p.X),Math.Min(a.Y,p.Y),0) : a,
+                Placement = new TextPlacement { Press = a, Anchor = box ? new Point3d(Math.Min(a.X,p.X),Math.Min(a.Y,p.Y),0) : a,
                     Width = box ? (double?)Math.Max(1,Math.Abs(p.X-a.X)) : null };
                 return null;
             }

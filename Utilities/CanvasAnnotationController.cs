@@ -50,7 +50,8 @@ namespace hopperdraw
             var layout = shape.Layout;
             float zoom = (float)_canvas.Viewport.Zoom;
             var origin = _canvas.Viewport.ProjectPoint(new PointF(layout.Bounds.Left + layout.Padding, layout.Bounds.Top + layout.Padding));
-            _editor = new TextEditorControl { Text = shape.Text, WordWrap = shape.BoxWidth.HasValue,
+            // The model stores LF; a Win32 multiline EDIT control only breaks lines on CRLF.
+            _editor = new TextEditorControl { Text = EditorText(shape.Text), WordWrap = shape.BoxWidth.HasValue,
                 Font = TextLayoutService.Font(shape, zoom), ForeColor = shape.TextColorOverride ?? owner.BorderColor,
                 Location = new Point((int)Math.Ceiling(origin.X), (int)Math.Ceiling(origin.Y)),
                 Size = new Size(Math.Max(80, (int)Math.Min(10000, (layout.Bounds.Width - 2 * layout.Padding) * zoom + 12)),
@@ -101,12 +102,17 @@ namespace hopperdraw
             }
             finally { _endingText = false; }
         }
+        internal static string EditorText(string model) => TextShape.NormalizeNewlines(model).Replace("\n", "\r\n");
         public bool PreFilterMessage(ref Message m)
         {
             if (_text == null) return false;
-            if (!_text.Owner.Eligible || !ReferenceEquals(_text.Document,_canvas.Document) || !Owners.Contains(_text.Owner)) EndText(false);
-            else if ((m.Msg == 0x201 || m.Msg == 0x204 || m.Msg == 0x207 || m.Msg == 0x20b) && m.HWnd != _editor.Handle ||
-                m.Msg == 0x20a && m.HWnd == _canvas.Handle) EndText(true);
+            // Cheap identity checks on every message; the document scan (owner still present) only on presses/wheel,
+            // the only messages that can commit. Owner removal is also handled by CancelOwner/DocumentChanged.
+            if (!_text.Owner.Eligible || !ReferenceEquals(_text.Document,_canvas.Document)) { EndText(false); return false; }
+            bool press = m.Msg == 0x201 || m.Msg == 0x204 || m.Msg == 0x207 || m.Msg == 0x20b, wheel = m.Msg == 0x20a;
+            if (!press && !wheel) return false;
+            if (!Owners.Contains(_text.Owner)) EndText(false);
+            else if (press && m.HWnd != _editor.Handle || wheel && m.HWnd == _canvas.Handle) EndText(true);
             return false;
         }
         private void ViewportChanged(object sender, GH_CanvasViewportChangedEventArgs e) => EndText(true);

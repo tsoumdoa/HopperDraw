@@ -15,7 +15,7 @@ namespace hopperdraw
     }
 
     // Single canvas-unit layout for paint, picking, bounds, handles and editor placement.
-    // The cache key deliberately includes the anchor: moving a snapshot cannot retain old bounds.
+    // Per-shape positioned layouts are keyed on every layout field incl. the anchor; line layout is shared by content.
     internal static class TextLayoutService
     {
         internal const int MaxTextLength = 100000, MaxLines = 10000;
@@ -38,17 +38,41 @@ namespace hopperdraw
             var style = (shape.Bold && !semibold ? FontStyle.Bold : FontStyle.Regular) | (shape.Italic ? FontStyle.Italic : FontStyle.Regular);
             return new Font(family, Math.Max(.1f, Em(shape) * scale), style, GraphicsUnit.Pixel);
         }
+        // Paint-time typography is cached: fetched per paint (never stored in a layout), so clearing the cache
+        // can dispose fonts safely between paints. The canvas UI is single-threaded.
+        private static readonly Dictionary<(TextStylePreset, double, bool, bool), Font> Fonts = new Dictionary<(TextStylePreset, double, bool, bool), Font>();
+        private static readonly StringFormat PaintFormat = Format();
+        internal static int CachedFontCount => Fonts.Count;
+        internal static Font PaintFont(TextShape shape)
+        {
+            var key = (shape.StylePreset, shape.SizeMultiplier, shape.Bold, shape.Italic);
+            if (Fonts.TryGetValue(key, out var font)) return font;
+            if (Fonts.Count >= 128) { foreach (var f in Fonts.Values) f.Dispose(); Fonts.Clear(); }
+            font = Font(shape); Fonts[key] = font; return font;
+        }
         internal static StringFormat Format()
         {
             var format = (StringFormat)StringFormat.GenericTypographic.Clone();
             format.FormatFlags |= StringFormatFlags.MeasureTrailingSpaces | StringFormatFlags.NoWrap;
             return format;
         }
+        // Line breaking and size depend only on content and typography, never on the anchor. Drag/move snapshots
+        // clone shapes every frame, so the expensive measurement is shared by content and only positioned per shape.
+        private static readonly Dictionary<(string text, double? box, TextStylePreset preset, double size, bool bold, bool italic), TextLayout> Shared =
+            new Dictionary<(string, double?, TextStylePreset, double, bool, bool), TextLayout>();
+        internal static int SharedCount => Shared.Count;
         internal static TextLayout Get(TextShape shape)
         {
             var entry = Cache.GetValue(shape, _ => new Entry());
             if (entry.Key != null && entry.Key.SameText(shape)) return entry.Value;
-            entry.Value = Build(shape);
+            var key = (shape.Text ?? "", shape.BoxWidth, shape.StylePreset, shape.SizeMultiplier, shape.Bold, shape.Italic);
+            if (!Shared.TryGetValue(key, out var basis))
+            {
+                if (Shared.Count >= 512) Shared.Clear();
+                basis = Build(shape); Shared[key] = basis;
+            }
+            entry.Value = new TextLayout { Em = basis.Em, Padding = basis.Padding, LineHeight = basis.LineHeight, Lines = basis.Lines,
+                Bounds = new RectangleF((float)shape.Anchor.X, (float)shape.Anchor.Y, basis.Bounds.Width, basis.Bounds.Height) };
             entry.Key = new TextShape { Text = shape.Text, Anchor = shape.Anchor, BoxWidth = shape.BoxWidth };
             shape.CopyTextStyleTo(entry.Key);
             return entry.Value;
@@ -120,8 +144,7 @@ namespace hopperdraw
                 if (shape.BoxWidth.HasValue)
                     g.SetClip(new RectangleF(layout.Bounds.X + layout.Padding, layout.Bounds.Y + layout.Padding,
                         Math.Max(0, layout.Bounds.Width - 2 * layout.Padding), layout.Bounds.Height - 2 * layout.Padding), System.Drawing.Drawing2D.CombineMode.Intersect);
-                using (var font = Font(shape))
-                using (var format = Format())
+                var font = PaintFont(shape); var format = PaintFormat;
                 using (var brush = new SolidBrush(greek ? Color.FromArgb((shape.TextColorOverride ?? basis).A, Color.Gray) : shape.TextColorOverride ?? basis))
                 {
                     var clip = g.VisibleClipBounds;

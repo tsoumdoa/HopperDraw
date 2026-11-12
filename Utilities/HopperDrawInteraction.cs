@@ -34,9 +34,11 @@ namespace hopperdraw
             if (_pressedHandled || e.Button != _press.Button) return GH_ObjectResponse.Handled;
             _pressedHandled=true;
             if (_context) return GH_ObjectResponse.Handled;
-            if (e.Clicks > 1 && _owner != null)
+            // In drawing mode a double-click finishes an open polyline/curve draft; it only edits text
+            // under the pointer with the Text tool or when no draft is active.
+            if (e.Clicks > 1 && _owner != null && (_drawing == null || _drawing.DrawMode == 5 || !_drawing.Draft.Active))
             {
-                var target = TextAt(_owner.Shapes[_shape], e.CanvasLocation);
+                var target = TextAt(_owner.Shapes[_shape], e.CanvasLocation, 5 * _owner.CanvasScale, _owner.DrawOrder != 0);
                 if (target != null) { _done = true; _controller.BeginText(_owner, target, false); return GH_ObjectResponse.Release; }
             }
             if (_drawing != null)
@@ -89,9 +91,9 @@ namespace hopperdraw
         }
         public override GH_ObjectResponse RespondToMouseDoubleClick(GH_Canvas sender, GH_CanvasMouseEvent e)
         {
-            if (!_done && !_context && _owner != null)
+            if (!_done && !_context && _owner != null && (_drawing == null || _drawing.DrawMode == 5 || !_drawing.Draft.Active))
             {
-                var text = TextAt(_owner.Shapes[_shape], e.CanvasLocation);
+                var text = TextAt(_owner.Shapes[_shape], e.CanvasLocation, 5 * _owner.CanvasScale, _owner.DrawOrder != 0);
                 if (text != null) { _done = true; _controller.BeginText(_owner,text,false); return GH_ObjectResponse.Release; }
             }
             return GH_ObjectResponse.Handled;
@@ -117,7 +119,7 @@ namespace hopperdraw
                 var placement = _drawing.Draft.TakePlacement();
                 if (placement != null)
                 {
-                    var text = new TextShape { Anchor = placement.Anchor, BoxWidth = placement.Width }; _drawing.ApplyPen(text);
+                    var text = new TextShape(); _drawing.ApplyPen(text); placement.Fit(text);
                     _controller.PlaceTextAfterRelease(_drawing,text);
                 }
             }
@@ -141,10 +143,11 @@ namespace hopperdraw
             if (_autoPan) { m_canvas.StopAutoPan(); _autoPan=false; }
             Instances.CursorServer.ResetCursor(m_canvas); base.Destroy();
         }
-        private static TextShape TextAt(DrawShape shape, PointF point)
+        // Same tolerance and backdrop rule as picking, so any text that can be picked can be double-click edited.
+        internal static TextShape TextAt(DrawShape shape, PointF point, float tolerance, bool interior)
         {
-            if (shape is TextShape text && AnnotationGeometry.Hit(text,point,0,0)) return text;
-            if (shape is DrawShapeGroup group) return group.Children.AsEnumerable().Reverse().Select(c=>TextAt(c,point)).FirstOrDefault(t=>t!=null);
+            if (shape is TextShape text && AnnotationGeometry.Hit(text,point,tolerance,0,interior)) return text;
+            if (shape is DrawShapeGroup group) return group.Children.AsEnumerable().Reverse().Select(c=>TextAt(c,point,tolerance,interior)).FirstOrDefault(t=>t!=null);
             return null;
         }
         private static Point3d Point(PointF p)=>new Point3d(p.X,p.Y,0);

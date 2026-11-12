@@ -36,8 +36,18 @@ namespace hopperdraw
         internal override RectangleF LayoutBounds => Layout.Bounds;
         internal override PointF[] EditHandles => new[] { new PointF(Layout.Bounds.Right, Layout.Bounds.Top + Layout.Bounds.Height / 2) };
         public override void Move(double dx, double dy) { Anchor = new Point3d(Anchor.X + dx, Anchor.Y + dy, 0); }
+        // A box must fit its padding plus at least one em of content, or glyphs are clipped away entirely.
+        internal double MinBoxWidth => 1.8 * TextLayoutService.Em(this);
+        internal const double MaxBoxWidth = 1000000;
+        internal static bool ValidBox(double anchorX, double width) =>
+            !double.IsNaN(width) && !double.IsInfinity(width) && width > 0 && width <= MaxBoxWidth && ShapeSerializer.ValidCoordinate(anchorX + width);
+        internal double ClampBoxWidth(double width)
+        {
+            double max = Math.Min(MaxBoxWidth, 10000000 - Anchor.X);
+            return Math.Max(Math.Min(MinBoxWidth, max), Math.Min(max, width));
+        }
         public override void MovePoint(int pointIndex, Point3d newPos)
-        { if (pointIndex == 0 && ShapeSerializer.ValidCoordinate(newPos.X)) BoxWidth = Math.Max(1, newPos.X - Anchor.X); }
+        { if (pointIndex == 0 && ShapeSerializer.ValidCoordinate(newPos.X)) BoxWidth = ClampBoxWidth(newPos.X - Anchor.X); }
         public override (bool hit, int pointIndex) HitTest(PointF pt, float tolerance, float thickness) =>
             (AnnotationGeometry.HitLeaf(this, pt, tolerance, thickness), -1);
         public override void Render(Graphics g, Pen pen, float thickness) => ShapeRenderer.Render(g, this, pen.Color, thickness);

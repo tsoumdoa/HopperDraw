@@ -125,7 +125,10 @@ namespace hopperdraw
             if (shape is TextShape)
             {
                 var bounds = shape.LayoutBounds; bounds.Inflate(half, half);
-                return crossing ? rect.IntersectsWith(bounds) || rect.Contains(bounds) : rect.Contains(bounds);
+                if (!crossing) return rect.Contains(bounds);
+                if (!rect.IntersectsWith(bounds) && !rect.Contains(bounds)) return false;
+                // Backdrop layer: a crossing window lying wholly inside the box does not touch its edges.
+                return interior || !(rect.Left > bounds.Left && rect.Right < bounds.Right && rect.Top > bounds.Top && rect.Bottom < bounds.Bottom);
             }
             if (!crossing && (rect.Width<2*half || rect.Height<2*half)) return false;
             if (crossing && interior && new[] { new PointF(rect.Left,rect.Top), new PointF(rect.Right,rect.Top), new PointF(rect.Right,rect.Bottom), new PointF(rect.Left,rect.Bottom) }.Any(p => Interior(shape,p))) return true;
