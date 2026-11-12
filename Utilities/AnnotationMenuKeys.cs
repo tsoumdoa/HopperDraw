@@ -58,14 +58,17 @@ namespace hopperdraw
             foreach(char c in "1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ") if(used.Add(c)) return name+" (&"+c+")";
             throw new InvalidOperationException("No mnemonic available for "+name);
         }
-        private static readonly HashSet<ToolStrip> Tracked = new HashSet<ToolStrip>();
+        // Weak: GH only hides dismissed component menus, so a strong set would retain every menu ever opened.
+        // Strong references live only in Open, and only while a menu is visible.
+        private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<ToolStrip,object> Tracked = new System.Runtime.CompilerServices.ConditionalWeakTable<ToolStrip,object>();
         // Visibility tracking only: any menu that hosts HopperDraw items (including GH's own component menu,
         // whose renderer we never touch) counts as open, so menu keys win over canvas commands while it shows.
         internal static void Track(ToolStrip menu)
         {
-            if(menu==null || !Tracked.Add(menu)) return;
+            if(menu==null || Tracked.TryGetValue(menu,out _)) return;
+            Tracked.Add(menu,null);
             menu.VisibleChanged+=(s,e)=>{ if(menu.Visible) Open.Add(menu); else Open.Remove(menu); };
-            menu.Disposed+=(s,e)=>{ Open.Remove(menu); Tracked.Remove(menu); };
+            menu.Disposed+=(s,e)=>Open.Remove(menu);
             if(menu.Visible) Open.Add(menu);
         }
         internal static void Configure(ToolStrip menu)
