@@ -277,8 +277,9 @@ namespace hopperdraw
         private void Message(int message, MouseEventArgs e, bool after)
         {
             try { RouteMessage(message, e, after); }
-            catch (Exception)
+            catch (Exception ex)
             {
+                System.Diagnostics.Debug.WriteLine("HopperDraw input skipped: " + ex);
                 _releasing = false; _window = null; _prePress = null;
                 EndFollow(true); ResetCursor();
             }
@@ -458,7 +459,7 @@ namespace hopperdraw
         private void Hover(object sender, MouseEventArgs e)
         {
             try { UpdateHover(sender, e); }
-            catch (Exception) { ResetCursor(); }
+            catch (Exception ex) { System.Diagnostics.Debug.WriteLine("HopperDraw hover skipped: " + ex); ResetCursor(); }
         }
         private void UpdateHover(object sender, MouseEventArgs e)
         {
