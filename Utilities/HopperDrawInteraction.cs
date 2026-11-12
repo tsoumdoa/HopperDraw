@@ -19,6 +19,9 @@ namespace hopperdraw
         private readonly bool _context;
         private AnnotationMove _move;
         private bool _done, _moving, _autoPan, _pressedHandled;
+        // Captured at press, before mouse-down can finish a polyline/curve draft: a double-click that finishes
+        // an open draft over a text label must never also open the text editor.
+        private readonly bool _textEditAllowed;
         // The last context menu stays alive until the next one opens, so a modal "Custom..." colour dialog
         // opened from a menu item never runs inside a disposed menu.
         private static ContextMenuStrip _lastMenu;
@@ -27,6 +30,7 @@ namespace hopperdraw
         {
             _controller=controller; _owner=owner; _shape=shape; _handle=handle; _drawing=drawing; _press=e;
             _context=e.Button==MouseButtons.Right;
+            _textEditAllowed=drawing == null || drawing.DrawMode == 5 || !drawing.Draft.Active;
         }
         public override bool DeactivateOnFocusLoss => !_done;
         public override GH_ObjectResponse RespondToMouseDown(GH_Canvas sender, GH_CanvasMouseEvent e)
@@ -36,9 +40,9 @@ namespace hopperdraw
             if (_context) return GH_ObjectResponse.Handled;
             // In drawing mode a double-click finishes an open polyline/curve draft; it only edits text
             // under the pointer with the Text tool or when no draft is active.
-            if (e.Clicks > 1 && _owner != null && (_drawing == null || _drawing.DrawMode == 5 || !_drawing.Draft.Active))
+            if (e.Clicks > 1 && _owner != null && _textEditAllowed)
             {
-                var target = TextAt(_owner.Shapes[_shape], e.CanvasLocation, 5 * _owner.CanvasScale, _owner.DrawOrder != 0);
+                var target = TextAt(_owner.Shapes[_shape], e.CanvasLocation, 5 * _owner.CanvasScale, _owner.LineThickness, _owner.DrawOrder != 0);
                 if (target != null) { _done = true; _controller.BeginText(_owner, target, false); return GH_ObjectResponse.Release; }
             }
             if (_drawing != null)
@@ -91,9 +95,9 @@ namespace hopperdraw
         }
         public override GH_ObjectResponse RespondToMouseDoubleClick(GH_Canvas sender, GH_CanvasMouseEvent e)
         {
-            if (!_done && !_context && _owner != null && (_drawing == null || _drawing.DrawMode == 5 || !_drawing.Draft.Active))
+            if (!_done && !_context && _owner != null && _textEditAllowed)
             {
-                var text = TextAt(_owner.Shapes[_shape], e.CanvasLocation, 5 * _owner.CanvasScale, _owner.DrawOrder != 0);
+                var text = TextAt(_owner.Shapes[_shape], e.CanvasLocation, 5 * _owner.CanvasScale, _owner.LineThickness, _owner.DrawOrder != 0);
                 if (text != null) { _done = true; _controller.BeginText(_owner,text,false); return GH_ObjectResponse.Release; }
             }
             return GH_ObjectResponse.Handled;
@@ -144,10 +148,10 @@ namespace hopperdraw
             Instances.CursorServer.ResetCursor(m_canvas); base.Destroy();
         }
         // Same tolerance and backdrop rule as picking, so any text that can be picked can be double-click edited.
-        internal static TextShape TextAt(DrawShape shape, PointF point, float tolerance, bool interior)
+        internal static TextShape TextAt(DrawShape shape, PointF point, float tolerance, float baseWidth, bool interior)
         {
-            if (shape is TextShape text && AnnotationGeometry.Hit(text,point,tolerance,0,interior)) return text;
-            if (shape is DrawShapeGroup group) return group.Children.AsEnumerable().Reverse().Select(c=>TextAt(c,point,tolerance,interior)).FirstOrDefault(t=>t!=null);
+            if (shape is TextShape text && AnnotationGeometry.Hit(text,point,tolerance,baseWidth,interior)) return text;
+            if (shape is DrawShapeGroup group) return group.Children.AsEnumerable().Reverse().Select(c=>TextAt(c,point,tolerance,baseWidth,interior)).FirstOrDefault(t=>t!=null);
             return null;
         }
         private static Point3d Point(PointF p)=>new Point3d(p.X,p.Y,0);

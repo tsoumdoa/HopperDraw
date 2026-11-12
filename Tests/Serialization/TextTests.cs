@@ -53,6 +53,10 @@ internal static class TextTests
             var clone=(TextShape)source.Clone(); clone.Move(37,11);
             Program.Check(ReferenceEquals(clone.Layout.Lines,first.Lines) && Math.Abs(clone.Layout.Bounds.X-first.Bounds.X-37)<.001 && Math.Abs(clone.Layout.Bounds.Y-first.Bounds.Y-11)<.001,"clone re-measured or mispositioned");
             Program.Check(ReferenceEquals(TextLayoutService.PaintFont(source),TextLayoutService.PaintFont(clone)),"paint font not cached");
+            // Double-click editing reaches the same outer stroke band that picking does, including inside groups.
+            var bordered=Text("Bordered"); bordered.StrokeVisible=true; bordered.ThicknessMultiplier=5; var lb=bordered.LayoutBounds;
+            var outer=new PointF(lb.Left-15,lb.Top+lb.Height/2); var wrap=new DrawShapeGroup(); wrap.Children.Add(bordered);
+            Program.Check(AnnotationGeometry.Hit(bordered,outer,5,8) && HopperDrawInteraction.TextAt(wrap,outer,5,8,true)==bordered,"thick border pickable but not editable");
             // Deleting the last text of a group removes the empty group in the same transaction.
             var owner=new HopperDraw(); var only=Text(); var g=new DrawShapeGroup(); g.Children.Add(only); var keep=new DrawShapeGroup(); keep.Children.Add(Text("keep")); keep.Children.Add(only.Clone());
             owner.Shapes.Add(g); owner.Shapes.Add(keep); var doc=new object(); int records=0;
