@@ -15,7 +15,7 @@ internal static class CanvasMenuTests
     {
         var o=new HopperDraw(); o.Shapes.Add(new LineShape(new Point3d(0,0,0),new Point3d(100,0,0))); o.SelectedShapeIndices.Add(0); return o;
     }
-    private static ToolStripMenuItem Find(ToolStripItemCollection items,string name)=>items.OfType<ToolStripMenuItem>().Single(i=>i.Text==name);
+    private static ToolStripMenuItem Find(ToolStripItemCollection items,string name)=>items.OfType<ToolStripMenuItem>().Single(i=>i.Name==name);
     internal static void Run()
     {
         Program.Test("selection menu checks uniform styles and exposes explicit line types",()=>

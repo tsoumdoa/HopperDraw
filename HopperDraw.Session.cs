@@ -33,7 +33,7 @@ namespace hopperdraw
         internal readonly DrawShape PenStyle = new LineShape();
         internal SmoothingLevel Smoothing = SmoothingLevel.Medium;
         internal string PenNotice;
-        internal DateTime PenNoticeUntil;
+        internal void ShowNotice(string text) { PenNotice=text; _annotationController?.Notice(text); Redraw(); }
         internal void ApplyPen(DrawShape shape)
         {
             if (shape is TextShape text) { TextPen.CopyStyleTo(text); TextPen.CopyTextStyleTo(text); return; }
@@ -52,7 +52,7 @@ namespace hopperdraw
             ApplyPen(shape);
             if (!shape.HasPaint(BorderColor))
             {
-                PenNotice="Shape has no visible paint"; PenNoticeUntil=DateTime.UtcNow.AddSeconds(3); Redraw(); return;
+                ShowNotice("Shape has no visible paint"); return;
             }
             if (!RecordShapeUndo("Create annotation")) return;
             Shapes.Add(shape); Changed();
@@ -74,7 +74,7 @@ namespace hopperdraw
             var param = (Param_Integer)Params.Input[2];
             param.RecordUndoEvent("HopperDraw: Change drawing tool");
             param.PersistentData.Clear(); param.PersistentData.Append(new GH_Integer(mode));
-            CancelGesture(); _drawMode = mode; param.ExpireSolution(false); ExpireSolution(true);
+            CancelGesture(); _drawMode = mode; param.ExpireSolution(false); ExpireSolution(true); Redraw();
         }
     }
 }

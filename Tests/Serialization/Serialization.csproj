@@ -8,18 +8,24 @@
     <ShouldRemoveRhinoReferences>false</ShouldRemoveRhinoReferences>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Remove="MenuCursorHudTests.cs" />
+    <Compile Include="MenuCursorHudTests.cs" />
     <Compile Include="../../Enums/*.cs" Link="Enums/%(Filename)%(Extension)" />
     <Compile Include="../../HopperDraw.Session.cs" Link="HopperDraw.Session.cs" />
     <Compile Include="../../HopperDraw.cs" Link="HopperDraw.cs" />
     <Compile Include="../../HopperDrawUIAttributes.cs" Link="HopperDrawUIAttributes.cs" />
     <Compile Include="../../Shapes/*.cs" Link="Shapes/%(Filename)%(Extension)" />
-    <Compile Include="../../Utilities/*.cs" Exclude="../../Utilities/FreehandStroke.cs;../../Utilities/HatchRenderer.cs;../../Utilities/TextLayoutService.cs;../../Utilities/TextEditSession.cs;../../Utilities/TextEditorControl.cs;../../Utilities/ToolShortcut.cs" Link="Utilities/%(Filename)%(Extension)" />
+    <Compile Include="../../Utilities/*.cs" Exclude="../../Utilities/AnnotationMenuKeys.cs;../../Utilities/ToolGlyph.cs;../../Utilities/DrawingCursorCache.cs;../../Utilities/AnnotationHintClock.cs;../../Utilities/FreehandStroke.cs;../../Utilities/HatchRenderer.cs;../../Utilities/TextLayoutService.cs;../../Utilities/TextEditSession.cs;../../Utilities/TextEditorControl.cs;../../Utilities/ToolShortcut.cs" Link="Utilities/%(Filename)%(Extension)" />
     <Compile Include="../../Utilities/FreehandStroke.cs" Link="Utilities/FreehandStroke.cs" />
     <Compile Include="../../Utilities/HatchRenderer.cs" Link="Utilities/HatchRenderer.cs" />
     <Compile Include="../../Utilities/TextLayoutService.cs" Link="Utilities/TextLayoutService.cs" />
     <Compile Include="../../Utilities/TextEditSession.cs" Link="Utilities/TextEditSession.cs" />
     <Compile Include="../../Utilities/TextEditorControl.cs" Link="Utilities/TextEditorControl.cs" />
     <Compile Include="../../Utilities/ToolShortcut.cs" Link="Utilities/ToolShortcut.cs" />
+    <Compile Include="../../Utilities/AnnotationMenuKeys.cs" Link="Utilities/AnnotationMenuKeys.cs" />
+    <Compile Include="../../Utilities/ToolGlyph.cs" Link="Utilities/ToolGlyph.cs" />
+    <Compile Include="../../Utilities/DrawingCursorCache.cs" Link="Utilities/DrawingCursorCache.cs" />
+    <Compile Include="../../Utilities/AnnotationHintClock.cs" Link="Utilities/AnnotationHintClock.cs" />
     <PackageReference Include="Grasshopper" Version="8.0.23304.9001" />
     <!-- Grasshopper's GUI resources need this outside Rhino (attributes render test). -->
     <PackageReference Include="System.Resources.Extensions" Version="4.6.0" />

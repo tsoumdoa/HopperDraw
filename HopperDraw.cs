@@ -619,6 +619,7 @@ namespace hopperdraw
             _drawingModeEnabled = true;
             _capturingOwner = this;
             _canvas.Focus();
+            _annotationController?.FeedbackChanged();
             _canvas.Invalidate();
         }
 
@@ -1587,6 +1588,7 @@ namespace hopperdraw
 
         private void RequestCanvasRedraw()
         {
+            _annotationController?.FeedbackChanged();
             var canvas = _canvas ?? Instances.ActiveCanvas;
             if (canvas != null && ReferenceEquals(canvas.Document, OnPingDocument())) canvas.Invalidate();
         }

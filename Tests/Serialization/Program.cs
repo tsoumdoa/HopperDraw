@@ -251,6 +251,7 @@ internal static class Program
         ReliabilityTests.Run();
         Review2Tests.Run();
         CanvasMenuTests.Run();
+        MenuCursorHudTests.Run();
         FillHatchTests.Run();
         TextTests.Run();
         return Finish();

@@ -89,7 +89,7 @@ namespace hopperdraw
                     { if (Math.Abs(delta.X)>=Math.Abs(delta.Y)) delta.Y=0; else delta.X=0; }
                     _move.Translate(new PointF((float)delta.X,(float)delta.Y),true);
                 }
-                Instances.CursorServer.AttachCursor(sender,"GH_HandClosed");
+                _controller.AssignCursor(Instances.CursorServer.Cursor("GH_HandClosed"));
             }
             sender.Invalidate(); return GH_ObjectResponse.Handled;
         }
@@ -145,7 +145,8 @@ namespace hopperdraw
         {
             Cancel();
             if (_autoPan) { m_canvas.StopAutoPan(); _autoPan=false; }
-            Instances.CursorServer.ResetCursor(m_canvas); base.Destroy();
+            _controller?.ResetCursor(); base.Destroy();
+            if(_controller!=null && !m_canvas.IsDisposed && m_canvas.IsHandleCreated) m_canvas.BeginInvoke(new Action(_controller.RefreshCursor));
         }
         // Same tolerance and backdrop rule as picking, so any text that can be picked can be double-click edited.
         internal static TextShape TextAt(DrawShape shape, PointF point, float tolerance, float baseWidth, bool interior)

@@ -15,7 +15,7 @@ internal static class TextTests
     { var chunk = new GH_LooseChunk("Root"); ShapeSerializer.WriteShapeList(chunk,"Shapes",new DrawShape[]{text}); return chunk; }
     private static DrawShape Read(GH_LooseChunk chunk) => ShapeSerializer.ReadShapeList(chunk,"Shapes",out _)[0];
     private static GH_Chunk Record(GH_LooseChunk chunk) => (GH_Chunk)chunk.FindChunk("Shapes").FindChunk("Shape",0);
-    private static ToolStripMenuItem Find(ToolStripItemCollection items,string name) => items.OfType<ToolStripMenuItem>().Single(i=>i.Text==name);
+    private static ToolStripMenuItem Find(ToolStripItemCollection items,string name) => items.OfType<ToolStripMenuItem>().Single(i=>i.Name==name);
     internal static void Run()
     {
         Program.Test("review fixes: editor CRLF, narrow boxes, box width bounds and shared layout",()=>

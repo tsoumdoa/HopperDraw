@@ -61,6 +61,7 @@ namespace hopperdraw
             _editor.TextChanged += EditorTextChanged;
             _canvas.Controls.Add(_editor); _editor.BringToFront(); _editor.Focus(); _editor.SelectAll();
             Application.AddMessageFilter(this);
+            FeedbackChanged(); _canvas.Invalidate();
         }
         private void EditorTextChanged(object sender, EventArgs e)
         {
@@ -97,7 +98,7 @@ namespace hopperdraw
                     _canvas.Controls.Remove(editor);
                     if (!_canvas.IsDisposed && _canvas.IsHandleCreated) _canvas.BeginInvoke(new Action(() => { var font = editor.Font; editor.Dispose(); font.Dispose(); }));
                     else { var font = editor.Font; editor.Dispose(); font.Dispose(); }
-                    _hook.Reset(); session.Owner.ResetTextKeys(); _canvas.Invalidate();
+                    _hook.Reset(); session.Owner.ResetTextKeys(); FeedbackChanged(); _canvas.Invalidate();
                 }
             }
             finally { _endingText = false; }
@@ -129,6 +130,36 @@ namespace hopperdraw
         private readonly HashSet<Guid> _seen = new HashSet<Guid>();
         private HashSet<IGH_DocumentObject> _prePress;
         private Cursor _ownedCursor;
+        private bool _refreshingCursor;
+        private readonly DrawingCursorCache _cursors = new DrawingCursorCache();
+        private readonly AnnotationHintClock _hints;
+        internal void Notice(string text) { _hints.Update(DrawingOwner,DrawingOwner?.DrawMode??-1,DrawingOwner?.Draft.Active==true || _text!=null); _hints.Notice(text); }
+        internal void FeedbackChanged()
+        {
+            var owner=DrawingOwner;
+            _hints.Update(owner,owner?.DrawMode??-1,owner?.Draft.Active==true || _text!=null);
+            RefreshCursor();
+        }
+        private void DpiChanged(object sender,EventArgs e) { FeedbackChanged(); _canvas.Invalidate(); }
+        internal void AssignCursor(Cursor cursor) { _ownedCursor=cursor; _canvas.Cursor=cursor; }
+        internal void ResetCursor()
+        {
+            if(_ownedCursor==null) return;
+            if(ReferenceEquals(_canvas.Cursor,_ownedCursor))
+            {
+                // A disposed canvas can still hold the Cursor object; detach before freeing its native handle.
+                if(_canvas.IsDisposed) _canvas.Cursor=Cursors.Default;
+                else { Instances.CursorServer.ResetCursor(_canvas); if(ReferenceEquals(_canvas.Cursor,_ownedCursor)) _canvas.Cursor=Cursors.Default; }
+            }
+            _ownedCursor=null;
+        }
+        internal void RefreshCursor()
+        {
+            if(_refreshingCursor || _cursors.IsDisposed || _canvas.IsDisposed || !_canvas.IsHandleCreated) return;
+            _refreshingCursor=true;
+            try { var p=_canvas.PointToClient(Control.MousePosition); Hover(_canvas,new MouseEventArgs(MouseButtons.None,0,p.X,p.Y,0)); }
+            finally { _refreshingCursor=false; }
+        }
         private const GH_RelevantObjectFilter NativeFilter = GH_RelevantObjectFilter.Attributes | GH_RelevantObjectFilter.Grips;
         internal IEnumerable<HopperDraw> Owners => _canvas.Document?.Objects.OfType<HopperDraw>().Where(o => o.Eligible) ?? Enumerable.Empty<HopperDraw>();
         internal HopperDraw DrawingOwner => Owners.FirstOrDefault(o => o.DrawingModeEnabled);
@@ -141,6 +172,7 @@ namespace hopperdraw
         private CanvasAnnotationController(GH_Canvas canvas)
         {
             _canvas = canvas;
+            _hints = new AnnotationHintClock(() => { if(!_canvas.IsDisposed) { FeedbackChanged(); _canvas.Invalidate(); } });
             _hook = CanvasDrawingShortcut.Register(canvas, () => false, () => {});
             _hook.Mouse = Message; _hook.Command = Command; _hook.Lost = Lost;
             canvas.DocumentChanged += DocumentChanged;
@@ -148,6 +180,7 @@ namespace hopperdraw
             ObserveTextDocument();
             canvas.Disposed += Disposed;
             canvas.MouseMove += Hover;
+            canvas.DpiChangedAfterParent += DpiChanged;
             canvas.KeyDown += NativeKey; canvas.KeyUp += NativeKey;
             canvas.CanvasPrePaintGroups += SyncPaint;
             canvas.CanvasPostPaintOverlay += PaintHud;
@@ -163,7 +196,8 @@ namespace hopperdraw
             _canvas.ViewportChanged -= ViewportChanged; _canvas.DocumentChanged -= DocumentChanged; _canvas.MouseMove -= Hover;
             _canvas.KeyDown -= NativeKey; _canvas.KeyUp -= NativeKey;
             _canvas.CanvasPrePaintGroups -= SyncPaint; _canvas.CanvasPostPaintOverlay -= PaintHud;
-            if (!_canvas.IsDisposed) Instances.CursorServer.ResetCursor(_canvas);
+            _canvas.DpiChangedAfterParent -= DpiChanged;
+            ResetCursor(); _cursors.Dispose(); _hints.Dispose();
         }
         private void Disposed(object sender, EventArgs e)
         { foreach (var owner in _registered.ToArray()) Remove(owner); }
@@ -336,7 +370,7 @@ namespace hopperdraw
             if (toolOwner != null && Control.MouseButtons == MouseButtons.None && _canvas.Focused && !CanvasDrawingShortcut.MenuActive &&
                 (_canvas.ActiveInteraction == null || _canvas.ActiveInteraction is HopperDrawInteraction) &&
                 ToolShortcut.Route(data, toolOwner.DrawMode, toolOwner.Params.Input[2].SourceCount > 0,
-                    toolOwner.SetTool, () => { toolOwner.PenNotice = "Disconnect M to switch tools"; toolOwner.PenNoticeUntil = DateTime.UtcNow.AddSeconds(3); _canvas.Invalidate(); })) return true;
+                    toolOwner.SetTool, () => Notice("Disconnect M to switch tools"))) return true;
             if (_canvas.ActiveInteraction is HopperDrawInteraction active)
             { if (key == Keys.Escape) { active.Cancel(true); _canvas.ActiveInteraction = null; return true; } return false; }
             if (_canvas.ActiveInteraction != null) return false;
@@ -381,12 +415,20 @@ namespace hopperdraw
             if (_canvas.ActiveInteraction != null || _canvas.ActiveObject != null || _canvas.ActiveWidget != null) return;
             var previous = Owners.ToDictionary(o=>o,o=>(o.HoveredShapeIndex,o.HoveredPointIndex));
             foreach (var owner in previous.Keys) { owner.HoveredShapeIndex=-1; owner.HoveredPointIndex=-1; }
-            string cursor = null;
+            Cursor cursor = null;
             var drawing = DrawingOwner;
             if (Eligible(e.Location))
             {
                 var p = _canvas.Viewport.UnprojectPoint(e.Location);
-                if (drawing != null) { if (!OverNative(_canvas.Document,p)) cursor = "GH_Pencil"; } // A press always draws.
+                if (drawing != null)
+                {
+                    if (!OverNative(_canvas.Document,p))
+                    {
+                        var textHit=drawing.DrawMode==5 ? Hit(p,false) : default;
+                        bool text=textHit.owner!=null && ContainsTextAt(textHit.owner.Shapes[textHit.shape],p);
+                        cursor=text ? Cursors.IBeam : _cursors.Get(drawing.DrawMode,_canvas.DeviceDpi);
+                    }
+                } // A press always draws.
                 else
                 {
                     var hit = Hit(p,true);
@@ -394,16 +436,17 @@ namespace hopperdraw
                     if (hit.owner != null)
                     {
                         hit.owner.HoveredShapeIndex=hit.shape; hit.owner.HoveredPointIndex=hit.handle;
-                        cursor = hit.handle >= 0 ? "" : "GH_HandOpen";
+                        cursor = hit.handle >= 0 ? Cursors.SizeAll : Instances.CursorServer.Cursor("GH_HandOpen");
                     }
                 }
             }
             // Only touch the cursor for HopperDraw targets; GH's own wire/slider/selection cursors stay intact.
             // GH's MouseMove runs first and may already have assigned its own cursor; never reset that one.
-            if (cursor != null) { _ownedCursor = cursor == "" ? Cursors.SizeAll : Instances.CursorServer.Cursor(cursor); _canvas.Cursor = _ownedCursor; }
-            else if (_ownedCursor != null) { if (ReferenceEquals(_canvas.Cursor,_ownedCursor)) Instances.CursorServer.ResetCursor(_canvas); _ownedCursor = null; }
-            if (drawing != null || previous.Any(pair=>pair.Value != (pair.Key.HoveredShapeIndex,pair.Key.HoveredPointIndex))) _canvas.Invalidate();
+            if (cursor != null) AssignCursor(cursor);
+            else ResetCursor();
+            if (!_refreshingCursor && (drawing != null || previous.Any(pair=>pair.Value != (pair.Key.HoveredShapeIndex,pair.Key.HoveredPointIndex)))) _canvas.Invalidate();
         }
-        private void PaintHud(GH_Canvas canvas) { AnnotationFeedback.Hud(canvas,DrawingOwner); }
+        private static bool ContainsTextAt(DrawShape shape,PointF p) => shape is TextShape text && AnnotationGeometry.Hit(text,p,0,0) || shape is DrawShapeGroup group && group.Children.Any(c=>ContainsTextAt(c,p));
+        private void PaintHud(GH_Canvas canvas) { FeedbackChanged(); AnnotationFeedback.Hud(canvas,DrawingOwner,_hints,_text!=null); }
     }
 }

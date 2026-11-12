@@ -149,6 +149,28 @@ internal static class Program
                 {
                     canvas.Focus();
                     Check(canvas.Focused, "Canvas could not acquire keyboard focus");
+                    Run("plain menu mnemonic opens submenu and activates while canvas commands yield", () =>
+                    {
+                        int commands=0, clicks=0;
+                        using(var registration=CanvasDrawingShortcut.Register(canvas,()=>true,()=>_activatedA++))
+                        using(var menu=new ContextMenuStrip())
+                        {
+                            registration.Command=k=>{commands++;return true;};
+                            var tool=new ToolStripMenuItem("Tool"){Name="Tool"};
+                            var textTool=new ToolStripMenuItem("Text",null,(s,args)=>clicks++){Name="Text"};
+                            tool.DropDownItems.Add(textTool); menu.Items.Add(tool); AnnotationMenuKeys.Apply(menu.Items);
+                            menu.Show(canvas,new Point(20,20)); Application.DoEvents();
+                            Check(CanvasDrawingShortcut.MenuActive,"Open menu not detected");
+                            // Real HWND key/character messages through the WinForms loop, without Alt.
+                            Tap(menu,Keys.T);
+                            Check(tool.DropDown.Visible,"Plain T did not open Tool");
+                            Tap(canvas,Keys.L); Check(commands==0,"Canvas tool routing stole a menu letter");
+                            Tap(tool.DropDown,Keys.T);
+                            Check(clicks==1 && !menu.Visible,"Plain T did not activate Text");
+                            Application.DoEvents(); Check(!AnnotationMenuKeys.Active,"Closed dropdown retained menu routing");
+                        }
+                        canvas.Focus();
+                    });
                     Run("baseline editor KeyPreview forwards D before canvas", () =>
                     {
                         Tap(canvas, Keys.D);

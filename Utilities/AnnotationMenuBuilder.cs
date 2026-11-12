@@ -15,9 +15,9 @@ namespace hopperdraw
         private static readonly string[] ColorNames={"Black","Dark grey","White","Red","Orange","Yellow","Green","Teal","Blue","Purple","Pink"};
         private static ToolStripMenuItem Item(ToolStripItemCollection items,string text,Action action,bool enabled=true,bool check=false,Image image=null)
         {
-            var item=new ToolStripMenuItem(text,image,(s,e)=>action?.Invoke()){Enabled=enabled,Checked=check}; items.Add(item); return item;
+            var item=new ToolStripMenuItem(text,image,(s,e)=>action?.Invoke()){Name=text,Enabled=enabled,Checked=check}; items.Add(item); return item;
         }
-        private static ToolStripMenuItem Sub(ToolStripItemCollection items,string text) { var item=new ToolStripMenuItem(text); items.Add(item); return item; }
+        private static ToolStripMenuItem Sub(ToolStripItemCollection items,string text) { var item=new ToolStripMenuItem(text){Name=text}; items.Add(item); return item; }
         // Dispose a context menu and the preview bitmaps HopperDraw created for it.
         internal static void Release(ToolStrip menu)
         {
@@ -67,7 +67,8 @@ namespace hopperdraw
             var colors=Sub(items,"Color");
             for(int i=0;i<Colors.Length;i++) { var c=Colors[i]; Item(colors.DropDownItems,ColorNames[i],()=>choose(c),true,color?.ToArgb()==c.ToArgb(),Preview(c,1,DashStyle.Solid,true)); }
             var recent=Sub(colors.DropDownItems,"Recent colors"); recent.Enabled=Recent.Count>0;
-            foreach(var c in Recent.ToArray()) Item(recent.DropDownItems,"#"+c.ToArgb().ToString("X8"),()=>choose(c),true,color?.ToArgb()==c.ToArgb(),Preview(c,1,DashStyle.Solid,true));
+            int recentIndex=0;
+            foreach(var c in Recent.ToArray()) Item(recent.DropDownItems,(++recentIndex).ToString()+" #"+c.ToArgb().ToString("X8"),()=>choose(c),true,color?.ToArgb()==c.ToArgb(),Preview(c,1,DashStyle.Solid,true));
             Item(colors.DropDownItems,"Custom…",()=>
             {
                 using(var dialog=new ColorDialog{Color=color??Color.Black,FullOpen=true}) if(dialog.ShowDialog()==DialogResult.OK)
@@ -87,7 +88,8 @@ namespace hopperdraw
                 var c=Colors[i]; Item(items,ColorNames[i],()=>choose(c),true,uniform && color?.ToArgb()==c.ToArgb(),Preview(c,1,DashStyle.Solid,true));
             }
             var recent=Sub(items,"Recent colors"); recent.Enabled=Recent.Count>0;
-            foreach(var c in Recent.ToArray()) Item(recent.DropDownItems,"#"+c.ToArgb().ToString("X8"),()=>choose(c),true,uniform && color?.ToArgb()==c.ToArgb(),Preview(c,1,DashStyle.Solid,true));
+            int recentIndex=0;
+            foreach(var c in Recent.ToArray()) Item(recent.DropDownItems,(++recentIndex).ToString()+" #"+c.ToArgb().ToString("X8"),()=>choose(c),true,uniform && color?.ToArgb()==c.ToArgb(),Preview(c,1,DashStyle.Solid,true));
             Item(items,"Custom…",()=>{ using(var dialog=new ColorDialog{Color=color??Color.Black,FullOpen=true}) if(dialog.ShowDialog()==DialogResult.OK) choose(dialog.Color); });
         }
         private static void Fill(ToolStripItemCollection items,DrawShape[] eligible,Action<string,Action<DrawShape>> apply,bool enabled,string hint)
@@ -196,11 +198,12 @@ namespace hopperdraw
             items.Add(new ToolStripSeparator());
             Item(items,"Duplicate",()=>AnnotationCommands.Duplicate(selected),selected.Length>0 && selected.All(o=>o.Selection.All(s=>s.CanTransformGeometry)));
             Item(items,"Delete",()=>AnnotationCommands.Delete(selected,selected.FirstOrDefault()?.OnPingDocument(),false),selected.Length>0);
+            AnnotationMenuKeys.Apply(items);
         }
         internal static void Drawing(ToolStripItemCollection items,HopperDraw owner)
         {
             var tools=Sub(items,"Tool"); bool wired=owner.Params.Input[2].SourceCount>0;
-            foreach(var tool in DrawingTool.All) { int mode=tool.Index; var item=Item(tools.DropDownItems,tool.Name,()=>owner.SetTool(mode),!wired,owner.DrawMode==mode); item.ShortcutKeyDisplayString=tool.Key.ToString(); if(wired) item.ToolTipText="Disconnect the M input to choose a tool here."; }
+            foreach(var tool in DrawingTool.All) { int mode=tool.Index; var item=Item(tools.DropDownItems,tool.Name,()=>owner.SetTool(mode),!wired,owner.DrawMode==mode); item.Image=Cached("tool:"+tool.Index,()=>ToolGlyph.Bitmap(tool.Index,16)); item.ShortcutKeyDisplayString=tool.Key.ToString(); if(wired) item.ToolTipText="Disconnect the M input to choose a tool here."; }
             var pen=Sub(items,"Pen");
             TextMenu(pen.DropDownItems,new[]{owner.TextPen},(name,change)=>{change(owner.TextPen);owner.Redraw();});
             var stroke=Sub(pen.DropDownItems,"Stroke");
@@ -217,19 +220,24 @@ namespace hopperdraw
                 Item(smoothing.DropDownItems,value.ToString(),()=>{owner.Smoothing=value; owner.Redraw();},true,owner.Smoothing==value);
             Item(items,"Reset pen to component defaults",owner.ResetPen);
             Item(items,"Exit drawing mode",owner.ExitDrawing,owner.DrawingModeEnabled);
+            AnnotationMenuKeys.Apply(items);
         }
         internal static void Component(ToolStripDropDown menu,HopperDraw owner)
         {
             menu.Items.Add(new ToolStripSeparator());
-            var drawing=Sub(menu.Items,"Drawing");
+            var used=new HashSet<char>(menu.Items.Cast<ToolStripItem>().Select(i=>AnnotationMenuKeys.Mnemonic(i.Text)));
+            var root=Sub(menu.Items,"HopperDraw"); root.Text=AnnotationMenuKeys.Label(root.Name,used);
+            var items=root.DropDownItems;
+            var drawing=Sub(items,"Drawing");
             Item(drawing.DropDownItems,"Enter drawing mode",owner.EnterDrawingMode,!owner.DrawingModeEnabled && owner.Eligible);
             Drawing(drawing.DropDownItems,owner);
-            var selection=Sub(menu.Items,"Selection");
+            var selection=Sub(items,"Selection");
             var owners=owner.OnPingDocument()?.Objects.OfType<HopperDraw>().Where(o=>o.Eligible).ToArray()??new[]{owner};
             Selection(selection.DropDownItems,owners);
-            Item(menu.Items,"Select all annotations",()=>{ owner.ClearSelection(); for(int i=0;i<owner.Shapes.Count;i++) if(!(owner.Shapes[i] is OpaqueShape)) owner.SelectedShapeIndices.Add(i); owner.Redraw(); });
-            Item(menu.Items,"Select unreadable annotation records",()=>{ owner.ClearSelection(); for(int i=0;i<owner.Shapes.Count;i++) if(owner.Shapes[i] is OpaqueShape) owner.SelectedShapeIndices.Add(i); owner.Redraw(); },owner.Shapes.Any(s=>s is OpaqueShape));
-            Item(menu.Items,"Clear all annotations",owner.ClearAll,owner.Shapes.Count>0 || owner.ComponentLoadDiagnostics.Any());
+            Item(items,"Select all annotations",()=>{ owner.ClearSelection(); for(int i=0;i<owner.Shapes.Count;i++) if(!(owner.Shapes[i] is OpaqueShape)) owner.SelectedShapeIndices.Add(i); owner.Redraw(); });
+            Item(items,"Select unreadable annotation records",()=>{ owner.ClearSelection(); for(int i=0;i<owner.Shapes.Count;i++) if(owner.Shapes[i] is OpaqueShape) owner.SelectedShapeIndices.Add(i); owner.Redraw(); },owner.Shapes.Any(s=>s is OpaqueShape));
+            Item(items,"Clear all annotations",owner.ClearAll,owner.Shapes.Count>0 || owner.ComponentLoadDiagnostics.Any());
+            AnnotationMenuKeys.Configure(root.DropDown); AnnotationMenuKeys.Apply(items);
         }
     }
 }
