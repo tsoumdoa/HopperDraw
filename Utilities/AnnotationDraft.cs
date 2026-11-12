@@ -21,24 +21,36 @@ namespace hopperdraw
         {
             if (!Held || GeometryUtilities.Distance(previousOnScreen,currentOnScreen)<2) return;
             if(Points.Count>=FreehandStroke.MaxRaw)
-            { for(int i=Points.Count-2;i>0;i-=2) Points.RemoveAt(i); }
+            { for(int i=Points.Count-2;i>0;i-=2) Points.RemoveAt(i); _version++; }
             var last=Points.Last();
-            if(last!=point) { _travel+=last.DistanceTo(point); _extent=Math.Max(_extent,point.DistanceTo(Points[0])); Points.Add(point); }
+            if(last!=point) { _travel+=last.DistanceTo(point); _extent=Math.Max(_extent,point.DistanceTo(Points[0])); Points.Add(point); _version++; }
         }
         // Tracked incrementally so paint-time close feedback never scans the raw samples.
         private double _travel, _extent;
+        private int _version, _ringVersion=-1; private Point3d _ringPoint; private float _ringScale; private bool _ringResult;
         internal bool Active => Points.Count > 0;
-        internal void Cancel() { Points.Clear(); _started = false; Held=false; _travel=0; _extent=0; }
+        internal void Cancel() { Points.Clear(); _started = false; Held=false; _travel=0; _extent=0; _version++; }
         internal void Backspace() { if (Active && !Held) Points.RemoveAt(Points.Count-1); }
-        // For a held freehand stroke the ring promises exactly what FreehandStroke.Process will accept.
-        internal bool NearStart(Point3d p, float scale) => Held
-            ? Points.Count>=3 && p.DistanceTo(Points[0]) <= 9 * scale && _extent*_gestureZoom >= FreehandStroke.CloseExtent && (_travel+Points.Last().DistanceTo(p))*_gestureZoom >= FreehandStroke.CloseTravel
+        internal bool NearStart(Point3d p, float scale) => Held ? FreehandWouldClose(p, scale)
             : Points.Distinct().Count() >= 3 && p.DistanceTo(Points[0]) <= 9 * scale;
+        // For a held freehand stroke the ring promises exactly what release will produce: cheap incremental gates
+        // first, then the real FreehandStroke.Process (incl. degeneracy fallback), cached until samples/pointer change.
+        private bool FreehandWouldClose(Point3d p, float scale)
+        {
+            if (Points.Count<3 || p.DistanceTo(Points[0]) > 9 * scale || _extent*_gestureZoom < FreehandStroke.CloseExtent ||
+                (_travel+Points.Last().DistanceTo(p))*_gestureZoom < FreehandStroke.CloseTravel) return false;
+            if (_ringVersion==_version && _ringPoint==p && _ringScale==scale) return _ringResult;
+            var release=new List<Point3d>(Points);
+            if (release.Last()!=p) { if (release.Count>=FreehandStroke.MaxRaw) release.RemoveAt(release.Count-1); release.Add(p); }
+            _ringResult=FreehandStroke.Process(release,_gestureZoom,_smoothing,scale)?.Closed==true;
+            _ringVersion=_version; _ringPoint=p; _ringScale=scale;
+            return _ringResult;
+        }
         internal DrawShape Down(int mode, Point3d p, Point screen, int clicks, bool shift, float scale, SmoothingLevel smoothing = SmoothingLevel.Medium)
         {
             if(mode==4)
             {
-                Cancel(); Points.Add(p); Held=true; _gestureZoom=1/Math.Max(.00001,scale); _closeScale=scale; _smoothing=smoothing; return null;
+                Cancel(); Points.Add(p); _version++; Held=true; _gestureZoom=1/Math.Max(.00001,scale); _closeScale=scale; _smoothing=smoothing; return null;
             }
             _press = screen; _started = !Active;
             if (clicks > 1) return mode == 1 || mode == 3 ? Finish(mode, false) : null;

@@ -14,6 +14,21 @@ namespace hopperdraw
             internal readonly List<PointF[]> Lines = new List<PointF[]>();
             internal readonly List<PointF> Dots = new List<PointF>();
             internal void Line(float x,float y,float u,float v) => Lines.Add(new[]{new PointF(x,y),new PointF(u,v)});
+            // Total stroke length in motif units (cell = 12), for the zoom-independent ink coverage.
+            internal double Length => Lines.Sum(l => Enumerable.Range(1,l.Length-1).Sum(i => Math.Sqrt(Math.Pow(l[i].X-l[i-1].X,2)+Math.Pow(l[i].Y-l[i-1].Y,2))));
+        }
+        internal const float LineWidth = .75f, DotRadius = .65f;
+        // GDI+ antialiasing paints sub-pixel lines at roughly this effective width, not their geometric width.
+        internal const double MinLinePixels = .8;
+        // Fraction of a cell covered by ink as actually rasterized at the tint threshold (screen cell = MinScreenCell).
+        // The sub-pixel tint uses this so the mean tone is continuous where the pattern turns into a tint, and stays
+        // at that tone when zooming further out instead of darkening as rasterized lines would merge.
+        internal static double Coverage(HatchPattern pattern, double scale)
+        {
+            int index=(int)pattern; if(index<1 || index>=Motifs.Length || !(scale>0)) return 0;
+            var m=Motifs[index]; double cell=MinScreenCell, zoom=cell/(12*scale);
+            double width=Math.Max(LineWidth*zoom,MinLinePixels), radius=DotRadius*zoom;
+            return Math.Min(1,(m.Length/12*cell*width + m.Dots.Count*Math.PI*radius*radius)/(cell*cell));
         }
         private static readonly Motif[] Motifs = Build();
         private static Motif[] Build()
@@ -37,12 +52,12 @@ namespace hopperdraw
         // vectors in one batched path; dense views fill once with a cached screen-resolution tile brush.
         internal const float MinScreenCell = 3f;
         internal const int VectorCellBudget = 4000, LineBudget = 20000, MaxTile = 256, MaxCachedTiles = 48;
-        internal const float TintFactor = .35f;
+        
         private sealed class Tile { internal Bitmap Image; internal TextureBrush Brush; }
-        private static readonly Dictionary<(int pattern,int size,int argb,int width),Tile> Tiles = new Dictionary<(int,int,int,int),Tile>();
+        private static readonly Dictionary<(int pattern,int size,int argb,long scale),Tile> Tiles = new Dictionary<(int,int,int,long),Tile>();
         internal static int CachedTileCount => Tiles.Count;
         internal static Color Ink(Color color,double opacity) => Color.FromArgb((int)Math.Round(color.A*Math.Max(0,Math.Min(1,opacity))),color);
-        private static Color Tint(Color ink) => Color.FromArgb((int)Math.Round(ink.A*TintFactor),ink);
+        private static Color Tint(Color ink,double coverage) => Color.FromArgb((int)Math.Round(ink.A*Math.Max(0,Math.Min(1,coverage))),ink);
         private static float ScreenScale(Graphics g)
         {
             using(var m=g.Transform)
@@ -70,15 +85,16 @@ namespace hopperdraw
                     if(double.IsNaN(scale) || double.IsInfinity(scale) || scale<=0) return;
                     int index=(int)shape.Hatch; if(index<1 || index>=Motifs.Length) return;
                     double cell=12*scale; float zoom=ScreenScale(g); double screenCell=cell*zoom;
-                    if(!(screenCell>=MinScreenCell)) { Tinted(g,inkColor,boundary); return; }
+                    double coverage=Coverage(shape.Hatch,scale);
+                    if(!(screenCell>=MinScreenCell)) { Tinted(g,inkColor,coverage,boundary); return; }
                     double columns=Math.Ceiling(bounds.Width/cell)+2, rows=Math.Ceiling(bounds.Height/cell)+2;
                     var motif=Motifs[index];
                     // Full visible-span lines avoid cell-by-cell work for the common ANSI/grid patterns.
                     if(index==1 || index==2 || index==7 || index==9 || index==10)
                     {
                         double count=(bounds.Width+bounds.Height)/cell*2+8;
-                        if(count>LineBudget) { Tinted(g,inkColor,boundary); return; }
-                        using(var pen=new Pen(ink,.75f))
+                        if(count>LineBudget) { Tinted(g,inkColor,coverage,boundary); return; }
+                        using(var pen=new Pen(ink,LineWidth))
                         {
                             if(index==7 || index==9)
                                 for(double y=Math.Floor(bounds.Top/cell)*cell;y<=bounds.Bottom;y+=cell) g.DrawLine(pen,bounds.Left,(float)y,bounds.Right,(float)y);
@@ -94,7 +110,7 @@ namespace hopperdraw
                         return;
                     }
                     if(columns*rows<=VectorCellBudget || screenCell>MaxTile) { Vectors(g,motif,inkColor,bounds,cell,scale,columns,rows); return; }
-                    var tile=TileFor(index,motif,(int)Math.Round(screenCell),inkColor,zoom);
+                    var tile=TileFor(index,motif,(int)Math.Round(screenCell),inkColor,scale);
                     tile.Brush.ResetTransform();
                     float unit=(float)(cell/tile.Image.Width); tile.Brush.ScaleTransform(unit,unit);
                     g.FillPath(tile.Brush,boundary);
@@ -102,9 +118,9 @@ namespace hopperdraw
             }
             finally { g.Restore(state); }
         }
-        private static void Tinted(Graphics g,Color inkColor,GraphicsPath boundary)
+        private static void Tinted(Graphics g,Color inkColor,double coverage,GraphicsPath boundary)
         {
-            using(var tint=new SolidBrush(Tint(inkColor))) g.FillPath(tint,boundary);
+            using(var tint=new SolidBrush(Tint(inkColor,coverage))) g.FillPath(tint,boundary);
         }
         // One batched path per primitive kind; motif buffers are reused (GraphicsPath copies them).
         private static void Vectors(Graphics g,Motif motif,Color inkColor,RectangleF bounds,double cell,double scale,double columns,double rows)
@@ -123,29 +139,31 @@ namespace hopperdraw
                         for(int i=0;i<pts.Length;i++) pts[i]=new PointF((float)(ox+line[i].X*scale),(float)(oy+line[i].Y*scale));
                         lines.StartFigure(); lines.AddLines(pts);
                     }
-                    foreach(var dot in motif.Dots) dots.AddEllipse((float)(ox+dot.X*scale-.65),(float)(oy+dot.Y*scale-.65),1.3f,1.3f);
+                    foreach(var dot in motif.Dots) dots.AddEllipse((float)(ox+dot.X*scale-DotRadius),(float)(oy+dot.Y*scale-DotRadius),2*DotRadius,2*DotRadius);
                 }
-                if(lines.PointCount>0) using(var pen=new Pen(inkColor,.75f)) g.DrawPath(pen,lines);
+                if(lines.PointCount>0) using(var pen=new Pen(inkColor,LineWidth)) g.DrawPath(pen,lines);
                 if(dots.PointCount>0) using(var brush=new SolidBrush(inkColor)) g.FillPath(brush,dots);
             }
         }
         // A seamless tile rendered at screen resolution. The brush lives in canvas space with its origin at the
         // canvas origin, so the phase stays canvas-anchored exactly as in the vector path.
-        private static Tile TileFor(int index,Motif motif,int size,Color inkColor,float zoom)
+        // The bitmap is stretched from `size` px to the true screen cell, so primitives are sized in tile pixels
+        // (size / canvas cell), not screen pixels: after the brush transform they match the vector path exactly.
+        // The key holds every rasterization input: pattern, tile size, ink and exact hatch scale.
+        private static Tile TileFor(int index,Motif motif,int size,Color inkColor,double scale)
         {
             size=Math.Max(1,Math.Min(MaxTile,size));
-            int width=(int)Math.Round(.75*zoom*20);
-            var key=(index,size,inkColor.ToArgb(),width);
+            var key=(index,size,inkColor.ToArgb(),BitConverter.DoubleToInt64Bits(scale));
             if(Tiles.TryGetValue(key,out var tile)) return tile;
             if(Tiles.Count>=MaxCachedTiles) ClearTiles(); // Paint is single-threaded: no brush is in use here.
             var image=new Bitmap(size,size,System.Drawing.Imaging.PixelFormat.Format32bppPArgb);
-            float k=size/12f;
+            float k=size/12f; float perUnit=(float)(size/(12*scale));
             using(var tg=Graphics.FromImage(image))
-            using(var pen=new Pen(inkColor,Math.Max(.05f,width/20f)))
+            using(var pen=new Pen(inkColor,LineWidth*perUnit))
             using(var brush=new SolidBrush(inkColor))
             {
                 tg.Clear(Color.Transparent); tg.SmoothingMode=SmoothingMode.AntiAlias;
-                float r=.65f*zoom;
+                float r=DotRadius*perUnit;
                 for(int dy=-1;dy<=1;dy++) for(int dx=-1;dx<=1;dx++)
                 {
                     foreach(var line in motif.Lines) tg.DrawLines(pen,line.Select(p=>new PointF((p.X+dx*12)*k,(p.Y+dy*12)*k)).ToArray());

@@ -37,8 +37,12 @@ namespace hopperdraw
             if(PreviewCache.TryGetValue(key,out var bitmap)) return bitmap;
             bitmap=create(); PreviewCache[key]=bitmap; Shared.Add(bitmap); return bitmap;
         }
-        private static Bitmap Preview(Color color,float width,DashStyle dash,bool swatch=false) =>
+        // Only the finite palette (named swatches, light grey, black stroke previews) is cached for the session.
+        // Arbitrary custom/recent colours get a per-menu bitmap that Release disposes, so the cache stays bounded.
+        private static bool Palette(Color color) => color.ToArgb()==Color.LightGray.ToArgb() || Colors.Any(c=>c.ToArgb()==color.ToArgb());
+        private static Bitmap Preview(Color color,float width,DashStyle dash,bool swatch=false) => !Palette(color) ? CreatePreview(color,width,dash,swatch) :
             Cached("p:"+color.ToArgb()+":"+width.ToString(System.Globalization.CultureInfo.InvariantCulture)+":"+(int)dash+":"+swatch,()=>CreatePreview(color,width,dash,swatch));
+        internal static int CachedPreviewCount => PreviewCache.Count;
         private static Bitmap CreatePreview(Color color,float width,DashStyle dash,bool swatch)
         {
             var bitmap=new Bitmap(48,18);

@@ -39,6 +39,10 @@ internal static class FreehandTests
             check(ReferenceEquals(preview.Points,draft.Points),"freehand preview copied raw samples");
             var shape=(CurveShape)draft.Up(4,P(1,1),new Point(1,1),false,new Size(4,4));
             check(shape!=null && shape.Closed,"ring promised a close that Process refused");
+            var line=new AnnotationDraft(); line.Down(4,P(0),Point.Empty,1,false,1); last=new PointF(0,0);
+            foreach(var x in new[]{10,20,30,40,30,20,10,2}) { var q=new PointF(x,0); line.Sample(P(x),last,q); last=q; }
+            check(!line.NearStart(P(0),1),"ring shown for a collinear stroke that release keeps open");
+            check(((CurveShape)line.Up(4,P(0),Point.Empty,false,new Size(4,4)))?.Closed!=true,"collinear stroke closed");
         });
         test("freehand fast two-sample drag remains a valid open curve",()=>
         {
