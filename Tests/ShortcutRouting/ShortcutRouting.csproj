@@ -11,6 +11,5 @@
     <Compile Include="../../Utilities/ToolShortcut.cs" Link="ToolShortcut.cs" />
     <Compile Include="../../Utilities/DrawingKeyGesture.cs" Link="DrawingKeyGesture.cs" />
     <Compile Include="../../Utilities/AnnotationMenuKeys.cs" Link="AnnotationMenuKeys.cs" />
-    <Compile Include="../../Utilities/AnnotationHintClock.cs" Link="AnnotationHintClock.cs" />
   </ItemGroup>
 </Project>

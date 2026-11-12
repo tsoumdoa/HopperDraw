@@ -9,11 +9,11 @@ namespace hopperdraw
     internal readonly struct HudLayout
     {
         internal readonly RectangleF Chip,Glyph,Swatch,Name,Key,Hint;
-        internal readonly bool Fill,HiddenStroke,Hatched;
-        internal HudLayout(RectangleF chip,RectangleF glyph,RectangleF swatch,RectangleF name,RectangleF key,RectangleF hint,bool fill,bool hidden,bool hatched)
-        { Chip=chip; Glyph=glyph; Swatch=swatch; Name=name; Key=key; Hint=hint; Fill=fill; HiddenStroke=hidden; Hatched=fill && hatched; }
+        internal readonly bool Fill,HiddenStroke;
+        internal HudLayout(RectangleF chip,RectangleF glyph,RectangleF swatch,RectangleF name,RectangleF key,RectangleF hint,bool fill,bool hidden)
+        { Chip=chip; Glyph=glyph; Swatch=swatch; Name=name; Key=key; Hint=hint; Fill=fill; HiddenStroke=hidden; }
         // Measurements are supplied in physical pixels. Every rectangle stays inside even a very narrow viewport.
-        internal static HudLayout Measure(Size canvas,float dpi,float nameWidth,float keyWidth,bool fill,bool hidden,bool hatched)
+        internal static HudLayout Measure(Size canvas,float dpi,float nameWidth,float keyWidth,bool fill,bool hidden)
         {
             float s=Math.Max(1,dpi/96),margin=Math.Min(8*s,Math.Max(0,canvas.Width/4f));
             float width=Math.Max(0,Math.Min(canvas.Width-2*margin,nameWidth+keyWidth+100*s));
@@ -23,7 +23,7 @@ namespace hopperdraw
             float key=Math.Min(keyWidth,Math.Max(0,width-76*s)),name=Math.Max(0,width-84*s-key);
             var nameBox=new RectangleF(chip.X+Math.Min(width,70*s),chip.Y,name,chip.Height);
             var keyBox=new RectangleF(Math.Max(chip.X,chip.Right-8*s-key),chip.Y,key,chip.Height);
-            return new HudLayout(chip,glyph,swatch,nameBox,keyBox,new RectangleF(margin,Math.Max(0,chip.Y-24*s),Math.Max(0,canvas.Width-2*margin),20*s),fill,hidden,hatched);
+            return new HudLayout(chip,glyph,swatch,nameBox,keyBox,new RectangleF(margin,Math.Max(0,chip.Y-24*s),Math.Max(0,canvas.Width-2*margin),20*s),fill,hidden);
         }
     }
     internal static class AnnotationFeedback
@@ -38,7 +38,6 @@ namespace hopperdraw
         private static readonly StringFormat HintFormat=new StringFormat{Alignment=StringAlignment.Center,LineAlignment=StringAlignment.Center,Trimming=StringTrimming.EllipsisCharacter,FormatFlags=StringFormatFlags.NoWrap};
         private static RectangleF _pathChip; private static float _pathRadius; private static GraphicsPath _chipPath, _shadowPath;
         private static readonly FrameShape Sample=new FrameShape();
-        internal static int CachedDpiCount => Resources.Count;
         private static DpiResources For(float dpi)
         {
             int key=(int)Math.Round(dpi);
@@ -73,7 +72,7 @@ namespace hopperdraw
                 var tool=DrawingTool.Get(owner.DrawMode); var pen=owner.DrawMode==5 ? owner.TextPen : owner.PenStyle;
                 if(!res.Widths.TryGetValue(tool.Index,out var widths))
                 { widths=(g.MeasureString(tool.Name,font).Width,g.MeasureString(tool.Key.ToString(),small).Width); res.Widths[tool.Index]=widths; }
-                var layout=HudLayout.Measure(canvas.ClientSize,g.DpiX,widths.name,widths.key,pen.FillColor.HasValue,!pen.StrokeVisible,pen.Hatch!=HatchPattern.None);
+                var layout=HudLayout.Measure(canvas.ClientSize,g.DpiX,widths.name,widths.key,pen.FillColor.HasValue,!pen.StrokeVisible);
                 if(layout.Chip.Width<1 || layout.Chip.Height<1) return;
                 ChipPaths(layout.Chip,8*s,s);
                 g.FillPath(Shadow,_shadowPath); g.FillPath(Background,_chipPath);

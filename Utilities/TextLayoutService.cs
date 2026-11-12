@@ -49,7 +49,6 @@ namespace hopperdraw
         // can dispose fonts safely between paints. The canvas UI is single-threaded.
         private static readonly Dictionary<(TextStylePreset, double, bool, bool), Font> Fonts = new Dictionary<(TextStylePreset, double, bool, bool), Font>();
         private static readonly StringFormat PaintFormat = Format();
-        internal static int CachedFontCount => Fonts.Count;
         internal static Font PaintFont(TextShape shape)
         {
             var key = (shape.StylePreset, shape.SizeMultiplier, shape.Bold, shape.Italic);
@@ -67,7 +66,6 @@ namespace hopperdraw
         // clone shapes every frame, so the expensive measurement is shared by content and only positioned per shape.
         private static readonly Dictionary<(string text, double? box, TextStylePreset preset, double size, bool bold, bool italic), TextLayout> Shared =
             new Dictionary<(string, double?, TextStylePreset, double, bool, bool), TextLayout>();
-        internal static int SharedCount => Shared.Count;
         internal static TextLayout Get(TextShape shape)
         {
             var entry = Cache.GetValue(shape, _ => new Entry());

@@ -60,7 +60,11 @@ internal static class MenuCursorHudTests
                         AnnotationMenuBuilder.Drawing(menu.Items,owner); Walk(menu.Items);
                         var tools=menu.Items.OfType<ToolStripMenuItem>().Single(i=>i.Name=="Tool");
                         foreach(var tool in tools.DropDownItems.OfType<ToolStripMenuItem>())
-                            Program.Check(AnnotationMenuKeys.Mnemonic(tool.Text)==DrawingTool.All.Single(t=>t.Name==tool.Name).Key,"Tool/menu letters differ");
+                        {
+                            char key = DrawingTool.All.Single(t => t.Name == tool.Name).Key;
+                            Program.Check(AnnotationMenuKeys.Mnemonic(tool.Text) == key && tool.ShortcutKeyDisplayString == key.ToString(),
+                                "Tool mnemonic/display letters differ");
+                        }
                     }
                 }
                 using(var menu=new ContextMenuStrip())
@@ -138,19 +142,19 @@ internal static class MenuCursorHudTests
             foreach(int dpi in new[]{96,144,192})
             {
                 float s=dpi/96f;
-                var normal=HudLayout.Measure(new Size(1200,600),dpi,50*s,10*s,true,false,true);
-                Program.Check(Math.Abs(normal.Chip.Width-160*s)<.01 && normal.Fill && normal.Hatched && !normal.HiddenStroke,"DPI layout/swatch");
-                foreach(bool fill in new[]{false,true}) foreach(bool hidden in new[]{false,true}) foreach(bool hatch in new[]{false,true})
+                var normal=HudLayout.Measure(new Size(1200,600),dpi,50*s,10*s,true,false);
+                Program.Check(Math.Abs(normal.Chip.Width-160*s)<.01 && normal.Fill && !normal.HiddenStroke,"DPI layout/swatch");
+                foreach(bool fill in new[]{false,true}) foreach(bool hidden in new[]{false,true})
                 {
-                    var state=HudLayout.Measure(new Size(800,600),dpi,50*s,10*s,fill,hidden,hatch);
-                    Program.Check(state.Fill==fill && state.HiddenStroke==hidden && state.Hatched==(fill && hatch),"Dormant swatch state displayed");
+                    var state=HudLayout.Measure(new Size(800,600),dpi,50*s,10*s,fill,hidden);
+                    Program.Check(state.Fill==fill && state.HiddenStroke==hidden,"Dormant swatch state displayed");
                 }
                 foreach(int width in new[]{0,1,16,48,100,200})
                 {
-                    var narrow=HudLayout.Measure(new Size(width,200),dpi,50*s,10*s,false,true,false);
+                    var narrow=HudLayout.Measure(new Size(width,200),dpi,50*s,10*s,false,true);
                     foreach(var box in new[]{narrow.Chip,narrow.Glyph,narrow.Swatch,narrow.Name,narrow.Key,narrow.Hint})
                         Program.Check(box.Width>=0 && box.Left>=0 && box.Right<=width+.01,"Layout exceeds narrow canvas: "+width+" "+box);
-                    Program.Check(!narrow.Fill && narrow.HiddenStroke && !narrow.Hatched,"None swatch state lost");
+                    Program.Check(!narrow.Fill && narrow.HiddenStroke,"None swatch state lost");
                 }
             }
         });
@@ -186,7 +190,9 @@ internal static class MenuCursorHudTests
                 now=now.AddSeconds(4); clock.Tick(null,EventArgs.Empty); Program.Check(!clock.Running && clock.Alpha==1,"Faded notice left the held timer running");
                 clock.Update(token,1,false); Program.Check(clock.Running && clock.Alpha==1 && clock.Interval>=2900,"Tool hint did not restart");
                 clock.Update(null,-1,false); Program.Check(!clock.Running,"Timer runs outside drawing mode");
-                clock.Dispose(); clock.Notice("after dispose"); Program.Check(clock.IsDisposed && !clock.Running && invalidated>0,"Clock disposal");
+                int beforeDispose = invalidated;
+                clock.Dispose(); clock.Notice("after dispose");
+                Program.Check(clock.IsDisposed && !clock.Running && invalidated == beforeDispose,"Clock disposal invalidated feedback");
             }
             using(var canvas=new GH_Canvas())
             {

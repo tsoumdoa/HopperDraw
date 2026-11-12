@@ -1,7 +1,6 @@
 using System.Linq;
 namespace hopperdraw
 {
-    internal enum DrawMode { Line = 0, Polyline = 1, Frame = 2, Curve = 3, Freehand = 4, Text = 5 }
     public enum HatchPattern { None = 0, Diagonal = 1, CrossHatch = 2, Concrete = 3, Earth = 4, Insulation = 5, Brick = 6, Grid = 7, Dots = 8, Horizontal = 9, Vertical = 10 }
     internal enum SmoothingLevel { Low, Medium, High }
     internal sealed class DrawingTool
