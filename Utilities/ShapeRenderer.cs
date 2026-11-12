@@ -46,10 +46,14 @@ namespace hopperdraw
         internal static void Ghost(Graphics g, DrawShape shape, Color basis, float scale)
         {
             if (shape is DrawShapeGroup group) { foreach(var child in group.Children) Ghost(g,child,basis,scale); return; }
-            if (shape is OpaqueShape || shape.HasPaint(basis)) return;
-            using(var path=AnnotationGeometry.Boundary(shape))
-            using(var pen=new Pen(Color.FromArgb(150,100,100,100),scale) { DashStyle=System.Drawing.Drawing2D.DashStyle.Dash })
-                if(path.PointCount>0) g.DrawPath(pen,path);
+            try
+            {
+                if (shape is OpaqueShape || shape.HasPaint(basis) || !ValidPoints(shape.GetPoints())) return;
+                using(var path=AnnotationGeometry.Boundary(shape))
+                using(var pen=new Pen(Color.FromArgb(150,100,100,100),scale) { DashStyle=System.Drawing.Drawing2D.DashStyle.Dash })
+                    if(path.PointCount>0) g.DrawPath(pen,path);
+            }
+            catch (Exception ex) { System.Diagnostics.Debug.WriteLine("HopperDraw ghost skipped: " + ex.Message); }
         }
 
         private static void Outline(Graphics g, DrawShape shape, bool selected, float scale)

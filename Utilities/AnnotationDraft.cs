@@ -22,12 +22,18 @@ namespace hopperdraw
             if (!Held || GeometryUtilities.Distance(previousOnScreen,currentOnScreen)<2) return;
             if(Points.Count>=FreehandStroke.MaxRaw)
             { for(int i=Points.Count-2;i>0;i-=2) Points.RemoveAt(i); }
-            if(Points.Last()!=point) Points.Add(point);
+            var last=Points.Last();
+            if(last!=point) { _travel+=last.DistanceTo(point); _extent=Math.Max(_extent,point.DistanceTo(Points[0])); Points.Add(point); }
         }
+        // Tracked incrementally so paint-time close feedback never scans the raw samples.
+        private double _travel, _extent;
         internal bool Active => Points.Count > 0;
-        internal void Cancel() { Points.Clear(); _started = false; Held=false; }
+        internal void Cancel() { Points.Clear(); _started = false; Held=false; _travel=0; _extent=0; }
         internal void Backspace() { if (Active && !Held) Points.RemoveAt(Points.Count-1); }
-        internal bool NearStart(Point3d p, float scale) => Points.Distinct().Count() >= 3 && p.DistanceTo(Points[0]) <= 9 * scale;
+        // For a held freehand stroke the ring promises exactly what FreehandStroke.Process will accept.
+        internal bool NearStart(Point3d p, float scale) => Held
+            ? Points.Count>=3 && p.DistanceTo(Points[0]) <= 9 * scale && _extent*_gestureZoom >= FreehandStroke.CloseExtent && (_travel+Points.Last().DistanceTo(p))*_gestureZoom >= FreehandStroke.CloseTravel
+            : Points.Distinct().Count() >= 3 && p.DistanceTo(Points[0]) <= 9 * scale;
         internal DrawShape Down(int mode, Point3d p, Point screen, int clicks, bool shift, float scale, SmoothingLevel smoothing = SmoothingLevel.Medium)
         {
             if(mode==4)
@@ -65,7 +71,8 @@ namespace hopperdraw
         internal DrawShape Preview(int mode, Point3d p, bool shift)
         {
             if (!Active) return null;
-            if (mode==4) return Points.Count<2 ? null : new CurveShape(Points.ToList());
+            // Shares the sample list (no per-paint copy); the preview shape is transient and never mutated.
+            if (mode==4) return Points.Count<2 ? null : new CurveShape(Points);
             if (shift) p = mode == 2 ? Square(Points[0], p) : GeometryUtilities.SnapAngle(Points.Last(), p);
             if (mode == 0) return new LineShape(Points[0], p);
             if (mode == 2) return Frame(Points[0], p);

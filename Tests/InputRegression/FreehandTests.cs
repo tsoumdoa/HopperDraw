@@ -25,6 +25,21 @@ internal static class FreehandTests
                 check(a.Points.First()==raw.First() && a.Points.Last()==raw.Last(),"open endpoints changed");
             }
         });
+        test("freehand close ring appears only when release would close and preview does not copy samples",()=>
+        {
+            var draft=new AnnotationDraft(); draft.Down(4,P(0),Point.Empty,1,false,1);
+            PointF last=new PointF(0,0);
+            void To(double x,double y) { var p=new PointF((float)x,(float)y); draft.Sample(P(x,y),last,p); last=p; }
+            To(3,0); To(3,3); To(0,3);
+            check(!draft.NearStart(P(1,1),1),"ring flashed for a tiny wiggle near the start");
+            check(FreehandStroke.Process(draft.Points.Concat(new[]{P(1,1)}).ToList(),1,SmoothingLevel.Medium,1)?.Closed!=true,"wiggle closed");
+            for(int i=0;i<=360;i+=5) To(30-30*Math.Cos(i*Math.PI/180),30*Math.Sin(i*Math.PI/180));
+            check(draft.NearStart(P(1,1),1),"ring missing for a closing loop");
+            var preview=(CurveShape)draft.Preview(4,P(1,1),false);
+            check(ReferenceEquals(preview.Points,draft.Points),"freehand preview copied raw samples");
+            var shape=(CurveShape)draft.Up(4,P(1,1),new Point(1,1),false,new Size(4,4));
+            check(shape!=null && shape.Closed,"ring promised a close that Process refused");
+        });
         test("freehand fast two-sample drag remains a valid open curve",()=>
         {
             var draft=new AnnotationDraft(); draft.Down(4,P(0),Point.Empty,1,false,1);

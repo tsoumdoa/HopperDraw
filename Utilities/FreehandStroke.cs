@@ -9,13 +9,14 @@ namespace hopperdraw
     internal static class FreehandStroke
     {
         internal const int MaxRaw=8192, MaxOutput=2048;
+        internal const double CloseExtent=18, CloseTravel=36;
         internal static CurveShape Process(IList<Point3d> raw, double zoom, SmoothingLevel level, float closeScale, bool allowClose = true)
         {
             if(raw.Count<2 || !StyleValidation.Finite(zoom) || zoom<=0) return null;
             double length=0, extent=0;
             for(int i=1;i<raw.Count;i++) { length+=raw[i].DistanceTo(raw[i-1]); extent=Math.Max(extent,raw[i].DistanceTo(raw[0])); }
             if(length*zoom<6 || extent*zoom<3) return null;
-            bool closed=allowClose && raw[raw.Count-1].DistanceTo(raw[0])<=9*closeScale && extent*zoom>=18 && length*zoom>=36;
+            bool closed=allowClose && raw[raw.Count-1].DistanceTo(raw[0])<=9*closeScale && extent*zoom>=CloseExtent && length*zoom>=CloseTravel;
             var input=raw.ToList(); if(closed) input.Add(input[0]);
             var resampled=Resample(input,Math.Max(2/zoom,(length+(closed?raw[raw.Count-1].DistanceTo(raw[0]):0))/(MaxOutput-2)));
             if(closed && resampled.Count>1) resampled.RemoveAt(resampled.Count-1);

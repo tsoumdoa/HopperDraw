@@ -26,9 +26,20 @@ namespace hopperdraw
             void Collect(ToolStripItemCollection items) { foreach(ToolStripItem item in items) { if(item.Image!=null) images.Add(item.Image); if(item is ToolStripDropDownItem drop && drop.HasDropDownItems) Collect(drop.DropDownItems); } }
             Collect(menu.Items);
             menu.Dispose();
-            foreach(var image in images) image.Dispose();
+            foreach(var image in images) if(!Shared.Contains(image)) image.Dispose();
         }
-        private static Bitmap Preview(Color color,float width,DashStyle dash,bool swatch=false)
+        // Preview bitmaps are stateless and shared by every menu instance (GH's component menu is never released
+        // through Release), so they are cached for the session and never disposed with a menu.
+        private static readonly Dictionary<string,Bitmap> PreviewCache=new Dictionary<string,Bitmap>();
+        private static readonly HashSet<Image> Shared=new HashSet<Image>();
+        private static Bitmap Cached(string key,Func<Bitmap> create)
+        {
+            if(PreviewCache.TryGetValue(key,out var bitmap)) return bitmap;
+            bitmap=create(); PreviewCache[key]=bitmap; Shared.Add(bitmap); return bitmap;
+        }
+        private static Bitmap Preview(Color color,float width,DashStyle dash,bool swatch=false) =>
+            Cached("p:"+color.ToArgb()+":"+width.ToString(System.Globalization.CultureInfo.InvariantCulture)+":"+(int)dash+":"+swatch,()=>CreatePreview(color,width,dash,swatch));
+        private static Bitmap CreatePreview(Color color,float width,DashStyle dash,bool swatch)
         {
             var bitmap=new Bitmap(48,18);
             using(var g=Graphics.FromImage(bitmap))
@@ -90,12 +101,16 @@ namespace hopperdraw
             var hatch=Sub(fill.DropDownItems,"Hatch");
             foreach(HatchPattern value in Enum.GetValues(typeof(HatchPattern)))
             {
-                var bitmap=new Bitmap(48,24);
-                using(var g=Graphics.FromImage(bitmap))
+                var bitmap=Cached("h:"+(int)value,()=>
                 {
-                    g.Clear(Color.White); var shape=new FrameShape(new Rhino.Geometry.Point3d(0,0,0),new Rhino.Geometry.Point3d(48,0,0),new Rhino.Geometry.Point3d(48,24,0),new Rhino.Geometry.Point3d(0,24,0)) { FillColor=Color.Black,Hatch=value,StrokeVisible=false,HatchScale=.75 };
-                    using(var path=AnnotationGeometry.Boundary(shape)) HatchRenderer.Paint(g,shape,path);
-                }
+                    var b=new Bitmap(48,24);
+                    using(var g=Graphics.FromImage(b))
+                    {
+                        g.Clear(Color.White); var shape=new FrameShape(new Rhino.Geometry.Point3d(0,0,0),new Rhino.Geometry.Point3d(48,0,0),new Rhino.Geometry.Point3d(48,24,0),new Rhino.Geometry.Point3d(0,24,0)) { FillColor=Color.Black,Hatch=value,StrokeVisible=false,HatchScale=.75 };
+                        using(var path=AnnotationGeometry.Boundary(shape)) HatchRenderer.Paint(g,shape,path);
+                    }
+                    return b;
+                });
                 Item(hatch.DropDownItems,value.ToString(),()=>apply("Change hatch",l=>l.Hatch=value),true,Same(l=>l.Hatch) && eligible[0].Hatch==value,bitmap);
             }
             var scale=Sub(fill.DropDownItems,"Hatch scale");

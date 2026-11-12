@@ -134,7 +134,7 @@ internal static class FillHatchTests
                 for(int y=5;y<125;y+=7) for(int x=5;x<125;x+=7)
                 {
                     var p=new PointF(x+.5f,y+.5f);
-                    Program.Check(AnnotationGeometry.Interior(curve,p)==path.IsVisible(p),"pick/fill path disagree");
+                    if(AnnotationGeometry.Interior(curve,p)!=path.IsVisible(p)) using(var pen=new Pen(Color.Black,1f)) Program.Check(path.IsOutlineVisible(p,pen),"pick/fill path disagree away from the flattened boundary at "+p);
                     if(b.GetPixel(x,y).A>0) Program.Check(AnnotationGeometry.Hit(curve,new PointF(x,y),1,8),"painted pixel unpickable");
                 }
             }
@@ -207,6 +207,60 @@ internal static class FillHatchTests
             owner.PenStyle.FillColor=Color.FromArgb(1,255,0,0); owner.PenStyle.FillOpacity=.1;
             owner.CompleteDraft(Frame()); Program.Check(owner.Shapes.Count==1,"zero effective alpha created invisible shape");
             var loaded=Program.RoundTrip(owner,true); Program.Check(loaded.PenStyle.FillColor==null && loaded.Smoothing==SmoothingLevel.Medium,"session pen persisted");
+        });
+        Program.Test("zero-area closed fill-only shapes are not paint, are rejected and get a ghost",()=>
+        {
+            var flat=new PolylineShape(new[]{new Point3d(20,50,0),new Point3d(60,50,0),new Point3d(100,50,0)}.ToList(),true) { StrokeVisible=false,FillColor=Color.Red };
+            Program.Check(flat.SupportsFill && !flat.HasArea && !flat.VisibleFill && !flat.HasPaint(Color.Black),"degenerate fill counted as paint");
+            Program.Check(!AnnotationGeometry.Interior(flat,new PointF(60,50)),"degenerate interior pickable");
+            var thin=new FrameShape(new Point3d(20,50,0),new Point3d(100,50,0),new Point3d(100,50,0),new Point3d(20,50,0)) { StrokeVisible=false,FillColor=Color.Red };
+            Program.Check(!thin.VisibleFill,"zero-height frame counted as filled");
+            var owner=new HopperDraw(); owner.PenStyle.StrokeVisible=false; owner.PenStyle.FillColor=Color.Red;
+            owner.CompleteDraft(new PolylineShape(flat.Points.ToList(),true)); Program.Check(owner.Shapes.Count==0,"invisible degenerate shape accepted");
+            using(var b=new Bitmap(130,130)) using(var g=Graphics.FromImage(b))
+            {
+                g.Clear(Color.Transparent); ShapeRenderer.Ghost(g,flat,Color.Black,1);
+                int ghost=0; for(int x=20;x<=100;x++) if(b.GetPixel(x,50).A>0) ghost++;
+                Program.Check(ghost>0,"degenerate fill-only shape has no ghost");
+                var bad=new PolylineShape(new[]{new Point3d(double.NaN,0,0),new Point3d(1,1,0),new Point3d(2,0,0)}.ToList(),true) { StrokeVisible=false };
+                ShapeRenderer.Ghost(g,bad,Color.Black,1); // must not throw into GH paint
+            }
+        });
+        Program.Test("zoomed-out and dense hatches stay bounded and canvas-anchored",()=>
+        {
+            var frame=new FrameShape(new Point3d(0,0,0),new Point3d(4000,0,0),new Point3d(4000,4000,0),new Point3d(0,4000,0)) { StrokeVisible=false,FillColor=Color.Blue };
+            foreach(HatchPattern hatch in Enum.GetValues(typeof(HatchPattern)))
+            {
+                if(hatch==HatchPattern.None) continue; frame.Hatch=hatch;
+                foreach(var setup in new[]{ (zoom:.2f,scale:.5), (zoom:.2f,scale:2.0), (zoom:1f,scale:.5) })
+                {
+                    frame.HatchScale=setup.scale;
+                    using(var b=new Bitmap(800,800)) using(var g=Graphics.FromImage(b))
+                    {
+                        g.Clear(Color.Transparent); g.ScaleTransform(setup.zoom,setup.zoom);
+                        var watch=System.Diagnostics.Stopwatch.StartNew(); ShapeRenderer.Render(g,frame,Color.Black,8); watch.Stop();
+                        Program.Check(watch.ElapsedMilliseconds<400,"hatch paint too slow: "+hatch+" "+setup+" "+watch.ElapsedMilliseconds+"ms");
+                        int painted=0; for(int y=0;y<800;y+=7) for(int x=0;x<800;x+=7) if(b.GetPixel(x,y).A>0) painted++;
+                        Program.Check(painted>0,"dense hatch painted nothing: "+hatch+" "+setup);
+                    }
+                }
+            }
+            // Below MinScreenCell the pattern is a uniform tint.
+            frame.Hatch=HatchPattern.Insulation; frame.HatchScale=.5;
+            using(var b=new Bitmap(200,200)) using(var g=Graphics.FromImage(b))
+            {
+                g.Clear(Color.Transparent); g.ScaleTransform(.1f,.1f); ShapeRenderer.Render(g,frame,Color.Black,8);
+                var tinted=b.GetPixel(100,100); Program.Check(Math.Abs(tinted.A-(int)Math.Round(255*HatchRenderer.TintFactor))<=1 && tinted.B>=250 && tinted.R<=5,"sub-pixel hatch not tinted: "+tinted);
+            }
+            // Tile path keeps canvas phase: panning the viewport by whole cells reproduces the same pixels.
+            frame.Hatch=HatchPattern.Brick; frame.HatchScale=2;
+            Bitmap Shot(float dx) { var b=new Bitmap(500,500); using(var g=Graphics.FromImage(b)) { g.Clear(Color.Transparent); g.ScaleTransform(.25f,.25f); g.TranslateTransform(dx,0); ShapeRenderer.Render(g,frame,Color.Black,8); } return b; }
+            using(var a=Shot(-240)) using(var c=Shot(-480))
+            {
+                Program.Check(HatchRenderer.CachedTileCount>0,"dense brick did not use the tile path");
+                int same=0,total=0; for(int y=20;y<480;y+=3) for(int x=20;x<400;x+=3) { total++; if(Math.Abs(a.GetPixel(x+60,y).A-c.GetPixel(x,y).A)<=40) same++; }
+                Program.Check(same>total*9/10,"tile phase not anchored to canvas: "+same+"/"+total);
+            }
         });
     }
 }

@@ -56,7 +56,7 @@ namespace hopperdraw
                 if (curve.Closed && points.Length > 2) path.AddClosedCurve(points, .5f);
                 else path.AddCurve(points, .5f);
             }
-            else if (shape.SupportsFill && points.Length > 2) path.AddPolygon(points);
+            else if (IsClosed(shape) && points.Length > 2) path.AddPolygon(points);
             else path.AddLines(points);
             return path;
         }
@@ -70,10 +70,22 @@ namespace hopperdraw
                 return stroke;
             }
         }
-        internal static bool Interior(DrawShape shape, PointF point)
+        // Non-zero winding over the cached flattened boundary: the same winding rule and geometry as paint,
+        // without rebuilding a GraphicsPath on every hover/pick.
+        internal static bool Interior(DrawShape shape, PointF point) => shape.VisibleFill && Interior(Leaf(shape), point);
+        private static bool Interior(StrokeCache leaf, PointF p)
         {
-            if (!shape.VisibleFill) return false;
-            using (var path = Boundary(shape)) return path.IsVisible(point);
+            var s = leaf.Stroke; var b = leaf.Bounds;
+            if (s == null || s.Length < 3 || p.X < b.Left || p.X > b.Right || p.Y < b.Top || p.Y > b.Bottom) return false;
+            int winding = 0;
+            for (int i = 0; i < s.Length; i++)
+            {
+                var a = s[i]; var c = s[(i + 1) % s.Length];
+                double cross = (double)(c.X - a.X) * (p.Y - a.Y) - (double)(p.X - a.X) * (c.Y - a.Y);
+                if (a.Y <= p.Y) { if (c.Y > p.Y && cross > 0) winding++; }
+                else if (c.Y <= p.Y && cross < 0) winding--;
+            }
+            return winding != 0;
         }
         internal static bool Hit(DrawShape shape, PointF point, float tolerance, float width)
         {
@@ -89,7 +101,7 @@ namespace hopperdraw
             float reach = tolerance + (shape.StrokeVisible ? effectiveWidth / 2 : 0);
             var b = leaf.Bounds;
             if (point.X < b.Left - reach || point.X > b.Right + reach || point.Y < b.Top - reach || point.Y > b.Bottom + reach) return false;
-            if (Interior(shape, point)) return true;
+            if (shape.VisibleFill && Interior(leaf, point)) return true;
             var s = leaf.Stroke;
             for (int i = 1; i < s.Length; i++)
                 if (GeometryUtilities.DistanceToSegment(point, s[i - 1], s[i]) <= reach) return true;
