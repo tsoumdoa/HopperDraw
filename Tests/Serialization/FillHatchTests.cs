@@ -241,7 +241,7 @@ internal static class FillHatchTests
                 ShapeRenderer.Ghost(g,bad,Color.Black,1); // must not throw into GH paint
             }
         });
-        Program.Test("hatch tone is continuous across tint, vector and tile strategies and tiles key every input",()=>
+        Program.Test("hatch tone is continuous across strategies, opacity and smoothing; tiles key every input",()=>
         {
             SmoothingMode smoothing=SmoothingMode.Default;
             double Mean(DrawShape shape,float zoom,int size)
@@ -253,18 +253,29 @@ internal static class FillHatchTests
                     return (double)sum/n;
                 }
             }
-            FrameShape Big(double scale,HatchPattern hatch)=>new FrameShape(new Point3d(0,0,0),new Point3d(20000,0,0),new Point3d(20000,20000,0),new Point3d(0,20000,0)) { StrokeVisible=false,FillColor=Color.Blue,Hatch=hatch,HatchScale=scale };
-            foreach(var mode in new[]{SmoothingMode.Default,SmoothingMode.AntiAlias})
+            double opacity=1;
+            FrameShape Region(double extent,double scale,HatchPattern hatch)=>new FrameShape(new Point3d(0,0,0),new Point3d(extent,0,0),new Point3d(extent,extent,0),new Point3d(0,extent,0)) { StrokeVisible=false,FillColor=Color.Blue,FillOpacity=opacity,Hatch=hatch,HatchScale=scale };
+            FrameShape Big(double scale,HatchPattern hatch)=>Region(20000,scale,hatch);
+            foreach(var mode in new[]{SmoothingMode.Default,SmoothingMode.AntiAlias,SmoothingMode.HighQuality})
+            foreach(var alpha in new[]{1.0,.25})
             foreach(HatchPattern hatch in Enum.GetValues(typeof(HatchPattern)))
             {
-                if(hatch==HatchPattern.None) continue; smoothing=mode;
+                if(hatch==HatchPattern.None) continue; smoothing=mode; opacity=alpha;
                 double scale=.5; float threshold=(float)(HatchRenderer.MinScreenCell/(12*scale));
+                // Tint threshold: the measured tint must match the pattern displayed just above it.
                 double below=Mean(Big(scale,hatch),threshold*.995f,400), above=Mean(Big(scale,hatch),threshold*1.005f,400);
-                Program.Check(Math.Abs(below-above)<=Math.Max(4,above*.12),"tone pops at tint threshold: "+mode+" "+hatch+" "+below+" vs "+above);
-                // Same zoom: small region (vector path) vs huge region (tile path) must have the same tone.
-                float zoom=.58f; var small=new FrameShape(new Point3d(0,0,0),new Point3d(300/zoom,0,0),new Point3d(300/zoom,300/zoom,0),new Point3d(0,300/zoom,0)) { StrokeVisible=false,FillColor=Color.Blue,Hatch=hatch,HatchScale=scale };
-                double vector=Mean(small,zoom,300), tiled=Mean(Big(scale,hatch),zoom,600);
-                Program.Check(Math.Abs(vector-tiled)<=Math.Max(4,vector*.12),"tile tone differs from vector: "+mode+" "+hatch+" "+vector+" vs "+tiled);
+                Program.Check(Math.Abs(below-above)<=Math.Max(4,above*.12),"tone pops at tint threshold: "+mode+" "+alpha+" "+hatch+" "+below+" vs "+above);
+                // Region size never changes the strategy: a small shape and a huge one show identical pixels.
+                float zoom=.58f; double small=Mean(Region(300/zoom,scale,hatch),zoom,300), huge=Mean(Big(scale,hatch),zoom,300);
+                Program.Check(Math.Abs(small-huge)<=1,"tone depends on region size: "+mode+" "+alpha+" "+hatch+" "+small+" vs "+huge);
+            }
+            // MaxTile boundary (tile -> exact vectors when one cell exceeds MaxTile px) keeps the tone.
+            smoothing=SmoothingMode.AntiAlias; opacity=1;
+            foreach(var hatch in new[]{HatchPattern.Concrete,HatchPattern.Earth,HatchPattern.Insulation,HatchPattern.Brick,HatchPattern.Dots})
+            {
+                double scale=.5; float edge=(float)(HatchRenderer.MaxTile/(12*scale));
+                double tiled=Mean(Big(scale,hatch),edge*.99f,800), vector=Mean(Big(scale,hatch),edge*1.01f,800);
+                Program.Check(Math.Abs(tiled-vector)<=Math.Max(3,vector*.12),"tone pops at tile/vector boundary: "+hatch+" "+tiled+" vs "+vector);
             }
             // Cache key covers every rasterization input: a prior zoom must not change a later render.
             var dots=Big(.5,HatchPattern.Dots);
@@ -279,7 +290,8 @@ internal static class FillHatchTests
                     Program.Check(diff==0,"tile cache reused a tile rasterized for other inputs: "+diff+" pixels");
                 }
             }
-        });        Program.Test("zoomed-out and dense hatches stay bounded and canvas-anchored",()=>
+        });
+        Program.Test("zoomed-out and dense hatches stay bounded and canvas-anchored",()=>
         {
             var frame=new FrameShape(new Point3d(0,0,0),new Point3d(4000,0,0),new Point3d(4000,4000,0),new Point3d(0,4000,0)) { StrokeVisible=false,FillColor=Color.Blue };
             foreach(HatchPattern hatch in Enum.GetValues(typeof(HatchPattern)))
@@ -303,7 +315,7 @@ internal static class FillHatchTests
             using(var b=new Bitmap(200,200)) using(var g=Graphics.FromImage(b))
             {
                 g.Clear(Color.Transparent); g.ScaleTransform(.1f,.1f); ShapeRenderer.Render(g,frame,Color.Black,8);
-                var tinted=b.GetPixel(100,100); Program.Check(Math.Abs(tinted.A-(int)Math.Round(255*HatchRenderer.Coverage(HatchPattern.Insulation,.5)))<=1 && tinted.B>=250 && tinted.R<=5,"sub-pixel hatch not tinted by coverage: "+tinted);
+                var tinted=b.GetPixel(100,100); Program.Check(Math.Abs(tinted.A-HatchRenderer.TintAlpha(HatchPattern.Insulation,.5,g.SmoothingMode,Color.Blue))<=1 && tinted.A>0 && tinted.B>=250 && tinted.R<=5,"sub-pixel hatch not tinted by measured tone: "+tinted);
             }
             // Tile path keeps canvas phase: panning the viewport by whole cells reproduces the same pixels.
             frame.Hatch=HatchPattern.Brick; frame.HatchScale=2;
