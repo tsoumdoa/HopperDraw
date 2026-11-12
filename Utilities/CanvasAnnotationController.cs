@@ -121,8 +121,13 @@ namespace hopperdraw
                 finally
                 {
                     editor.LostFocus -= EditorLostFocus; editor.TextChanged -= EditorTextChanged;
+                    // Esc / Ctrl+Enter / a canvas click end the edit while the editor still has focus. Removing a
+                    // focused child lets Windows move focus to an arbitrary sibling (live Rhino: not the canvas), so
+                    // drawing-mode keys (Escape, tool letters) stopped working and a click would place new text.
+                    bool hadFocus = editor.ContainsFocus;
                     // Remove immediately; defer disposal until after this message/filter has returned.
                     _canvas.Controls.Remove(editor);
+                    if (hadFocus) RestoreCanvasFocus();
                     if (!_canvas.IsDisposed && _canvas.IsHandleCreated) _canvas.BeginInvoke(new Action(() => { var font = editor.Font; editor.Dispose(); font.Dispose(); }));
                     else { var font = editor.Font; editor.Dispose(); font.Dispose(); }
                     _hook.Reset(); session.Owner.ResetTextKeys(); FeedbackChanged(); _canvas.Invalidate();
@@ -220,6 +225,25 @@ namespace hopperdraw
             if (unchecked((uint)(now - _lastEscapeTick)) < 250) return false;
             _lastEscapeTick = now; return true;
         }
+        [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern IntPtr GetFocus();
+        [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool IsChild(IntPtr parent, IntPtr child);
+        private void RestoreCanvasFocus()
+        {
+            if (_canvas.IsDisposed || !_canvas.IsHandleCreated) return;
+            _canvas.Focus();
+            // Host focus handling can run after this message; re-assert once if focus landed nowhere useful.
+            _canvas.BeginInvoke(new Action(() => { if (!_canvas.IsDisposed && _text == null && !_canvas.Focused && CanvasOwnsKeyboard()) _canvas.Focus(); }));
+        }
+        // Keyboard input belongs to this canvas when it, or a container of it (the editor form/panels), holds focus,
+        // or nothing does while its form is active. A focused text field elsewhere (GH search, panel editor) does not.
+        private bool CanvasOwnsKeyboard()
+        {
+            if (_canvas.IsDisposed || !_canvas.IsHandleCreated) return false;
+            var focus = GetFocus();
+            if (focus == _canvas.Handle) return true;
+            if (focus == IntPtr.Zero) return Form.ActiveForm != null && ReferenceEquals(Form.ActiveForm, _canvas.FindForm());
+            return IsChild(focus, _canvas.Handle);
+        }
         private bool _rhinoEscape;
         [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
         private void ObserveRhinoEscape(bool on)
@@ -246,7 +270,8 @@ namespace hopperdraw
                         if (_editor != null && _editor.ContainsFocus && FreshEscape()) EndText(true);
                         return;
                     }
-                    if (!_canvas.Focused || unchecked((uint)(Environment.TickCount - _textEndedTick)) < 250) return;
+                    if (!CanvasOwnsKeyboard() || unchecked((uint)(Environment.TickCount - _textEndedTick)) < 250) return;
+                    if (!_canvas.Focused) _canvas.Focus(); // later keys (tool letters) route through the canvas again
                     if (Command(Keys.Escape)) _canvas.Invalidate();
                 }
                 catch (Exception ex) { System.Diagnostics.Debug.WriteLine("HopperDraw Escape skipped: " + ex); }
