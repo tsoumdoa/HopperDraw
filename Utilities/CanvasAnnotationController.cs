@@ -75,6 +75,7 @@ namespace hopperdraw
                 editor.TextChanged += EditorTextChanged;
                 _canvas.Controls.Add(editor);
                 editor.BringToFront(); editor.Focus(); editor.SelectAll();
+                _canvas.BeginInvoke(new Action(() => { if (ReferenceEquals(_editor, editor) && !editor.IsDisposed && !editor.ContainsFocus) editor.Focus(); }));
                 Application.AddMessageFilter(this);
                 FeedbackChanged(); _canvas.Invalidate();
             }
@@ -107,7 +108,7 @@ namespace hopperdraw
             if (_text == null || _endingText) return;
             _endingText = true;
             var session = _text; var editor = _editor;
-            _text = null; _editor = null;
+            _text = null; _editor = null; _textEndedTick = Environment.TickCount;
             try
             {
                 Application.RemoveMessageFilter(this);
@@ -211,9 +212,50 @@ namespace hopperdraw
             { controller = new CanvasAnnotationController(canvas); Controllers.Add(canvas,controller); }
             controller._registered.Add(owner); return controller;
         }
+        // One physical Escape can arrive through both the HWND/editor route and Rhino's EscapeKeyPressed.
+        private int _lastEscapeTick = Environment.TickCount - 10000, _textEndedTick = Environment.TickCount - 10000;
+        private bool FreshEscape()
+        {
+            int now = Environment.TickCount;
+            if (unchecked((uint)(now - _lastEscapeTick)) < 250) return false;
+            _lastEscapeTick = now; return true;
+        }
+        private bool _rhinoEscape;
+        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+        private void ObserveRhinoEscape(bool on)
+        {
+            try
+            {
+                if (on == _rhinoEscape || !Rhino.Runtime.HostUtils.RunningInRhino) return;
+                if (on) Rhino.RhinoApp.EscapeKeyPressed += RhinoEscape; else Rhino.RhinoApp.EscapeKeyPressed -= RhinoEscape;
+                _rhinoEscape = on;
+            }
+            catch (Exception ex) { System.Diagnostics.Debug.WriteLine("HopperDraw Escape hook unavailable: " + ex.Message); }
+        }
+        private void RhinoEscape(object sender, EventArgs e)
+        {
+            if (_canvas.IsDisposed || !_canvas.IsHandleCreated) return;
+            _canvas.BeginInvoke(new Action(() =>
+            {
+                try
+                {
+                    if (_canvas.IsDisposed || CanvasDrawingShortcut.MenuActive) return;
+                    if (_text != null)
+                    {
+                        // Only the editor this canvas owns, and only while it has focus.
+                        if (_editor != null && _editor.ContainsFocus && FreshEscape()) EndText(true);
+                        return;
+                    }
+                    if (!_canvas.Focused || unchecked((uint)(Environment.TickCount - _textEndedTick)) < 250) return;
+                    if (Command(Keys.Escape)) _canvas.Invalidate();
+                }
+                catch (Exception ex) { System.Diagnostics.Debug.WriteLine("HopperDraw Escape skipped: " + ex); }
+            }));
+        }
         private CanvasAnnotationController(GH_Canvas canvas)
         {
             _canvas = canvas;
+            ObserveRhinoEscape(true);
             _hints = new AnnotationHintClock(() => { if(!_canvas.IsDisposed) { UpdateHints(); _canvas.Invalidate(); } });
             _hook = CanvasDrawingShortcut.Register(canvas, () => false, () => {});
             _hook.Mouse = Message; _hook.Command = Command; _hook.Lost = Lost;
@@ -239,6 +281,7 @@ namespace hopperdraw
             _canvas.KeyDown -= NativeKey; _canvas.KeyUp -= NativeKey;
             _canvas.CanvasPrePaintGroups -= SyncPaint; _canvas.CanvasPostPaintOverlay -= PaintHud;
             _canvas.DpiChangedAfterParent -= DpiChanged;
+            ObserveRhinoEscape(false);
             ResetCursor(); _cursors.Dispose(); _hints.Dispose();
         }
         private void Disposed(object sender, EventArgs e)
@@ -416,7 +459,13 @@ namespace hopperdraw
         private bool Command(Keys data)
         {
             Keys key = data & Keys.KeyCode, mods = data & Keys.Modifiers;
-            if (_text != null || !Owners.Any() || _canvas.Document == null || _canvas.ActiveWidget != null || _canvas.ActiveObject != null) return false;
+            if (_text != null)
+            {
+                if (key != Keys.Escape && !(key == Keys.Enter && mods == Keys.Control)) return false;
+                if (key == Keys.Escape && !FreshEscape()) return true;
+                EndText(true); return true;
+            }
+            if (!Owners.Any() || _canvas.Document == null || _canvas.ActiveWidget != null || _canvas.ActiveObject != null) return false;
             // GH clears its preview boundary before dispatching Escape to any interaction.
             if (key == Keys.Escape && _canvas.Document.PreviewBoundary != null) return false;
             var toolOwner = DrawingOwner;
@@ -430,6 +479,7 @@ namespace hopperdraw
             var drawing = DrawingOwner;
             if (key == Keys.Escape)
             {
+                if (!FreshEscape()) return true; // the same physical press already arrived through the host route
                 switch (AnnotationEscape.Layer(drawing?.Draft.Active == true,drawing != null,Owners.Any(o=>o.HasSelection)))
                 {
                     case EscapeLayer.Gesture: drawing.Draft.Cancel(); break;
