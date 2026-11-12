@@ -26,8 +26,7 @@ namespace hopperdraw
             var owner = (HopperDraw)Owner;
             if (channel == GH_CanvasChannel.Objects)
             {
-                var names = new[] { "Line", "Polyline", "Frame", "Curve" };
-                string text = names[StyleValidation.Clamp(owner.DrawMode, 0, 3)] + (owner.DrawingModeEnabled ? " ON" : "");
+                string text = DrawingTool.Get(owner.DrawMode).Name + (owner.DrawingModeEnabled ? " ON" : "");
                 var footer = new RectangleF(Bounds.X + 4, Bounds.Bottom - 22, Bounds.Width - 8, 18);
                 using (var capsule = GH_Capsule.CreateTextCapsule(footer, footer,
                     owner.DrawingModeEnabled ? GH_Palette.Blue : GH_Palette.Black, text, 2, 0))
@@ -38,6 +37,7 @@ namespace hopperdraw
             if (channel == shapeChannel)
                 foreach (var shape in owner.Shapes) ShapeRenderer.Render(graphics, shape, owner.BorderColor, owner.LineThickness);
             if (channel != GH_CanvasChannel.Overlay) return;
+            if (owner.DrawingModeEnabled) foreach(var shape in owner.Shapes) ShapeRenderer.Ghost(graphics,shape,owner.BorderColor,owner.CanvasScale);
             if (owner.IsActivated && (owner.Draft.Active || owner.IsDrawing))
             {
                 var point = owner.DrawEnd;
@@ -52,10 +52,9 @@ namespace hopperdraw
                     { var first = owner.Draft.Points[0]; float r = 9 * owner.CanvasScale; graphics.DrawEllipse(ring, (float)first.X-r,(float)first.Y-r,2*r,2*r); }
                 if (preview != null)
                 {
-                    preview.ThicknessMultiplier = owner.CurrentThicknessMultiplier;
-                    preview.OverrideColor = owner.PendingColorOverride;
-                    preview.LineType = owner.CurrentLineType;
+                    owner.ApplyPen(preview);
                     ShapeRenderer.Render(graphics, preview, owner.BorderColor, owner.LineThickness);
+                    ShapeRenderer.Ghost(graphics, preview, owner.BorderColor, owner.CanvasScale);
                     if (owner.DrawMode == 1 || owner.DrawMode == 3)
                         ShapeRenderer.Handles(graphics, preview, -1, true, owner.CanvasScale, drawOutline: false);
                 }

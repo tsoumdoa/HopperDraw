@@ -18,19 +18,15 @@ namespace hopperdraw
 
         public override void Render(Graphics g, Pen pen, float thickness)
         {
-            if (!Start.IsValid || !End.IsValid) return;
-            g.DrawLine(pen, (float)Start.X, (float)Start.Y, (float)End.X, (float)End.Y);
+            using (var boundary = AnnotationGeometry.Boundary(this))
+                if (boundary.PointCount > 0) g.DrawPath(pen, boundary);
         }
 
         public override (bool hit, int pointIndex) HitTest(PointF pt, float tolerance, float thickness)
         {
-            if (GeometryUtilities.Distance(pt, Start.ToPointF()) <= tolerance)
-                return (true, 0);
-            if (GeometryUtilities.Distance(pt, End.ToPointF()) <= tolerance)
-                return (true, 1);
-            if (GeometryUtilities.DistanceToSegment(pt, Start.ToPointF(), End.ToPointF()) <= thickness / 2 + tolerance)
-                return (true, -1);
-            return (false, -1);
+            var points = GetPoints();
+            for (int i=0;i<points.Length;i++) if (GeometryUtilities.Distance(pt,points[i]) <= tolerance) return (true,i);
+            return (AnnotationGeometry.HitLeaf(this,pt,tolerance,thickness),-1);
         }
 
         public override PointF[] GetPoints() => new PointF[] { Start.ToPointF(), End.ToPointF() };
@@ -51,11 +47,9 @@ namespace hopperdraw
         {
             var clone = new LineShape(Start, End)
             {
-                ThicknessMultiplier = ThicknessMultiplier,
-                OverrideColor = OverrideColor,
-                LineType = LineType,
                 Id = HopperDraw.GetNextId()
             };
+            CopyStyleTo(clone);
             CopyArchiveStateTo(clone);
             return clone;
         }

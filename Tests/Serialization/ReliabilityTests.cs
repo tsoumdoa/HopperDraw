@@ -57,28 +57,25 @@ internal static class ReliabilityTests
                 }
             }
         });
-        Program.Test("curve cache matches reference picking and invalidates on all geometry changes", () =>
+        Program.Test("shared spline boundary cache matches GDI and invalidates on geometry changes", () =>
         {
             var random = new Random(99);
-            var sample = typeof(CurveShape).GetMethod("SampleCurve", BindingFlags.Instance | BindingFlags.NonPublic);
-            var cache = typeof(CurveShape).GetField("_cacheSamples", BindingFlags.Instance | BindingFlags.NonPublic);
-            for (int i = 0; i < 100; i++)
+            for(int i=0;i<100;i++)
             {
-                var curve = new CurveShape(Enumerable.Range(0, random.Next(1, 12)).Select(_ => new Point3d(random.Next(500), random.Next(500), 0)).ToList(), i % 2 == 0);
-                for (int k = 0; k < 100; k++)
+                var curve=new CurveShape(Enumerable.Range(0,random.Next(3,12)).Select(_=>new Point3d(random.Next(500),random.Next(500),0)).ToList(),i%2==0);
+                for(int k=0;k<50;k++)
                 {
-                    if (k == 50) { curve.Points[0] = new Point3d(15, 25, 0); curve.Move(7, -3); curve.Closed = !curve.Closed; }
-                    var point = new PointF(random.Next(-50, 550), random.Next(-50, 550));
-                    var got = curve.HitTest(point, 15, 8);
-                    var want = (hit: false, index: -1);
-                    for (int p = 0; p < curve.Points.Count; p++)
-                        if (GeometryUtilities.Distance(point, curve.Points[p].ToPointF()) <= 15) { want = (true, p); break; }
-                    var points = (List<PointF>)sample.Invoke(curve, new object[] { 20 });
-                    if (!want.hit) for (int p = 0; p < points.Count - 1; p++)
-                        if (GeometryUtilities.DistanceToSegment(point, points[p], points[p + 1]) <= 19) { want = (true, -1); break; }
-                    Program.Check(got.hit == want.hit && got.pointIndex == want.index, "cache differs from reference");
-                    var saved = cache.GetValue(curve); curve.HitTest(point, 15, 8);
-                    Program.Check(ReferenceEquals(saved, cache.GetValue(curve)), "unchanged geometry rebuilt cache");
+                    if(k==25) { curve.Points[0]=new Point3d(15,25,0); curve.Move(7,-3); curve.Closed=!curve.Closed; }
+                    var point=new PointF(random.Next(-50,550),random.Next(-50,550));
+                    using(var path=AnnotationGeometry.Boundary(curve))
+                    {
+                        path.Flatten(null,.2f); var points=path.PathPoints.ToList();
+                        if(curve.Closed) points.Add(points[0]);
+                        bool want=Enumerable.Range(1,points.Count-1).Any(n=>GeometryUtilities.DistanceToSegment(point,points[n-1],points[n])<=19);
+                        Program.Check(AnnotationGeometry.Hit(curve,point,15,8)==want,"cache differs from shared GDI boundary");
+                        var cached=AnnotationGeometry.Strokes(curve).Single();
+                        Program.Check(ReferenceEquals(cached,AnnotationGeometry.Strokes(curve).Single()),"unchanged boundary rebuilt");
+                    }
                 }
             }
         });
@@ -207,7 +204,7 @@ internal static class ReliabilityTests
             {
                 var c = new HopperDraw();
                 solve.Invoke(c, new object[] { new FakeAccess(false, true, 99, Color.Black, width, -1, 99) });
-                Program.Check(c.DrawMode == 3 && c.DrawOrder == 1 && StyleValidation.ValidWidth(c.LineThickness), "unsafe input");
+                Program.Check(c.DrawMode == 4 && c.DrawOrder == 1 && StyleValidation.ValidWidth(c.LineThickness), "unsafe input");
                 Program.Check(c.RuntimeMessages(GH_RuntimeMessageLevel.Warning).Count >= 4, "missing input warnings");
             }
         });

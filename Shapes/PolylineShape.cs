@@ -20,36 +20,15 @@ namespace hopperdraw
 
         public override void Render(Graphics g, Pen pen, float thickness)
         {
-            if (Points.Count < 2) return;
-            var pts = Points.ToPointFArray();
-            if (Closed && pts.Length > 2)
-            {
-                g.DrawPolygon(pen, pts);
-            }
-            else
-            {
-                g.DrawLines(pen, pts);
-            }
+            using (var boundary = AnnotationGeometry.Boundary(this))
+                if (boundary.PointCount > 0) g.DrawPath(pen, boundary);
         }
 
         public override (bool hit, int pointIndex) HitTest(PointF pt, float tolerance, float thickness)
         {
-            for (int i = 0; i < Points.Count; i++)
-            {
-                if (GeometryUtilities.Distance(pt, Points[i].ToPointF()) <= tolerance)
-                    return (true, i);
-            }
-            for (int i = 0; i < Points.Count - 1; i++)
-            {
-                if (GeometryUtilities.DistanceToSegment(pt, Points[i].ToPointF(), Points[i + 1].ToPointF()) <= thickness / 2 + tolerance)
-                    return (true, -1);
-            }
-            if (Closed && Points.Count > 2)
-            {
-                if (GeometryUtilities.DistanceToSegment(pt, Points[Points.Count - 1].ToPointF(), Points[0].ToPointF()) <= thickness / 2 + tolerance)
-                    return (true, -1);
-            }
-            return (false, -1);
+            var points = GetPoints();
+            for (int i=0;i<points.Length;i++) if (GeometryUtilities.Distance(pt,points[i]) <= tolerance) return (true,i);
+            return (AnnotationGeometry.HitLeaf(this,pt,tolerance,thickness),-1);
         }
 
         public override PointF[] GetPoints() => Points.ToPointFArray();
@@ -70,11 +49,9 @@ namespace hopperdraw
         {
             var clone = new PolylineShape(new List<Point3d>(Points), Closed)
             {
-                ThicknessMultiplier = ThicknessMultiplier,
-                OverrideColor = OverrideColor,
-                LineType = LineType,
                 Id = HopperDraw.GetNextId()
             };
+            CopyStyleTo(clone);
             CopyArchiveStateTo(clone);
             return clone;
         }

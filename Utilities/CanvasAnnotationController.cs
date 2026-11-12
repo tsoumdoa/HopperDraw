@@ -149,7 +149,7 @@ namespace hopperdraw
                     if (mods != Keys.Shift && mods != Keys.Control) Clear();
                     if (_windowActive)
                         foreach (var owner in Owners)
-                            for (int i=0;i<owner.Shapes.Count;i++) if (AnnotationGeometry.InRectangle(owner.Shapes[i],rect,_windowCrossing,owner.LineThickness))
+                            for (int i=0;i<owner.Shapes.Count;i++) if (AnnotationGeometry.InRectangle(owner.Shapes[i],rect,_windowCrossing,owner.LineThickness,owner.DrawOrder!=0))
                             { if (mods == Keys.Control) owner.SelectedShapeIndices.Remove(i); else if (!owner.SelectedShapeIndices.Contains(i)) owner.SelectedShapeIndices.Add(i); }
                     _window = null;
                 }
@@ -245,7 +245,7 @@ namespace hopperdraw
                 }
                 _canvas.Invalidate(); return true;
             }
-            if (drawing?.Draft.Active == true && (key == Keys.Enter || key == Keys.Back))
+            if (drawing?.Draft.Active == true && drawing.DrawMode != 4 && (key == Keys.Enter || key == Keys.Back))
             {
                 if (key == Keys.Back) drawing.Draft.Backspace();
                 else if (drawing.DrawMode == 1 || drawing.DrawMode == 3) drawing.CompleteDraft(drawing.Draft.Finish(drawing.DrawMode,false));

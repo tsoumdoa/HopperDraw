@@ -37,7 +37,7 @@ namespace hopperdraw
             if (_drawing != null)
             {
                 _drawing.CompleteDraft(_drawing.Draft.Down(_drawing.DrawMode,Point(e.CanvasLocation),e.ControlLocation,e.Clicks,
-                    (Control.ModifierKeys & Keys.Shift)!=0,_drawing.CanvasScale));
+                    (Control.ModifierKeys & Keys.Shift)!=0,_drawing.CanvasScale,_drawing.Smoothing));
             }
             else if (_owner != null && e.Clicks < 2)
             {
@@ -51,6 +51,7 @@ namespace hopperdraw
         }
         public override GH_ObjectResponse RespondToMouseMove(GH_Canvas sender, GH_CanvasMouseEvent e)
         {
+            if (_done) return GH_ObjectResponse.Handled;
             if (!_moving && AnnotationDraft.Moved(ControlPointDown,e.ControlLocation,SystemInformation.DragSize)) _moving=true;
             if (_context && _moving)
             {
@@ -60,8 +61,13 @@ namespace hopperdraw
                 navigation.RespondToMouseMove(sender,e);
                 return GH_ObjectResponse.Handled;
             }
-            if (_moving && !_autoPan && (_move != null || _drawing?.Draft.Active == true && (_drawing.DrawMode == 0 || _drawing.DrawMode == 2)))
+            if (_moving && !_autoPan && (_move != null || _drawing?.Draft.Active == true && (_drawing.DrawMode == 0 || _drawing.DrawMode == 2 || _drawing.DrawMode == 4)))
             { sender.StartAutoPan(); _autoPan=true; }
+            if (_drawing?.Draft.Held == true && !_done)
+            {
+                var previous=_drawing.Draft.Points.Last().ToPointF();
+                _drawing.Draft.Sample(Point(e.CanvasLocation),sender.Viewport.ProjectPoint(previous),e.ControlLocation);
+            }
             if (_moving && _move != null)
             {
                 if (_handle>=0) _move.Edit(_owner,_shape,_handle,Point(e.CanvasLocation),(Control.ModifierKeys & Keys.Shift)!=0);
@@ -81,6 +87,7 @@ namespace hopperdraw
         {
             if (_done || e.Button != _press.Button) return GH_ObjectResponse.Handled;
             _done=true;
+            if (_autoPan) { sender.StopAutoPan(); _autoPan=false; }
             if (_context)
             {
                 if (_owner!=null && !_owner.SelectedShapeIndices.Contains(_shape)) _controller.Select(_owner,_shape,(Control.ModifierKeys & Keys.Shift)!=0,false);
@@ -92,7 +99,7 @@ namespace hopperdraw
                 sender.BeginInvoke(new Action(() => { if (!sender.IsDisposed) menu.Show(sender,e.ControlLocation); }));
             }
             else if (_drawing!=null)
-                _drawing.CompleteDraft(_drawing.Draft.Up(_drawing.DrawMode,Point(e.CanvasLocation),e.ControlLocation,(Control.ModifierKeys & Keys.Shift)!=0,SystemInformation.DragSize));
+                _drawing.CompleteDraft(_drawing.Draft.Up(_drawing.DrawMode,Point(e.CanvasLocation),e.ControlLocation,(Control.ModifierKeys & Keys.Shift)!=0,SystemInformation.DragSize,_drawing.CanvasScale));
             else _move?.Commit(sender.Document);
             sender.Invalidate(); return GH_ObjectResponse.Release;
         }
@@ -103,7 +110,8 @@ namespace hopperdraw
         {
             if (_done) return;
             _done=true; _move?.Revert(true);
-            if (_drawing != null && (discardDraft || _drawing.DrawMode == 0 || _drawing.DrawMode == 2)) _drawing.Draft.Cancel();
+            if (_autoPan) { m_canvas.StopAutoPan(); _autoPan=false; }
+            if (_drawing != null && (discardDraft || _drawing.DrawMode == 0 || _drawing.DrawMode == 2 || _drawing.DrawMode == 4)) _drawing.Draft.Cancel();
             m_canvas?.Invalidate();
         }
         public override void Destroy()

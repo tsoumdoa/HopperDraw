@@ -5,6 +5,7 @@
     <UseWindowsForms>true</UseWindowsForms>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../../Enums/*.cs" Link="Enums/%(Filename)%(Extension)" />
     <Compile Include="../../Utilities/CanvasDrawingShortcut.cs" Link="CanvasDrawingShortcut.cs" />
     <Compile Include="../../Utilities/DrawingKeyGesture.cs" Link="DrawingKeyGesture.cs" />
   </ItemGroup>

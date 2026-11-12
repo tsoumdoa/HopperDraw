@@ -23,27 +23,15 @@ namespace hopperdraw
 
         public override void Render(Graphics g, Pen pen, float thickness)
         {
-            var points = new PointF[]
-            {
-                TopLeft.ToPointF(),
-                TopRight.ToPointF(),
-                BottomRight.ToPointF(),
-                BottomLeft.ToPointF(),
-                TopLeft.ToPointF()
-            };
-            g.DrawPolygon(pen, points);
+            using (var boundary = AnnotationGeometry.Boundary(this))
+                if (boundary.PointCount > 0) g.DrawPath(pen, boundary);
         }
 
         public override (bool hit, int pointIndex) HitTest(PointF pt, float tolerance, float thickness)
         {
-            var corners = new PointF[] { TopLeft.ToPointF(), TopRight.ToPointF(), BottomRight.ToPointF(), BottomLeft.ToPointF() };
-            for (int i = 0; i < 4; i++)
-                if (GeometryUtilities.Distance(pt, corners[i]) <= tolerance) return (true, i);
-            if (GeometryUtilities.DistanceToSegment(pt, corners[0], corners[1]) <= thickness / 2 + tolerance) return (true, -1);
-            if (GeometryUtilities.DistanceToSegment(pt, corners[1], corners[2]) <= thickness / 2 + tolerance) return (true, -1);
-            if (GeometryUtilities.DistanceToSegment(pt, corners[2], corners[3]) <= thickness / 2 + tolerance) return (true, -1);
-            if (GeometryUtilities.DistanceToSegment(pt, corners[3], corners[0]) <= thickness / 2 + tolerance) return (true, -1);
-            return (false, -1);
+            var points = GetPoints();
+            for (int i=0;i<points.Length;i++) if (GeometryUtilities.Distance(pt,points[i]) <= tolerance) return (true,i);
+            return (AnnotationGeometry.HitLeaf(this,pt,tolerance,thickness),-1);
         }
 
         public override PointF[] GetPoints() => new PointF[] { TopLeft.ToPointF(), TopRight.ToPointF(), BottomRight.ToPointF(), BottomLeft.ToPointF() };
@@ -71,11 +59,9 @@ namespace hopperdraw
         {
             var clone = new FrameShape(TopLeft, TopRight, BottomRight, BottomLeft)
             {
-                ThicknessMultiplier = ThicknessMultiplier,
-                OverrideColor = OverrideColor,
-                LineType = LineType,
                 Id = HopperDraw.GetNextId()
             };
+            CopyStyleTo(clone);
             CopyArchiveStateTo(clone);
             return clone;
         }

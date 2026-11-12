@@ -44,6 +44,7 @@ internal static class Program
     {
         if (shape is OpaqueShape o) return o.Payload.Serialize_Xml();
         return shape.GetType().Name + shape.PersistentId + ":" + shape.ThicknessMultiplier + ":" + shape.LineType + ":" + shape.OverrideColor?.ToArgb() +
+            ":" + shape.StrokeVisible + ":" + shape.FillColor?.ToArgb() + ":" + shape.FillOpacity + ":" + shape.Hatch + ":" + shape.HatchScale + ":" + shape.HatchBackground?.ToArgb() +
             (shape is DrawShapeGroup g ? string.Join(";", g.Children.Select(Fingerprint)) : string.Join(";", shape.GetPoints().Select(p => p.ToString()))) +
             (shape is CurveShape c ? c.Closed.ToString() : shape is PolylineShape l ? l.Closed.ToString() : "");
     }
@@ -65,6 +66,11 @@ internal static class Program
         result.ThicknessMultiplier = new[] { .5f, 1, 2, 3 }[random.Next(4)];
         result.LineType = (DashStyle)random.Next(5);
         result.OverrideColor = random.Next(2) == 0 ? (Color?)null : Color.FromArgb(random.Next());
+        result.StrokeVisible=random.Next(2)==0;
+        result.FillColor=random.Next(2)==0 ? (Color?)null : Color.FromArgb(random.Next());
+        result.FillOpacity=new[]{.1,.25,.5,.75,1}[random.Next(5)];
+        result.Hatch=(HatchPattern)random.Next(11); result.HatchScale=new[]{.5,1,2,4}[random.Next(4)];
+        result.HatchBackground=random.Next(2)==0 ? (Color?)null : Color.FromArgb(random.Next());
         return result;
     }
     private static GH_IWriter FirstRecord(GH_LooseChunk root) => (GH_IWriter)root.FindChunk("HopperDraw").FindChunk("Shapes").FindChunk("Shape", 0);
@@ -240,6 +246,7 @@ internal static class Program
         ReliabilityTests.Run();
         Review2Tests.Run();
         CanvasMenuTests.Run();
+        FillHatchTests.Run();
         return Finish();
     }
     private static int Finish()

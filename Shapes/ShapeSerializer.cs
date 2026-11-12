@@ -92,6 +92,14 @@ namespace hopperdraw
             writer.SetGuid("Id", shape.PersistentId);
             writer.SetDouble("ThickMult", shape.ThicknessMultiplier);
             writer.SetInt32("LineType", (int)shape.LineType);
+            writer.SetBoolean("StrokeVisible", shape.StrokeVisible);
+            writer.SetBoolean("HasFillColor", shape.FillColor.HasValue);
+            if (shape.FillColor.HasValue) writer.SetInt32("FillColor", shape.FillColor.Value.ToArgb());
+            writer.SetDouble("FillOpacity", shape.FillOpacity);
+            writer.SetInt32("Hatch", (int)shape.Hatch);
+            writer.SetDouble("HatchScale", shape.HatchScale);
+            writer.SetBoolean("HasHatchBackground", shape.HatchBackground.HasValue);
+            if (shape.HatchBackground.HasValue) writer.SetInt32("HatchBackground", shape.HatchBackground.Value.ToArgb());
             writer.SetBoolean("HasColor", shape.OverrideColor.HasValue);
             if (shape.OverrideColor.HasValue) writer.SetInt32("Color", shape.OverrideColor.Value.ToArgb());
             if (shape is DrawShapeGroup group) { WriteShapeList(writer, "Children", group.Children, group.ChildrenExtensions); return; }
@@ -194,7 +202,7 @@ namespace hopperdraw
                     default: shape = new CurveShape(points, closed); break;
                 }
             }
-            var knownItems = new List<string> { "Kind", "Id", "ThickMult", "LineType", "HasColor", "Color" };
+            var knownItems = new List<string> { "Kind", "Id", "ThickMult", "LineType", "HasColor", "Color", "StrokeVisible", "HasFillColor", "FillColor", "FillOpacity", "Hatch", "HatchScale", "HasHatchBackground", "HatchBackground" };
             if (kind != 4) knownItems.AddRange(new[] { "X", "Y" });
             if (kind == 1 || kind == 3) knownItems.Add("Closed");
             shape.Extensions = Residual(reader, knownItems, kind == 4 ? new[] { "Children" } : new string[0]);
@@ -222,6 +230,23 @@ namespace hopperdraw
                 if (!reader.TryGetInt32("Color", ref color)) throw new FormatException("Missing override color.");
                 shape.OverrideColor = Color.FromArgb(color);
             }
+            bool stroke = true, hasFill = false, hasBackground = false;
+            double opacity = 1, scale = 1; int hatch = 0, fill = 0, background = 0;
+            if (reader.ItemExists("StrokeVisible") && !reader.TryGetBoolean("StrokeVisible", ref stroke) ||
+                reader.ItemExists("HasFillColor") && !reader.TryGetBoolean("HasFillColor", ref hasFill) ||
+                reader.ItemExists("HasHatchBackground") && !reader.TryGetBoolean("HasHatchBackground", ref hasBackground) ||
+                reader.ItemExists("FillOpacity") && !reader.TryGetDouble("FillOpacity", ref opacity) ||
+                reader.ItemExists("HatchScale") && !reader.TryGetDouble("HatchScale", ref scale) ||
+                reader.ItemExists("Hatch") && !reader.TryGetInt32("Hatch", ref hatch) ||
+                reader.ItemExists("FillColor") && !reader.TryGetInt32("FillColor", ref fill) ||
+                reader.ItemExists("HatchBackground") && !reader.TryGetInt32("HatchBackground", ref background) ||
+                hasFill && !reader.ItemExists("FillColor") || hasBackground && !reader.ItemExists("HatchBackground") ||
+                double.IsNaN(opacity) || opacity < .1 || opacity > 1 ||
+                double.IsNaN(scale) || double.IsInfinity(scale) || scale <= 0 || scale > 1000000 || hatch < 0 || hatch > 10)
+                throw new FormatException("Invalid fill/stroke style.");
+            shape.StrokeVisible = stroke; shape.FillColor = hasFill ? Color.FromArgb(fill) : (Color?)null;
+            shape.FillOpacity = opacity; shape.Hatch = (HatchPattern)hatch; shape.HatchScale = scale;
+            shape.HatchBackground = hasBackground ? Color.FromArgb(background) : (Color?)null;
             return shape;
         }
 

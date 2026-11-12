@@ -24,11 +24,11 @@ internal static class CanvasMenuTests
             using(var menu=new ContextMenuStrip())
             {
                 AnnotationMenuBuilder.Selection(menu.Items,new[]{o});
-                Program.Check(Find(Find(menu.Items,"Color").DropDownItems,"Red").Checked,"Uniform red unchecked");
-                Program.Check(Find(Find(menu.Items,"Thickness").DropDownItems,"2x").Checked,"Uniform width unchecked");
-                Program.Check(Find(Find(menu.Items,"Line type").DropDownItems,"Dot").Checked,"Uniform dash unchecked");
+                Program.Check(Find(Find(Find(menu.Items,"Stroke").DropDownItems,"Color").DropDownItems,"Red").Checked,"Uniform red unchecked");
+                Program.Check(Find(Find(Find(menu.Items,"Stroke").DropDownItems,"Thickness").DropDownItems,"2x").Checked,"Uniform width unchecked");
+                Program.Check(Find(Find(Find(menu.Items,"Stroke").DropDownItems,"Line type").DropDownItems,"Dot").Checked,"Uniform dash unchecked");
                 Program.Check(Find(menu.Items,"Use selection style for drawing").Enabled,"Uniform style unavailable");
-                Find(Find(menu.Items,"Line type").DropDownItems,"Dash-dot-dot").PerformClick();
+                Find(Find(Find(menu.Items,"Stroke").DropDownItems,"Line type").DropDownItems,"Dash-dot-dot").PerformClick();
                 Program.Check(o.Shapes[0].LineType==DashStyle.DashDotDot && o.CurrentLineType==DashStyle.Solid,"Selection style changed pen");
             }
         });
@@ -39,10 +39,10 @@ internal static class CanvasMenuTests
             using(var menu=new ContextMenuStrip())
             {
                 AnnotationMenuBuilder.Selection(menu.Items,new[]{a,b});
-                foreach(string name in new[]{"Color","Thickness","Line type"}) Program.Check(!Find(menu.Items,name).DropDownItems.OfType<ToolStripMenuItem>().Any(i=>i.Checked),"Mixed style checked: "+name);
+                foreach(string name in new[]{"Color","Thickness","Line type"}) Program.Check(!Find(Find(menu.Items,"Stroke").DropDownItems,name).DropDownItems.OfType<ToolStripMenuItem>().Any(i=>i.Checked),"Mixed style checked: "+name);
                 Program.Check(!Find(menu.Items,"Use selection style for drawing").Enabled,"Mixed style copied to pen");
                 Program.Check(!Find(menu.Items,"Group").Enabled && Find(menu.Items,"Group").ToolTipText.Length>0,"Cross-owner grouping available or unexplained");
-                Find(Find(menu.Items,"Thickness").DropDownItems,"5x").PerformClick();
+                Find(Find(Find(menu.Items,"Stroke").DropDownItems,"Thickness").DropDownItems,"5x").PerformClick();
                 Program.Check(a.Shapes[0].ThicknessMultiplier==5 && b.Shapes[0].ThicknessMultiplier==5,"Menu did not style both owners");
             }
         });
@@ -53,7 +53,7 @@ internal static class CanvasMenuTests
             {
                 AnnotationMenuBuilder.Drawing(menu.Items,o);
                 Program.Check(Find(Find(menu.Items,"Tool").DropDownItems,"Line").Checked,"Current tool not checked");
-                Program.Check(Find(Find(Find(menu.Items,"Pen").DropDownItems,"Thickness").DropDownItems,"3x").Checked,"Pen width not checked");
+                Program.Check(Find(Find(Find(Find(menu.Items,"Pen").DropDownItems,"Stroke").DropDownItems,"Thickness").DropDownItems,"3x").Checked,"Pen width not checked");
                 Find(Find(menu.Items,"Tool").DropDownItems,"Curve").PerformClick();
                 Program.Check(o.DrawMode==3,"Tool persistent API not applied");
             }

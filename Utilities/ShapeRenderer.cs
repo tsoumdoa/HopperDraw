@@ -25,16 +25,51 @@ namespace hopperdraw
                 }
                 if (!ValidPoints(shape.GetPoints())) return;
                 float width = StyleValidation.EffectiveWidth(baseWidth, shape.ThicknessMultiplier);
-                using (var pen = new Pen(shape.OverrideColor ?? baseColor, width))
+                using (var boundary = AnnotationGeometry.Boundary(shape))
                 {
-                    pen.DashStyle = StyleValidation.SafeDash(shape.LineType);
-                    shape.Render(graphics, pen, width);
+                    HatchRenderer.Paint(graphics,shape,boundary);
+                    if (shape.StrokeVisible)
+                        using (var pen = new Pen(shape.OverrideColor ?? baseColor, width))
+                        {
+                            pen.DashStyle = StyleValidation.SafeDash(shape.LineType);
+                            if (boundary.PointCount > 0) graphics.DrawPath(pen,boundary);
+                        }
                 }
             }
             catch (Exception ex)
             {
                 // GDI+ can reject finite degenerate geometry. One annotation must not break GH paint.
                 System.Diagnostics.Debug.WriteLine("HopperDraw paint skipped: " + ex.Message);
+            }
+        }
+
+        internal static void Ghost(Graphics g, DrawShape shape, Color basis, float scale)
+        {
+            if (shape is DrawShapeGroup group) { foreach(var child in group.Children) Ghost(g,child,basis,scale); return; }
+            try
+            {
+                if (shape is OpaqueShape || shape.HasPaint(basis) || !ValidPoints(shape.GetPoints())) return;
+                using(var path=AnnotationGeometry.Boundary(shape))
+                using(var pen=new Pen(Color.FromArgb(150,100,100,100),scale) { DashStyle=System.Drawing.Drawing2D.DashStyle.Dash })
+                    if(path.PointCount>0) g.DrawPath(pen,path);
+            }
+            catch (Exception ex) { System.Diagnostics.Debug.WriteLine("HopperDraw ghost skipped: " + ex.Message); }
+        }
+
+        private static void Outline(Graphics g, DrawShape shape, bool selected, float scale)
+        {
+            if (shape is DrawShapeGroup group) { foreach(var child in group.Children) Outline(g,child,selected,scale); return; }
+            if (shape is OpaqueShape) return;
+            using(var boundary=AnnotationGeometry.Boundary(shape))
+            {
+                if(boundary.PointCount==0) return;
+                if(selected) using(var halo=new Pen(Color.White,4*scale)) g.DrawPath(halo,boundary);
+                bool ghost=!shape.StrokeVisible && !shape.VisibleFill;
+                using(var pen=new Pen(selected ? Color.FromArgb(20,150,70) : Color.FromArgb(110,30,150,80),(selected?2:ghost?1:3)*scale))
+                {
+                    if(selected || ghost) pen.DashStyle=System.Drawing.Drawing2D.DashStyle.Dash;
+                    g.DrawPath(pen,boundary);
+                }
             }
         }
 
@@ -55,19 +90,7 @@ namespace hopperdraw
                         graphics.FillRectangle(brush, pt.X - size / 2, pt.Y - size / 2, size, size);
                         graphics.DrawRectangle(pen, pt.X - size / 2, pt.Y - size / 2, size, size);
                     }
-                    if (!selected && drawOutline)
-                        foreach (var stroke in AnnotationGeometry.Strokes(shape))
-                            using (var hover = new Pen(Color.FromArgb(110, 30, 150, 80), 3 * scale)) graphics.DrawLines(hover,stroke);
-                    if (selected && drawOutline && points.Length > 1)
-                    {
-                        foreach (var stroke in AnnotationGeometry.Strokes(shape))
-                        {
-                            using (var halo = new Pen(Color.White, 4 * scale)) graphics.DrawLines(halo, stroke);
-                            pen.Color = Color.FromArgb(20, 150, 70); pen.Width = 2 * scale;
-                            pen.DashStyle = System.Drawing.Drawing2D.DashStyle.Dash;
-                            graphics.DrawLines(pen, stroke);
-                        }
-                    }
+                    if (drawOutline) Outline(graphics,shape,selected,scale);
                 }
             }
             catch (Exception ex) { System.Diagnostics.Debug.WriteLine("HopperDraw handles skipped: " + ex.Message); }

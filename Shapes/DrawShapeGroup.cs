@@ -25,8 +25,7 @@ namespace hopperdraw
         }
         private static bool HitChild(DrawShape child, PointF pt, float tolerance, float basis)
         {
-            float width = child is DrawShapeGroup ? basis : StyleValidation.EffectiveWidth(basis, child.ThicknessMultiplier);
-            return child.HitTest(pt, tolerance, width).hit;
+            return AnnotationGeometry.Hit(child, pt, tolerance, basis);
         }
         public override PointF[] GetPoints()
         {
@@ -61,6 +60,7 @@ namespace hopperdraw
         {
             var group = new DrawShapeGroup { Id = HopperDraw.GetNextId() };
             group.Children.AddRange(Children.Select(child => child.Clone()));
+            CopyStyleTo(group);
             CopyArchiveStateTo(group);
             group.ChildrenExtensions = ChildrenExtensions == null ? null : ShapeSerializer.Capture(ChildrenExtensions);
             return group;

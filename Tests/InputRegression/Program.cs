@@ -193,6 +193,7 @@ internal static class Program
                 Check(GeometryUtilities.SnapOrthogonal(start, targets[i]) == expected[i], "Snap case " + i);
         });
         CanvasUxTests.Run(Test, Check);
+        FreehandTests.Run(Test, Check);
         return Finish();
     }
     private static int Finish()
