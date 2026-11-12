@@ -46,5 +46,14 @@ internal static class TextInputTests
             check(owner.DrawingModeEnabled && !owner.Draft.Active,"tool change exited drawing mode");
             owner.ResetPen();check(!owner.TextPen.Bold && !owner.TextPen.StrokeVisible && owner.PenStyle.StrokeVisible,"reset pen wrong");
         });
+        test("finishing text leaves drawing mode only from the Text tool",()=>
+        {
+            var owner=new HopperDraw();var flags=System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance;
+            check(!CanvasAnnotationController.ExitsAfterText(null) && !CanvasAnnotationController.ExitsAfterText(owner),"exit outside drawing mode");
+            typeof(HopperDraw).GetField("_drawingModeEnabled",flags).SetValue(owner,true);
+            owner.SetTool(0);check(!CanvasAnnotationController.ExitsAfterText(owner),"editing text from Line tool exits drawing");
+            owner.SetTool(5);check(CanvasAnnotationController.ExitsAfterText(owner),"Text tool stays after finishing");
+            owner.ExitDrawing();check(!owner.DrawingModeEnabled,"exit failed");
+        });
     }
 }

@@ -70,7 +70,7 @@ namespace hopperdraw
                     Math.Max(48, (int)Math.Min(10000, (layout.Bounds.Height - 2 * layout.Padding) * zoom + 12)));
                 _editor = editor;
                 _text = session;
-                editor.Commit = () => EndText(true);
+                editor.Commit = () => EndText(true, true);
                 editor.LostFocus += EditorLostFocus;
                 editor.TextChanged += EditorTextChanged;
                 _canvas.Controls.Add(editor);
@@ -95,7 +95,7 @@ namespace hopperdraw
             _editor.Size = new Size(Math.Max(80, (int)Math.Min(10000, (b.Bounds.Width - 2*b.Padding)*zoom+12)),
                 Math.Max(48, (int)Math.Min(10000, (b.Bounds.Height - 2*b.Padding)*zoom+12)));
         }
-        private void EditorLostFocus(object sender, EventArgs e) => EndText(true);
+        private void EditorLostFocus(object sender, EventArgs e) => EndText(true, true);
         private void TextUndoChanged(object sender, GH_DocUndoEventArgs e)
         { if (e.Operation == GH_UndoOperation.Undo || e.Operation == GH_UndoOperation.Redo) { _textEpoch++; EndText(false); } }
         internal void AbortText(HopperDraw owner)
@@ -103,7 +103,10 @@ namespace hopperdraw
             OwnerPlacement(owner).Value++;
             if (_text?.Owner == owner) EndText(false);
         }
-        private void EndText(bool commit)
+        // finished: the user ended this text (Esc, Ctrl+Enter, left click outside, focus left). Like the text tool in
+        // design apps, that also leaves the Text tool, so the next click selects/drags instead of placing more text.
+        // Viewport changes, right-click, M changes, aborts and starting another edit keep drawing mode.
+        private void EndText(bool commit, bool finished = false)
         {
             if (_text == null || _endingText) return;
             _endingText = true;
@@ -134,7 +137,9 @@ namespace hopperdraw
                 }
             }
             finally { _endingText = false; }
+            if (commit && finished && ExitsAfterText(DrawingOwner)) { DrawingOwner.ExitDrawing(); FeedbackChanged(); }
         }
+        internal static bool ExitsAfterText(HopperDraw drawing) => drawing != null && drawing.DrawingModeEnabled && drawing.DrawMode == 5;
         internal static string EditorText(string model) => TextShape.NormalizeNewlines(model).Replace("\n", "\r\n");
         public bool PreFilterMessage(ref Message m)
         {
@@ -145,7 +150,7 @@ namespace hopperdraw
             bool press = m.Msg == 0x201 || m.Msg == 0x204 || m.Msg == 0x207 || m.Msg == 0x20b, wheel = m.Msg == 0x20a;
             if (!press && !wheel) return false;
             if (!Owners.Contains(_text.Owner)) EndText(false);
-            else if (press && m.HWnd != _editor.Handle || wheel && m.HWnd == _canvas.Handle) EndText(true);
+            else if (press && m.HWnd != _editor.Handle || wheel && m.HWnd == _canvas.Handle) EndText(true, m.Msg == 0x201);
             return false;
         }
         private void ViewportChanged(object sender, GH_CanvasViewportChangedEventArgs e) => EndText(true);
@@ -267,7 +272,7 @@ namespace hopperdraw
                     if (_text != null)
                     {
                         // Only the editor this canvas owns, and only while it has focus.
-                        if (_editor != null && _editor.ContainsFocus && FreshEscape()) EndText(true);
+                        if (_editor != null && _editor.ContainsFocus && FreshEscape()) EndText(true, true);
                         return;
                     }
                     if (!CanvasOwnsKeyboard() || unchecked((uint)(Environment.TickCount - _textEndedTick)) < 250) return;
@@ -354,7 +359,7 @@ namespace hopperdraw
         }
         private void RouteMessage(int message, MouseEventArgs e, bool after)
         {
-            if (!after && (message == 0x201 || message == 0x203 || message == 0x204 || message == 0x20a)) EndText(true);
+            if (!after && (message == 0x201 || message == 0x203 || message == 0x204 || message == 0x20a)) EndText(true, message == 0x201 || message == 0x203);
             if (!after && (message == 0x201 || message == 0x203 || message == 0x204))
             {
                 _prePress = null;
@@ -488,7 +493,7 @@ namespace hopperdraw
             {
                 if (key != Keys.Escape && !(key == Keys.Enter && mods == Keys.Control)) return false;
                 if (key == Keys.Escape && !FreshEscape()) return true;
-                EndText(true); return true;
+                EndText(true, true); return true;
             }
             if (!Owners.Any() || _canvas.Document == null || _canvas.ActiveWidget != null || _canvas.ActiveObject != null) return false;
             // GH clears its preview boundary before dispatching Escape to any interaction.
