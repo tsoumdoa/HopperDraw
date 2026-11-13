@@ -18,6 +18,7 @@ namespace hopperdraw
         private readonly GH_CanvasMouseEvent _press;
         private readonly bool _context;
         private AnnotationMove _move;
+        private TextShape _pendingText;
         private bool _done, _moving, _autoPan, _pressedHandled;
         // Captured at press, before mouse-down can finish a polyline/curve draft: a double-click that finishes
         // an open draft over a text label must never also open the text editor.
@@ -43,7 +44,13 @@ namespace hopperdraw
             if (e.Clicks > 1 && _owner != null && _textEditAllowed)
             {
                 var target = TextAt(_owner.Shapes[_shape], e.CanvasLocation, 5 * _owner.CanvasScale, _owner.LineThickness, _owner.DrawOrder != 0);
-                if (target != null) { _done = true; _controller.BeginText(_owner, target, false); return GH_ObjectResponse.Release; }
+                if (target != null)
+                {
+                    // Keep GH's active interaction through its double-click dispatch so relay/search
+                    // handling cannot run before editor focus tears down the interaction.
+                    _pendingText = target;
+                    return GH_ObjectResponse.Handled;
+                }
             }
             if (_drawing != null)
             {
@@ -89,7 +96,7 @@ namespace hopperdraw
                     { if (Math.Abs(delta.X)>=Math.Abs(delta.Y)) delta.Y=0; else delta.X=0; }
                     _move.Translate(new PointF((float)delta.X,(float)delta.Y),true);
                 }
-                Instances.CursorServer.AttachCursor(sender,"GH_HandClosed");
+                _controller.AssignCursor(Instances.CursorServer.Cursor("GH_HandClosed"));
             }
             sender.Invalidate(); return GH_ObjectResponse.Handled;
         }
@@ -106,6 +113,11 @@ namespace hopperdraw
         {
             if (_done || e.Button != _press.Button) return GH_ObjectResponse.Handled;
             _done=true;
+            if (_pendingText != null)
+            {
+                _controller.BeginText(_owner, _pendingText, false);
+                return GH_ObjectResponse.Release;
+            }
             if (_autoPan) { sender.StopAutoPan(); _autoPan=false; }
             if (_context)
             {
@@ -145,7 +157,8 @@ namespace hopperdraw
         {
             Cancel();
             if (_autoPan) { m_canvas.StopAutoPan(); _autoPan=false; }
-            Instances.CursorServer.ResetCursor(m_canvas); base.Destroy();
+            _controller?.ResetCursor(); base.Destroy();
+            if(_controller!=null && !m_canvas.IsDisposed && m_canvas.IsHandleCreated) m_canvas.BeginInvoke(new Action(_controller.RefreshCursor));
         }
         // Same tolerance and backdrop rule as picking, so any text that can be picked can be double-click edited.
         internal static TextShape TextAt(DrawShape shape, PointF point, float tolerance, float baseWidth, bool interior)

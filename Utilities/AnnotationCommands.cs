@@ -61,11 +61,18 @@ namespace hopperdraw
         {
             var selected=owners.Where(o=>o.HasSelection).ToArray();
             if(selected.Length==0 || selected.Any(o=>o.Selection.Any(s=>!s.CanTransformGeometry))) return;
+            var proposals = selected.ToDictionary(o => o, o => o.Selection.Select(s =>
+            {
+                var copy = s.Clone();
+                copy.Move(30, 30);
+                return copy;
+            }).ToArray());
+            if (proposals.Values.SelectMany(copies => copies).Any(copy => !AnnotationMove.ValidGeometry(copy))) return;
             if(!Record(selected,"Duplicate annotations")) return;
             foreach(var o in selected)
             {
-                var copies=o.Selection.Select(s=>s.Clone()).ToArray(); o.ClearSelection();
-                foreach(var copy in copies) { copy.Move(30,30); o.SelectedShapeIndices.Add(o.Shapes.Count); o.Shapes.Add(copy); }
+                var copies=proposals[o]; o.ClearSelection();
+                foreach(var copy in copies) { o.SelectedShapeIndices.Add(o.Shapes.Count); o.Shapes.Add(copy); }
                 o.Changed();
             }
         }

@@ -189,7 +189,7 @@ namespace hopperdraw
             thickness = StyleValidation.Width(thickness);
             _borderColor = color;
             _lineThickness = (float)thickness;
-            if (_drawMode != drawMode) CancelGesture();
+            if (_drawMode != drawMode) CancelGesture(true);
             _drawMode = drawMode;
             _baseLineType = (System.Drawing.Drawing2D.DashStyle)lineType;
             if (!_hasPendingLineTypeOverride) _currentLineType = _baseLineType;
@@ -578,26 +578,12 @@ namespace hopperdraw
 
         private void CancelDrawing()
         {
-            _annotationController?.CancelOwner(this);
-            Draft.Cancel();
-            EndShapeGesture();
+            CancelGesture();
             if (ReferenceEquals(_capturingOwner, this)) _capturingOwner = null;
             _drawingModeEnabled = false;
             _drawingKeyGesture.Reset();
             _drawingShortcut?.Reset();
-            _currentPoints.Clear();
-            _isDrawing = false;
-            _frameCornerCount = 0;
-            _acceptDrawingMouseUp = false;
             // The session pen is sticky until explicitly reset.
-            _clickStartPt = Point3d.Unset;
-            _isWindowSelecting = false;
-            _isDragging = false;
-            _isMultiDragging = false;
-            _isFrameDragging = false;
-            _dragShapeIndex = -1;
-            _dragPointIndex = -1;
-            ClearCapturedGHObjects();
         }
 
         internal void EnterDrawingMode()
@@ -619,6 +605,7 @@ namespace hopperdraw
             _drawingModeEnabled = true;
             _capturingOwner = this;
             _canvas.Focus();
+            _annotationController?.FeedbackChanged();
             _canvas.Invalidate();
         }
 
@@ -1268,35 +1255,6 @@ namespace hopperdraw
             RequestCanvasRedraw();
         }
 
-        private void ShowColorPickerForSelected()
-        {
-            if (!HasSelection)
-                return;
-
-            var firstShape = Shapes[SelectedShapeIndices[0]];
-            using (var dialog = new ColorDialog())
-            {
-                dialog.Color = firstShape.OverrideColor ?? _borderColor;
-                if (dialog.ShowDialog() == DialogResult.OK)
-                {
-                    SetSelectedColor(dialog.Color);
-                    _canvas?.Invalidate();
-                }
-            }
-        }
-
-        private void ShowColorPickerForDrawing()
-        {
-            using (var dialog = new ColorDialog())
-            {
-                dialog.Color = _pendingColorOverride ?? _borderColor;
-                if (dialog.ShowDialog() == DialogResult.OK)
-                {
-                    _pendingColorOverride = dialog.Color;
-                }
-            }
-        }
-
         private void CaptureSelectedGHObjects()
         {
             _selectedGHObjects.Clear();
@@ -1587,6 +1545,7 @@ namespace hopperdraw
 
         private void RequestCanvasRedraw()
         {
+            _annotationController?.FeedbackChanged();
             var canvas = _canvas ?? Instances.ActiveCanvas;
             if (canvas != null && ReferenceEquals(canvas.Document, OnPingDocument())) canvas.Invalidate();
         }

@@ -13,7 +13,7 @@ internal static class FillHatchTests
     private static FrameShape Frame() => new FrameShape(new Point3d(20,20,0),new Point3d(100,20,0),new Point3d(100,100,0),new Point3d(20,100,0));
     private static HopperDraw Owner(DrawShape shape) { var owner=new HopperDraw(); owner.Shapes.Add(shape); owner.SelectedShapeIndices.Add(0); return owner; }
     private static GH_IWriter Record(GH_LooseChunk root) => (GH_IWriter)root.FindChunk("HopperDraw").FindChunk("Shapes").FindChunk("Shape",0);
-    private static ToolStripMenuItem Find(ToolStripItemCollection items,string name)=>items.OfType<ToolStripMenuItem>().Single(i=>i.Text==name);
+    private static ToolStripMenuItem Find(ToolStripItemCollection items,string name)=>items.OfType<ToolStripMenuItem>().Single(i=>i.Name==name);
     private static Bitmap Paint(DrawShape shape)
     {
         var b=new Bitmap(130,130); using(var g=Graphics.FromImage(b)) { g.Clear(Color.Transparent); ShapeRenderer.Render(g,shape,Color.Black,8); } return b;
@@ -217,7 +217,7 @@ internal static class FillHatchTests
         {
             var owner=new HopperDraw(); owner.PenStyle.StrokeVisible=false; owner.PenStyle.FillColor=Color.Red;
             owner.CompleteDraft(new CurveShape(new[]{new Point3d(0,0,0),new Point3d(50,50,0)}.ToList()));
-            Program.Check(owner.Shapes.Count==0 && owner.PenNoticeUntil>DateTime.UtcNow,"invisible completion accepted or no HUD");
+            Program.Check(owner.Shapes.Count==0 && owner.PenNotice=="Shape has no visible paint","invisible completion accepted or no HUD");
             owner.CompleteDraft(Frame()); Program.Check(owner.Shapes.Count==1 && owner.Shapes[0].FillColor==Color.Red && !owner.Shapes[0].StrokeVisible,"closed pen fill lost");
             owner.PenStyle.FillColor=Color.FromArgb(1,255,0,0); owner.PenStyle.FillOpacity=.1;
             owner.CompleteDraft(Frame()); Program.Check(owner.Shapes.Count==1,"zero effective alpha created invisible shape");

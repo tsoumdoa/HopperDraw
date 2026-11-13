@@ -11,14 +11,13 @@ namespace hopperdraw
         internal readonly HopperDraw Owner;
         internal readonly object Document;
         internal readonly Guid TargetId;
-        internal readonly TextShape Original, Draft;
+        internal readonly TextShape Draft;
         internal string Buffer;
         internal bool Ended { get; private set; }
         internal bool IsNew { get; }
         internal TextEditSession(HopperDraw owner, object document, TextShape shape, bool isNew)
         {
             Owner = owner; Document = document; TargetId = shape.PersistentId; IsNew = isNew;
-            Original = (TextShape)ShapeEditUndoAction.CloneForSnapshot(shape);
             Draft = (TextShape)ShapeEditUndoAction.CloneForSnapshot(shape); Buffer = shape.Text;
         }
         internal static TextShape Find(IEnumerable<DrawShape> shapes, Guid id) =>

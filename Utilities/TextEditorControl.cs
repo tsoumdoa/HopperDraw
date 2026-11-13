@@ -10,6 +10,8 @@ namespace hopperdraw
     {
         [DllImport("user32.dll")] private static extern bool TranslateMessage(ref Message message);
         [DllImport("user32.dll")] private static extern IntPtr SendMessage(IntPtr window, int message, IntPtr wParam, IntPtr lParam);
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        private static extern IntPtr SendMessage(IntPtr window, int message, IntPtr wParam, string text);
         internal Action Commit;
         private bool _finishing;
         private int _suppressedScan = -1;
@@ -25,6 +27,8 @@ namespace hopperdraw
             // avoid bubbling to the parent menu. These methods send native EDIT commands.
             switch (keyData)
             {
+                case Keys.Control | Keys.Back: DeleteWord(true); return true;
+                case Keys.Control | Keys.Delete: DeleteWord(false); return true;
                 case Keys.Control | Keys.A: SelectAll(); return true;
                 case Keys.Control | Keys.C:
                 case Keys.Control | Keys.Insert: Copy(); return true;
@@ -36,6 +40,27 @@ namespace hopperdraw
                 case Keys.Alt | Keys.Back: Undo(); return true;
             }
             return false;
+        }
+        private void DeleteWord(bool backwards)
+        {
+            if (SelectionLength == 0)
+            {
+                string text = Text;
+                int start = SelectionStart, end = start;
+                if (backwards)
+                {
+                    while (start > 0 && char.IsWhiteSpace(text[start - 1])) start--;
+                    while (start > 0 && !char.IsWhiteSpace(text[start - 1])) start--;
+                }
+                else
+                {
+                    while (end < text.Length && char.IsWhiteSpace(text[end])) end++;
+                    while (end < text.Length && !char.IsWhiteSpace(text[end])) end++;
+                }
+                Select(start, end - start);
+            }
+            // Unlike SelectedText's setter, EM_REPLACESEL with canUndo preserves local undo.
+            SendMessage(Handle, 0xC2, new IntPtr(1), "");
         }
         protected override bool IsInputKey(Keys keyData) => true;
         private bool FinishMessage(Message m)
@@ -53,6 +78,9 @@ namespace hopperdraw
         {
             // Some host dispatch bypasses the application filter. Keep the finish key
             // and its delayed WM_CHAR paired there as well, without touching other messages.
+            if (m.Msg == 0x102 && char.IsControl((char)m.WParam.ToInt32()) &&
+                m.WParam.ToInt32() != 8 && m.WParam.ToInt32() != 9 && m.WParam.ToInt32() != 13)
+            { m.Result = IntPtr.Zero; return; }
             if (FinishMessage(m)) { m.Result = IntPtr.Zero; return; }
             base.WndProc(ref m);
         }

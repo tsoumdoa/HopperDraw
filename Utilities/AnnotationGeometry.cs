@@ -18,14 +18,32 @@ namespace hopperdraw
         private static bool IsClosed(DrawShape shape) => shape is TextShape || shape is FrameShape || shape is PolylineShape p && p.Closed || shape is CurveShape c && c.Closed;
         private static StrokeCache Leaf(DrawShape shape)
         {
-            var points = BoundaryPoints(shape);
             bool closed = IsClosed(shape);
             var cache = Cache.GetValue(shape, _ => new StrokeCache());
-            if (cache.Key != null && cache.Closed == closed && cache.Key.SequenceEqual(points)) return cache;
+            if (cache.Key != null && cache.Closed == closed && SamePoints(shape, cache.Key)) return cache;
+            var points = BoundaryPoints(shape);
             cache.Key = points; cache.Closed = closed;
             cache.Stroke = points.Length < 2 || !ShapeRenderer.ValidPoints(points) ? null : Flatten(shape);
             cache.Bounds = Bounds(cache.Stroke);
             return cache;
+        }
+        // Public point lists can be edited in place, so compare their coordinates directly. Cache hits
+        // allocate nothing and avoid PointF's boxed Equals used by Enumerable.SequenceEqual.
+        private static bool SamePoints(DrawShape shape, PointF[] key)
+        {
+            bool At(int i, Point3d p) => key[i].X == (float)p.X && key[i].Y == (float)p.Y;
+            if (shape is LineShape line) return key.Length == 2 && At(0, line.Start) && At(1, line.End);
+            if (shape is FrameShape frame) return key.Length == 4 && At(0, frame.TopLeft) && At(1, frame.TopRight) &&
+                At(2, frame.BottomRight) && At(3, frame.BottomLeft);
+            if (shape is TextShape text)
+            {
+                var b = text.LayoutBounds;
+                return key.Length == 4 && key[0].X == b.Left && key[0].Y == b.Top && key[2].X == b.Right && key[2].Y == b.Bottom;
+            }
+            var points = shape is PolylineShape poly ? poly.Points : (shape as CurveShape)?.Points;
+            if (points == null || key.Length != points.Count) return false;
+            for (int i = 0; i < key.Length; i++) if (!At(i, points[i])) return false;
+            return true;
         }
         internal static PointF[] BoundaryPoints(DrawShape shape)
         {

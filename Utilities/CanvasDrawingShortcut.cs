@@ -36,7 +36,7 @@ namespace hopperdraw
         [DllImport("user32.dll")] private static extern bool GetGUIThreadInfo(uint thread, ref GuiThreadInfo info);
         internal static bool MenuActive
         {
-            get { var info = new GuiThreadInfo { Size = Marshal.SizeOf(typeof(GuiThreadInfo)) }; return GetGUIThreadInfo(0, ref info) && (info.Flags & 0x1c) != 0; }
+            get { var info = new GuiThreadInfo { Size = Marshal.SizeOf(typeof(GuiThreadInfo)) }; return AnnotationMenuKeys.Active || GetGUIThreadInfo(0, ref info) && (info.Flags & 0x1c) != 0; }
         }
         private readonly Control _canvas;
         private readonly List<Registration> _owners = new List<Registration>();
@@ -160,7 +160,7 @@ namespace hopperdraw
         private readonly HashSet<Keys> _commandsDown = new HashSet<Keys>();
         private bool RouteCommand(Keys key, bool repeat = false)
         {
-            if (!_canvas.Focused) return false;
+            if (!_canvas.Focused || MenuActive) return false;
             if (_commandsDown.Contains(key)) return true;
             if (repeat) return false;
             foreach (var owner in _owners.ToArray())
