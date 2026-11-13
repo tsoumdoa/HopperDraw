@@ -52,7 +52,9 @@ namespace hopperdraw
                     { var first = owner.Draft.Points[0]; float r = 9 * owner.CanvasScale; graphics.DrawEllipse(ring, (float)first.X-r,(float)first.Y-r,2*r,2*r); }
                 if (preview != null)
                 {
-                    owner.ApplyPen(preview);
+                    // The Text tool's drag frame previews the text box: text pen box style (stroke hidden by default,
+                    // then only the dashed ghost shows), never the geometric pen's stroke/fill.
+                    if (owner.DrawMode == 5) owner.TextPen.CopyStyleTo(preview); else owner.ApplyPen(preview);
                     ShapeRenderer.Render(graphics, preview, owner.BorderColor, owner.LineThickness);
                     ShapeRenderer.Ghost(graphics, preview, owner.BorderColor, owner.CanvasScale);
                     if (owner.DrawMode == 1 || owner.DrawMode == 3)

@@ -194,6 +194,7 @@ internal static class Program
         });
         CanvasUxTests.Run(Test, Check);
         FreehandTests.Run(Test, Check);
+        TextInputTests.Run(Test, Check);
         return Finish();
     }
     private static int Finish()

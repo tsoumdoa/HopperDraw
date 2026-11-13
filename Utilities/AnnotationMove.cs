@@ -49,7 +49,8 @@ namespace hopperdraw
             if (!Allowed) return;
             var proposal = ShapeEditUndoAction.CloneForSnapshot(_before[owner][shape]);
             var points = proposal.GetPoints();
-            if (proposal is FrameShape frame)
+            if (proposal is TextShape text) text.MovePoint(handle, point);
+            else if (proposal is FrameShape frame)
             {
                 var fixedPoint = points[(handle + 2) % 4];
                 if (shift) point = GeometryUtilities.SnapToAspectRatio(new Point3d(fixedPoint.X, fixedPoint.Y, 0), point,
@@ -73,7 +74,7 @@ namespace hopperdraw
             }
             if (!ShapeRenderer.ValidPoints(proposal.GetPoints())) return;
             owner.Shapes[shape] = proposal;
-            _edited = !proposal.GetPoints().SequenceEqual(_before[owner][shape].GetPoints());
+            _edited = proposal is TextShape editedText ? !editedText.SameText((TextShape)_before[owner][shape]) : !proposal.GetPoints().SequenceEqual(_before[owner][shape].GetPoints());
         }
         internal void Revert(bool native)
         {

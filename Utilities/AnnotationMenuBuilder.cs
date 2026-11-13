@@ -123,6 +123,29 @@ namespace hopperdraw
             Item(background.DropDownItems,"Light grey",()=>apply("Change hatch background",l=>l.HatchBackground=Color.LightGray),true,Same(l=>l.HatchBackground?.ToArgb()) && eligible[0].HatchBackground?.ToArgb()==Color.LightGray.ToArgb(),Preview(Color.LightGray,1,DashStyle.Solid,true));
             Palette(background.DropDownItems,eligible.FirstOrDefault()?.HatchBackground,Same(l=>l.HatchBackground?.ToArgb()),c=>apply("Change hatch background",l=>l.HatchBackground=c),true);
         }
+        private static void TextMenu(ToolStripItemCollection items, TextShape[] texts, Action<string, Action<TextShape>> apply, Action edit = null)
+        {
+            var menu = Sub(items,"Text"); menu.Enabled = texts.Length > 0;
+            bool Same<T>(Func<TextShape,T> get) => texts.Length > 0 && texts.Select(get).Distinct().Count() == 1;
+            var style = Sub(menu.DropDownItems,"Style");
+            foreach (TextStylePreset value in Enum.GetValues(typeof(TextStylePreset)))
+                Item(style.DropDownItems,value.ToString(),()=>apply("Change text style",t=>t.SetPreset(value)),true,Same(t=>t.StylePreset) && texts[0].StylePreset==value);
+            var size = Sub(menu.DropDownItems,"Size");
+            foreach (double value in new[]{.5,.75,1,1.5,2,3,4})
+                Item(size.DropDownItems,value.ToString("0.##",System.Globalization.CultureInfo.InvariantCulture)+"x",()=>apply("Change text size",t=>t.SizeMultiplier=value),true,Same(t=>t.SizeMultiplier) && texts[0].SizeMultiplier==value);
+            bool bold = Same(t=>t.Bold) && texts[0].Bold, italic = Same(t=>t.Italic) && texts[0].Italic;
+            Item(menu.DropDownItems,"Bold",()=>apply("Change text bold",t=>t.Bold=!bold),true,bold);
+            Item(menu.DropDownItems,"Italic",()=>apply("Change text italic",t=>t.Italic=!italic),true,italic);
+            var color = Sub(menu.DropDownItems,"Color");
+            Action<Color?> choose = c=>
+            {
+                if (c.HasValue) { Recent.RemoveAll(r=>r.ToArgb()==c.Value.ToArgb()); Recent.Insert(0,c.Value); if(Recent.Count>5) Recent.RemoveAt(5); }
+                apply("Change text color",t=>t.TextColorOverride=c);
+            };
+            Palette(color.DropDownItems,texts.FirstOrDefault()?.TextColorOverride,Same(t=>t.TextColorOverride?.ToArgb()),choose,false);
+            Item(color.DropDownItems,"Use component color",()=>choose(null),true,Same(t=>t.TextColorOverride?.ToArgb()) && !texts[0].TextColorOverride.HasValue);
+            if (edit != null) Item(menu.DropDownItems,"Edit text…",edit,texts.Length==1);
+        }
         internal static void Selection(ToolStripItemCollection items,HopperDraw[] owners)
         {
             var selected=owners.Where(o=>o.HasSelection).ToArray();
@@ -130,6 +153,10 @@ namespace hopperdraw
             var colors=leaves.Select(l=>l.OverrideColor?.ToArgb()).Distinct().ToArray();
             var widths=leaves.Select(l=>l.ThicknessMultiplier).Distinct().ToArray();
             var dashes=leaves.Select(l=>l.LineType).Distinct().ToArray();
+            var texts=leaves.OfType<TextShape>().ToArray();
+            if (texts.Length>0) TextMenu(items,texts,(name,change)=>AnnotationCommands.Apply(selected,name,
+                l=> { if (!(l is TextShape t)) return false; var copy=(TextShape)t.Clone(); change(copy); return !t.SameText(copy); },
+                l=>change((TextShape)l)),()=>selected.FirstOrDefault(o=>o.SelectionLeaves.Contains(texts[0]))?.EditText(texts[0]));
             int first=items.Count;
             var stroke=Sub(items,"Stroke");
             Styles(stroke.DropDownItems,colors.Length==1 && colors[0].HasValue ? Color.FromArgb(colors[0].Value) : (Color?)null,
@@ -151,7 +178,8 @@ namespace hopperdraw
             {
                 var target=owners.FirstOrDefault(o=>o.DrawingModeEnabled)??selected.FirstOrDefault();
                 target?.PenFrom(leaves[0]);
-            },leaves.Length>0 && leaves.All(l=>l.SameStyle(leaves[0])));
+            },leaves.Length>0 && leaves.All(l=>l.SameStyle(leaves[0])) &&
+                (texts.Length==0 || texts.Length==leaves.Length && texts.All(t=>t.SameTextStyle(texts[0]))));
             items.Add(new ToolStripSeparator());
             Item(items,"Bring to front",()=>AnnotationCommands.Arrange(selected,true),selected.Length>0);
             Item(items,"Send to back",()=>AnnotationCommands.Arrange(selected,false),selected.Length>0);
@@ -172,16 +200,18 @@ namespace hopperdraw
         internal static void Drawing(ToolStripItemCollection items,HopperDraw owner)
         {
             var tools=Sub(items,"Tool"); bool wired=owner.Params.Input[2].SourceCount>0;
-            foreach(var tool in DrawingTool.All) { int mode=tool.Index; var item=Item(tools.DropDownItems,tool.Name,()=>owner.SetTool(mode),!wired,owner.DrawMode==mode); if(wired) item.ToolTipText="Disconnect the M input to choose a tool here."; }
+            foreach(var tool in DrawingTool.All) { int mode=tool.Index; var item=Item(tools.DropDownItems,tool.Name,()=>owner.SetTool(mode),!wired,owner.DrawMode==mode); item.ShortcutKeyDisplayString=tool.Key.ToString(); if(wired) item.ToolTipText="Disconnect the M input to choose a tool here."; }
             var pen=Sub(items,"Pen");
+            TextMenu(pen.DropDownItems,new[]{owner.TextPen},(name,change)=>{change(owner.TextPen);owner.Redraw();});
             var stroke=Sub(pen.DropDownItems,"Stroke");
-            Styles(stroke.DropDownItems,owner.PendingColorOverride,owner.CurrentThicknessMultiplier,owner.CurrentLineType,
-                c=>owner.Pen(c,owner.CurrentThicknessMultiplier,owner.CurrentLineType),
-                w=>owner.Pen(owner.PendingColorOverride,w,owner.CurrentLineType),
-                d=>owner.Pen(owner.PendingColorOverride,owner.CurrentThicknessMultiplier,d));
+            var stylePen=owner.DrawMode==5 ? (DrawShape)owner.TextPen : owner.PenStyle;
+            Styles(stroke.DropDownItems,owner.DrawMode==5 ? stylePen.OverrideColor : owner.PendingColorOverride,owner.DrawMode==5 ? stylePen.ThicknessMultiplier : owner.CurrentThicknessMultiplier,owner.DrawMode==5 ? stylePen.LineType : owner.CurrentLineType,
+                c=>{ if(owner.DrawMode==5) {stylePen.OverrideColor=c;owner.Redraw();} else owner.Pen(c,owner.CurrentThicknessMultiplier,owner.CurrentLineType); },
+                w=>{ if(owner.DrawMode==5) {stylePen.ThicknessMultiplier=w;owner.Redraw();} else owner.Pen(owner.PendingColorOverride,w,owner.CurrentLineType); },
+                d=>{ if(owner.DrawMode==5) {stylePen.LineType=d;owner.Redraw();} else owner.Pen(owner.PendingColorOverride,owner.CurrentThicknessMultiplier,d); });
             stroke.DropDownItems.Add(new ToolStripSeparator());
-            Item(stroke.DropDownItems,"None",()=>{owner.PenStyle.StrokeVisible=!owner.PenStyle.StrokeVisible; owner.Redraw();},true,!owner.PenStyle.StrokeVisible);
-            Fill(pen.DropDownItems,new[]{owner.PenStyle},(name,change)=>{change(owner.PenStyle); owner.Redraw();},owner.DrawMode!=0,"Applies when the shape is closed.");
+            Item(stroke.DropDownItems,"None",()=>{stylePen.StrokeVisible=!stylePen.StrokeVisible; owner.Redraw();},true,!stylePen.StrokeVisible);
+            Fill(pen.DropDownItems,new[]{stylePen},(name,change)=>{change(stylePen); owner.Redraw();},owner.DrawMode!=0,"Applies when the shape is closed, or to the text box.");
             var smoothing=Sub(pen.DropDownItems,"Smoothing");
             foreach(SmoothingLevel value in Enum.GetValues(typeof(SmoothingLevel)))
                 Item(smoothing.DropDownItems,value.ToString(),()=>{owner.Smoothing=value; owner.Redraw();},true,owner.Smoothing==value);

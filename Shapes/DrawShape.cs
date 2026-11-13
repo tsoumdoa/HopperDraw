@@ -28,7 +28,7 @@ namespace hopperdraw
         public HatchPattern Hatch { get; set; }
         public double HatchScale { get; set; } = 1;
         public Color? HatchBackground { get; set; }
-        public bool SupportsFill => this is FrameShape || this is PolylineShape p && p.Closed || this is CurveShape c && c.Closed;
+        public bool SupportsFill => this is TextShape || this is FrameShape || this is PolylineShape p && p.Closed || this is CurveShape c && c.Closed;
         internal bool VisibleFill => SupportsFill && FillColor.HasValue && FillOpacity > 0 &&
             (Math.Round(FillColor.Value.A * Math.Min(1,FillOpacity)) > 0 || Hatch != HatchPattern.None && Math.Round(HatchBackground.GetValueOrDefault().A * Math.Min(1,FillOpacity)) > 0) &&
             HasArea;
@@ -37,6 +37,7 @@ namespace hopperdraw
         {
             get
             {
+                if (this is TextShape t) return t.LayoutBounds.Width > 0 && t.LayoutBounds.Height > 0;
                 if (this is FrameShape f) return Spans(new[] { f.TopLeft, f.TopRight, f.BottomRight, f.BottomLeft });
                 if (this is PolylineShape p) return Spans(p.Points);
                 if (this is CurveShape c) return Spans(c.Points);
@@ -55,7 +56,7 @@ namespace hopperdraw
                 if (Math.Abs((b.X-a.X)*(points[i].Y-a.Y)-(b.Y-a.Y)*(points[i].X-a.X)) > 1e-9 * scale * Math.Max(1, a.DistanceTo(points[i]))) return true;
             return false;
         }
-        internal bool HasPaint(Color basis) => StrokeVisible && (OverrideColor ?? basis).A > 0 || VisibleFill;
+        internal bool HasPaint(Color basis) => this is TextShape t && !string.IsNullOrWhiteSpace(t.Text) && (t.TextColorOverride ?? basis).A > 0 || StrokeVisible && (OverrideColor ?? basis).A > 0 || VisibleFill;
         internal void CopyStyleTo(DrawShape target)
         {
             target.OverrideColor = OverrideColor; target.ThicknessMultiplier = ThicknessMultiplier; target.LineType = LineType;
@@ -72,6 +73,13 @@ namespace hopperdraw
         public abstract void Render(Graphics g, Pen pen, float thickness);
         public abstract (bool hit, int pointIndex) HitTest(PointF pt, float tolerance, float thickness);
         public abstract PointF[] GetPoints();
+        internal virtual PointF[] EditHandles => GetPoints();
+        internal virtual RectangleF LayoutBounds
+        {
+            get { var p = GetPoints(); if (p.Length == 0) return RectangleF.Empty;
+                return RectangleF.FromLTRB(System.Linq.Enumerable.Min(p, x => x.X), System.Linq.Enumerable.Min(p, x => x.Y),
+                    System.Linq.Enumerable.Max(p, x => x.X), System.Linq.Enumerable.Max(p, x => x.Y)); }
+        }
         public abstract void Move(double dx, double dy);
         public abstract void MovePoint(int pointIndex, Point3d newPos);
         public abstract DrawShape Clone();

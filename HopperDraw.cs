@@ -189,7 +189,7 @@ namespace hopperdraw
             thickness = StyleValidation.Width(thickness);
             _borderColor = color;
             _lineThickness = (float)thickness;
-            if (_drawMode != drawMode && (_isDrawing || _drawingModeEnabled)) CancelDrawing();
+            if (_drawMode != drawMode) CancelGesture();
             _drawMode = drawMode;
             _baseLineType = (System.Drawing.Drawing2D.DashStyle)lineType;
             if (!_hasPendingLineTypeOverride) _currentLineType = _baseLineType;
