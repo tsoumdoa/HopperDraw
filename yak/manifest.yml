@@ -1,6 +1,6 @@
 ---
 name: hopperdraw
-version: 0.2.0.0
+version: 0.3.0-beta
 authors:
 - AEC Tooling
 description: Canvas drawing plugin for Grasshopper

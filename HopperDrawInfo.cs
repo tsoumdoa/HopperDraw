@@ -39,6 +39,9 @@ namespace hopperdraw
 
         public override string AuthorContact => "";
 
-        public override string AssemblyVersion => GetType().Assembly.GetName().Version.ToString();
+        // The informational version keeps a pre-release label such as "-beta" (minus any "+commit" suffix).
+        public override string AssemblyVersion =>
+            GetType().Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0]
+            ?? GetType().Assembly.GetName().Version.ToString();
     }
 }
