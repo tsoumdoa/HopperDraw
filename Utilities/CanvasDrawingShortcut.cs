@@ -111,9 +111,12 @@ namespace hopperdraw
 
         private void PreviewKeyDown(object sender, PreviewKeyDownEventArgs args)
         {
-            // WinForms emits this before menu/dialog command preprocessing. Only
-            // observe here: Rhino's native loop may skip this stage, so capture
-            // still belongs to the HWND hook. Do not change IsInputKey.
+            // Rhino's native loop can preprocess keys without running IMessageFilters.
+            // GH_Canvas inherits Control's dialog-key classification, so Escape can be
+            // consumed before WndProc. Claim only an Escape our command handler owns,
+            // and send it on to the HWND hook (which swallows the already-claimed down).
+            // Menus and native interactions still get Escape when our handler declines.
+            if (args.KeyCode == Keys.Escape && RouteCommand(args.KeyCode)) args.IsInputKey = true;
             if (args.KeyCode != Keys.D || args.Modifiers != Keys.None) Reset();
             if (_canvas.IsHandleCreated)
                 SendMessage(_canvas.Handle, KeyObservedMessage, new IntPtr((int)args.KeyCode), new IntPtr(KeyDownMessage));

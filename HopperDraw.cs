@@ -86,7 +86,7 @@ namespace hopperdraw
         private const float HitTolerance = 15f;
 
         public HopperDraw()
-            : base("Hopper Draw", "HopperDraw", "Press D twice to enter drawing mode, then click empty canvas. Hold Shift for orthogonal snapping. Press Escape to exit.", "Params", "Util")
+            : base("Hopper Draw", "HopperDraw", "Press D twice to enter drawing mode, then click empty canvas. Hold Shift for orthogonal snapping. Double-click the canvas to exit.", "Params", "Util")
         {
             CreateAttributes();
         }

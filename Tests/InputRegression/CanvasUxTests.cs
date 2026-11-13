@@ -3,6 +3,9 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Linq;
+using System.Windows.Forms;
+using Grasshopper.GUI;
+using Grasshopper.GUI.Canvas;
 using Grasshopper.Kernel;
 using hopperdraw;
 using Rhino.Geometry;
@@ -17,6 +20,60 @@ internal static class CanvasUxTests
     }
     internal static void Run(Action<string,Action> test,Action<bool,string> check)
     {
+        test("real controller interaction teardown releases the canvas after mouse-up and Escape",()=>
+        {
+            foreach (bool cancel in new[]{false,true})
+            using (var canvas=new GH_Canvas())
+            {
+                var owner=new HopperDraw(); owner.SetTool(1);
+                var controller=CanvasAnnotationController.Register(canvas,owner);
+                try
+                {
+                    var press=new GH_CanvasMouseEvent(canvas.Viewport,new MouseEventArgs(MouseButtons.Left,1,10,10,0));
+                    var interaction=new HopperDrawInteraction(controller,canvas,press,null,-1,-1,owner);
+                    canvas.ActiveInteraction=interaction;
+                    interaction.RespondToMouseDown(canvas,press);
+                    if (cancel) interaction.Cancel(true);
+                    else interaction.RespondToMouseUp(canvas,press);
+                    // GH calls Destroy before clearing ActiveInteraction. An exception here traps all later input.
+                    canvas.ActiveInteraction=null;
+                    check(canvas.ActiveInteraction==null,"Completed interaction still captures the canvas");
+                    check(owner.Draft.Active==!cancel,"Teardown changed draft cancellation semantics");
+                    owner.ExitDrawing();
+                }
+                finally { controller.Remove(owner); }
+            }
+        });
+        test("canvas double-click exits every drawing tool and finishes an open stroke once",()=>
+        {
+            foreach (int mode in Enumerable.Range(0,6))
+            using (var canvas=new GH_Canvas())
+            {
+                var owner=new HopperDraw(); owner.SetTool(mode);
+                var stored=new LineShape(P(200),P(300)); owner.Shapes.Add(stored);
+                var flags=System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic;
+                typeof(HopperDraw).GetField("_drawingModeEnabled",flags).SetValue(owner,true);
+                owner.Draft.Down(mode,P(0),Point.Empty,1,false,1);
+                bool stroke=mode==1 || mode==3;
+                if (stroke) owner.Draft.Down(mode,P(50,40),new Point(50,40),1,false,1);
+                var controller=CanvasAnnotationController.Register(canvas,owner);
+                typeof(HopperDraw).GetField("_annotationController",flags).SetValue(owner,controller);
+                try
+                {
+                    var mouse=new GH_CanvasMouseEvent(canvas.Viewport,new MouseEventArgs(MouseButtons.Left,2,50,40,0));
+                    var interaction=new HopperDrawInteraction(controller,canvas,mouse,null,-1,-1,owner);
+                    canvas.ActiveInteraction=interaction;
+                    interaction.RespondToMouseDown(canvas,mouse);
+                    check(owner.DrawingModeEnabled && canvas.ActiveInteraction==interaction,"Second press leaked to native search");
+                    check(interaction.RespondToMouseDoubleClick(canvas,mouse)==GH_ObjectResponse.Release,"Double-click not consumed");
+                    check(!owner.DrawingModeEnabled && !owner.Draft.Active && canvas.ActiveInteraction==null,"Double-click did not terminate tool");
+                    interaction.RespondToMouseDoubleClick(canvas,mouse); interaction.RespondToMouseUp(canvas,mouse);
+                    check(owner.Shapes.Count==(stroke ? 2 : 1) && ReferenceEquals(owner.Shapes[0],stored),"Exit lost completed geometry or completed twice");
+                    if (stroke) check(owner.Shapes[1].GetPoints().Length==2,"Exit duplicated stroke endpoint");
+                }
+                finally { controller.Remove(owner); }
+            }
+        });
         test("all annotation modifier transitions preserve mixed selection when required",()=>
         {
             foreach(bool selected in new[]{false,true}) foreach(bool shift in new[]{false,true}) foreach(bool control in new[]{false,true})

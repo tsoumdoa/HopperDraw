@@ -20,9 +20,6 @@ namespace hopperdraw
         private AnnotationMove _move;
         private TextShape _pendingText;
         private bool _done, _moving, _autoPan, _pressedHandled;
-        // Captured at press, before mouse-down can finish a polyline/curve draft: a double-click that finishes
-        // an open draft over a text label must never also open the text editor.
-        private readonly bool _textEditAllowed;
         // The last context menu stays alive until the next one opens, so a modal "Custom..." colour dialog
         // opened from a menu item never runs inside a disposed menu.
         private static ContextMenuStrip _lastMenu;
@@ -31,7 +28,6 @@ namespace hopperdraw
         {
             _controller=controller; _owner=owner; _shape=shape; _handle=handle; _drawing=drawing; _press=e;
             _context=e.Button==MouseButtons.Right;
-            _textEditAllowed=drawing == null || drawing.DrawMode == 5 || !drawing.Draft.Active;
         }
         public override bool DeactivateOnFocusLoss => !_done;
         public override GH_ObjectResponse RespondToMouseDown(GH_Canvas sender, GH_CanvasMouseEvent e)
@@ -39,9 +35,10 @@ namespace hopperdraw
             if (_pressedHandled || e.Button != _press.Button) return GH_ObjectResponse.Handled;
             _pressedHandled=true;
             if (_context) return GH_ObjectResponse.Handled;
-            // In drawing mode a double-click finishes an open polyline/curve draft; it only edits text
-            // under the pointer with the Text tool or when no draft is active.
-            if (e.Clicks > 1 && _owner != null && _textEditAllowed)
+            // Keep the second press captured until GH dispatches MouseDoubleClick, so exiting
+            // cannot fall through to component search or insert a relay in the same gesture.
+            if (e.Clicks > 1 && _drawing != null) return GH_ObjectResponse.Handled;
+            if (e.Clicks > 1 && _owner != null)
             {
                 var target = TextAt(_owner.Shapes[_shape], e.CanvasLocation, 5 * _owner.CanvasScale, _owner.LineThickness, _owner.DrawOrder != 0);
                 if (target != null)
@@ -102,7 +99,16 @@ namespace hopperdraw
         }
         public override GH_ObjectResponse RespondToMouseDoubleClick(GH_Canvas sender, GH_CanvasMouseEvent e)
         {
-            if (!_done && !_context && _owner != null && _textEditAllowed)
+            if (!_done && !_context && _drawing != null)
+            {
+                _done = true;
+                if (_drawing.DrawMode == 1 || _drawing.DrawMode == 3)
+                    _drawing.CompleteDraft(_drawing.Draft.Finish(_drawing.DrawMode, false));
+                _drawing.ExitDrawing();
+                sender.Invalidate();
+                return GH_ObjectResponse.Release;
+            }
+            if (!_done && !_context && _owner != null)
             {
                 var text = TextAt(_owner.Shapes[_shape], e.CanvasLocation, 5 * _owner.CanvasScale, _owner.LineThickness, _owner.DrawOrder != 0);
                 if (text != null) { _done = true; _controller.BeginText(_owner,text,false); return GH_ObjectResponse.Release; }
@@ -155,10 +161,13 @@ namespace hopperdraw
         }
         public override void Destroy()
         {
+            // GH_AbstractInteraction.Destroy clears m_canvas. Keep the canvas locally so
+            // cursor refresh cannot throw before GH releases its ActiveInteraction.
+            var canvas = m_canvas;
             Cancel();
             if (_autoPan) { m_canvas.StopAutoPan(); _autoPan=false; }
             _controller?.ResetCursor(); base.Destroy();
-            if(_controller!=null && !m_canvas.IsDisposed && m_canvas.IsHandleCreated) m_canvas.BeginInvoke(new Action(_controller.RefreshCursor));
+            if(_controller!=null && canvas!=null && !canvas.IsDisposed && canvas.IsHandleCreated) canvas.BeginInvoke(new Action(_controller.RefreshCursor));
         }
         // Same tolerance and backdrop rule as picking, so any text that can be picked can be double-click edited.
         internal static TextShape TextAt(DrawShape shape, PointF point, float tolerance, float baseWidth, bool interior)

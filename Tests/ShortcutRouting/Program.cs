@@ -73,6 +73,23 @@ internal static class Program
         protected override bool IsInputKey(Keys keyData) { return true; }
     }
 
+    // GH_Canvas uses Control's default dialog-key classification (unlike Canvas above).
+    private sealed class HostCanvas : Control
+    {
+        internal HostCanvas() { SetStyle(ControlStyles.Selectable, true); TabStop = true; }
+    }
+
+    private static void HostKey(Control canvas, Keys key, bool up = false, bool repeat = false)
+    {
+        long flags = 1 | ((long)MapVirtualKey((uint)key, 0) << 16);
+        if (repeat || up) flags |= 1L << 30;
+        if (up) flags |= 1L << 31;
+        var message = Message.Create(canvas.Handle, up ? 0x101 : 0x100, new IntPtr((int)key), new IntPtr(flags));
+        // Rhino's native message pump can preprocess without Application's IMessageFilters.
+        if (canvas.PreProcessControlMessage(ref message) != PreProcessControlState.MessageProcessed)
+            SendMessage(message.HWnd, message.Msg, message.WParam, message.LParam);
+    }
+
     private sealed class PointerReceiver : NativeWindow, IDisposable
     {
         internal IntPtr Received;
@@ -153,6 +170,39 @@ internal static class Program
                 {
                     canvas.Focus();
                     Check(canvas.Focused, "Canvas could not acquire keyboard focus");
+                    Run("native host preprocessing lets Escape cancel then exit drawing", () =>
+                    {
+                        using (var host = new HostCanvas { Size = new Size(100, 100) })
+                        using (var cancel = new Button { Text = "Cancel" })
+                        {
+                            form.Controls.Add(host); form.Controls.Add(cancel); form.CancelButton = cancel;
+                            int native = 0, layers = 0;
+                            cancel.Click += (s, args) => native++;
+                            using (var registration = CanvasDrawingShortcut.Register(host, () => false, () => { }))
+                            {
+                                registration.Command = key => { if (key != Keys.Escape || layers == 2) return false; layers++; return true; };
+                                host.Focus(); Check(host.Focused, "Host canvas cannot focus");
+                                using (var menu = new ContextMenuStrip())
+                                {
+                                    menu.Items.Add("Tool"); AnnotationMenuKeys.Configure(menu);
+                                    menu.Show(host, new Point(10, 10)); Application.DoEvents();
+                                    HostKey(host, Keys.Escape); HostKey(host, Keys.Escape, up: true);
+                                    Check(layers == 0, "Menu Escape cancelled drawing");
+                                    menu.Close();
+                                }
+                                host.Focus(); native = 0;
+                                HostKey(host, Keys.Escape); HostKey(host, Keys.Escape, repeat: true); HostKey(host, Keys.Escape, up: true);
+                                Check(layers == 1 && native == 0, "Escape never reached draft cancellation or consumed two layers");
+                                HostKey(host, Keys.Escape); HostKey(host, Keys.Escape, up: true);
+                                Check(layers == 2 && native == 0, "Second Escape could not exit drawing");
+                                HostKey(host, Keys.Escape); HostKey(host, Keys.Escape, up: true);
+                                Check(native == 1, "Idle Escape did not return to native dialog handling");
+                            }
+                            form.CancelButton = null;
+                            form.Controls.Remove(host); form.Controls.Remove(cancel);
+                        }
+                        canvas.Focus();
+                    });
                     Run("plain menu mnemonic opens submenu and activates while canvas commands yield", () =>
                     {
                         int commands = 0, clicks = 0;
