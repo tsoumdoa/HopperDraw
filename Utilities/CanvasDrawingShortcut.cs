@@ -54,6 +54,7 @@ namespace hopperdraw
             internal Func<Keys, bool> Command;
             internal Action Lost;
             internal Action<Keys> BeforeKey;
+            internal Action KeyFailed;
 
 
             internal Registration(CanvasDrawingShortcut hook, Func<bool> canActivate, Action activate)
@@ -203,8 +204,11 @@ namespace hopperdraw
         }
         public bool PreFilterMessage(ref Message m)
         {
+            // GH's editor KeyPreview also receives arrows addressed to other editor controls.
+            // Observe those before preprocessing, while leaving command ownership canvas-only.
+            if (m.Msg == KeyDownMessage || m.Msg == SystemKeyDownMessage)
+                BeforeKey(m, true);
             if (m.HWnd != Handle) return false;
-            if (m.Msg == KeyDownMessage || m.Msg == SystemKeyDownMessage) BeforeKey((Keys)m.WParam.ToInt32());
             if (ReleaseCharacter(m)) return true; // Before dialog/mnemonic preprocessing, too.
             if (m.Msg == KeyDownMessage && RouteCommand((Keys)m.WParam.ToInt32(), (m.LParam.ToInt64() & (1L << 30)) != 0))
             {
@@ -215,8 +219,35 @@ namespace hopperdraw
             if (m.Msg == KeyUpMessage && ReleaseCommand((Keys)m.WParam.ToInt32())) return true;
             return false;
         }
-        private void BeforeKey(Keys key)
-        { foreach (var owner in _owners.ToArray()) owner.BeforeKey?.Invoke(key | Control.ModifierKeys); }
+        private readonly KeyMessageObservation _keyObservation = new KeyMessageObservation();
+        internal bool ObservesKeyWindow(IntPtr window)
+        {
+            if (window == Handle && Handle != IntPtr.Zero) return true;
+            var form = _canvas.FindForm();
+            return form != null && ReferenceEquals(Control.FromChildHandle(window)?.FindForm(), form);
+        }
+        private void BeforeKey(Message message, bool filtered)
+        {
+            try
+            {
+                if (!ObservesKeyWindow(message.HWnd) || !_keyObservation.ShouldObserve(message, filtered)) return;
+                foreach (var owner in _owners.ToArray())
+                {
+                    try { owner.BeforeKey?.Invoke((Keys)message.WParam.ToInt32() | Control.ModifierKeys); }
+                    catch (Exception ex)
+                    {
+                        owner.KeyFailed?.Invoke();
+                        System.Diagnostics.Debug.WriteLine("HopperDraw shortcut key skipped: " + ex);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                foreach (var owner in _owners.ToArray())
+                    try { owner.KeyFailed?.Invoke(); } catch (Exception reset) { System.Diagnostics.Debug.WriteLine("HopperDraw shortcut reset skipped: " + reset); }
+                System.Diagnostics.Debug.WriteLine("HopperDraw shortcut key skipped: " + ex);
+            }
+        }
         private void RouteMouse(int message, IntPtr location, bool after)
         {
             if (message < 0x200 || message > 0x215) return;
@@ -229,7 +260,7 @@ namespace hopperdraw
         }
         protected override void WndProc(ref Message message)
         {
-            if (message.Msg == KeyDownMessage || message.Msg == SystemKeyDownMessage) BeforeKey((Keys)message.WParam.ToInt32());
+            if (message.Msg == KeyDownMessage || message.Msg == SystemKeyDownMessage) BeforeKey(message, false);
             RouteMouse(message.Msg, message.LParam, false);
             if (message.Msg == KillFocusMessage || message.Msg == 0x215 || message.Msg == 0x1f)
             {
@@ -305,6 +336,20 @@ namespace hopperdraw
             RouteMouse(message.Msg, message.LParam, true);
             if (message.Msg == KeyDownMessage || message.Msg == KeyUpMessage || message.Msg == SystemKeyDownMessage || message.Msg == SystemKeyUpMessage)
                 foreach (var registration in _owners.ToArray()) registration.Mouse?.Invoke(message.Msg, null, true);
+        }
+    }
+
+    // A filtered key may reach WndProc as well, or be consumed by WinForms preprocessing.
+    // Every new filter observation replaces the pending message, including identical held repeats.
+    internal sealed class KeyMessageObservation
+    {
+        private Message? _filtered;
+        internal bool ShouldObserve(Message message, bool filtered)
+        {
+            var previous = _filtered;
+            _filtered = filtered ? message : (Message?)null;
+            return filtered || !previous.HasValue || previous.Value.HWnd != message.HWnd ||
+                previous.Value.Msg != message.Msg || previous.Value.WParam != message.WParam || previous.Value.LParam != message.LParam;
         }
     }
 }

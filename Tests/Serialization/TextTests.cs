@@ -242,11 +242,11 @@ internal static class TextTests
         Program.Test("text width edit retains anchor, bypasses snap and detects point-to-box change", () =>
         {
             var owner = new HopperDraw(); var text = Text(); owner.Shapes.Add(text); owner.SelectedShapeIndices.Add(0);
-            var move = new AnnotationMove(new[] { owner }, new IGH_DocumentObject[0], null);
+            var move = new AnnotationMove(new[] { owner }.Where(item => item.HasSelection).ToDictionary(item => item, item => item.SelectedShapeIndices.ToArray()), new IGH_DocumentObject[0], null);
             move.Edit(owner, 0, 0, new Point3d(120, 800, 0), true); var edited = (TextShape)owner.Shapes[0];
             Program.Check(edited.Anchor == text.Anchor && edited.BoxWidth == 100 && move.Changed, "width edit changed anchor/snapped/lost no-op detection");
             move.Revert(false); Program.Check(((TextShape)owner.Shapes[0]).BoxWidth == null, "rollback lost point text");
-            text = (TextShape)owner.Shapes[0]; text.BoxWidth = 100; move = new AnnotationMove(new[] { owner }, new IGH_DocumentObject[0], null);
+            text = (TextShape)owner.Shapes[0]; text.BoxWidth = 100; move = new AnnotationMove(new[] { owner }.Where(item => item.HasSelection).ToDictionary(item => item, item => item.SelectedShapeIndices.ToArray()), new IGH_DocumentObject[0], null);
             move.Edit(owner, 0, 0, new Point3d(120, -999, 0), true); Program.Check(!move.Changed, "same width creates undo");
         });
         Program.Test("nested text duplicate, move and undo snapshots retain all fields", () =>

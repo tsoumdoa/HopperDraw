@@ -31,7 +31,7 @@ internal static class CanvasUxTests
         });
         test("absolute multi-owner move snapshots return to start and Escape records nothing",()=>
         {
-            HopperDraw a=Owner(), b=Owner(200); var move=new AnnotationMove(new[]{a,b},new IGH_DocumentObject[0],null);
+            HopperDraw a=Owner(), b=Owner(200); var move=new AnnotationMove(new[]{a,b}.Where(item => item.HasSelection).ToDictionary(item => item, item => item.SelectedShapeIndices.ToArray()),new IGH_DocumentObject[0],null);
             move.Translate(new PointF(25,15),false); move.Translate(new PointF(30,20),false);
             check(((LineShape)a.Shapes[0]).Start==P(30,20) && ((LineShape)b.Shapes[0]).Start==P(230,20),"Accumulated delta");
             move.Revert(false); check(!move.Changed && ((LineShape)a.Shapes[0]).Start==P(0),"Escape did not restore");
@@ -41,7 +41,7 @@ internal static class CanvasUxTests
         test("endpoint and polyline vertex edits snap relative to their anchors",()=>
         {
             var o=Owner(); o.Shapes[0]=new PolylineShape(new List<Point3d>{P(0),P(50),P(100,40)});
-            var move=new AnnotationMove(new[]{o},new IGH_DocumentObject[0],null);
+            var move=new AnnotationMove(new[]{o}.Where(item => item.HasSelection).ToDictionary(item => item, item => item.SelectedShapeIndices.ToArray()),new IGH_DocumentObject[0],null);
             move.Edit(o,0,2,P(100,44),true); var p=((PolylineShape)o.Shapes[0]).Points[2];
             check(Math.Abs(p.X-50-p.Y)<.0001,"Vertex did not snap to previous point");
             move.Revert(false); check(((PolylineShape)o.Shapes[0]).Points[2]==P(100,40),"Edit rollback lost snapshot");
@@ -49,7 +49,7 @@ internal static class CanvasUxTests
         test("opaque record in any owner blocks every selected geometry",()=>
         {
             HopperDraw a=Owner(), b=Owner(); b.Shapes.Add(new OpaqueShape(new GH_IO.Serialization.GH_LooseChunk("Shape"),"unreadable")); b.SelectedShapeIndices.Add(1);
-            var move=new AnnotationMove(new[]{a,b},new IGH_DocumentObject[0],null); move.Translate(new PointF(40,0),false);
+            var move=new AnnotationMove(new[]{a,b}.Where(item => item.HasSelection).ToDictionary(item => item, item => item.SelectedShapeIndices.ToArray()),new IGH_DocumentObject[0],null); move.Translate(new PointF(40,0),false);
             check(!move.Allowed && !move.Changed && ((LineShape)a.Shapes[0]).Start==P(0),"Partial geometry change");
         });
         test("Escape resolves exactly one layer",()=>

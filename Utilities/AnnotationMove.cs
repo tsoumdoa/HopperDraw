@@ -21,14 +21,14 @@ namespace hopperdraw
         private bool _edited;
         internal bool Changed => _edited || _delta != PointF.Empty;
         internal bool Allowed { get; }
-        internal AnnotationMove(IEnumerable<HopperDraw> owners, IEnumerable<IGH_DocumentObject> natives, GH_Document document)
-            : this(owners.Where(o => o.HasSelection).ToDictionary(o => o, o => o.SelectedShapeIndices.ToArray()), natives, document) { }
-        internal AnnotationMove(IDictionary<HopperDraw, int[]> indices, IEnumerable<IGH_DocumentObject> natives, GH_Document document)
+        internal AnnotationMove(IDictionary<HopperDraw, int[]> indices, IEnumerable<IGH_DocumentObject> natives, GH_Document document,
+            IDictionary<HopperDraw, ShapeEditUndoAction> existingActions = null)
         {
             _indices = indices.ToDictionary(p => p.Key, p => p.Value.Distinct().Where(i => i >= 0 && i < p.Key.Shapes.Count).ToArray());
             var selected = _indices.Keys.ToArray();
             _before = selected.ToDictionary(o => o, o => _indices[o].ToDictionary(i => i, i => ShapeEditUndoAction.CloneForSnapshot(o.Shapes[i])));
-            Actions = selected.ToDictionary(o => o, o => new ShapeEditUndoAction(o, Enumerable.Empty<IGH_DocumentObject>()));
+            Actions = selected.ToDictionary(o => o, o => existingActions != null && existingActions.TryGetValue(o, out var action)
+                ? action : new ShapeEditUndoAction(o, Enumerable.Empty<IGH_DocumentObject>()));
             _pivots = natives.Where(o => o.Attributes != null).Distinct().ToDictionary(o => o, o => o.Attributes.Pivot);
             Allowed = selected.All(o => _indices[o].All(i => o.Shapes[i].CanTransformGeometry));
             if (!Allowed) foreach (var o in selected) o.AddRuntimeMessage(GH_RuntimeMessageLevel.Warning, "Geometry edit blocked: selection contains unreadable annotation records.");
@@ -38,21 +38,30 @@ namespace hopperdraw
         // Window containment against GH's rectangle, including blob/hull groups' bounding rectangle.
         // Only top-level shapes move: annotation groups stay whole. Unreadable contained shapes stay put;
         // selected unreadable shapes remain in the union so they block the transaction with the usual warning.
-        internal static Dictionary<HopperDraw, int[]> MovingSet(IEnumerable<HopperDraw> owners, GH_Document document)
-            => MovingSet(owners, document?.Objects.OfType<GH_Group>() ?? Enumerable.Empty<GH_Group>());
-        internal static Dictionary<HopperDraw, int[]> MovingSet(IEnumerable<HopperDraw> owners, IEnumerable<GH_Group> groups)
+        internal static Dictionary<HopperDraw, int[]> MovingSet(IEnumerable<HopperDraw> owners, GH_Document document, bool nudge = false)
+            => MovingSet(owners, document?.Objects.OfType<GH_Group>() ?? Enumerable.Empty<GH_Group>(), nudge);
+        internal static Dictionary<HopperDraw, int[]> MovingSet(IEnumerable<HopperDraw> owners, IEnumerable<GH_Group> groups, bool nudge = false)
         {
-            var bounds = groups.Where(g => g.Attributes?.Selected == true).Select(g => g.Attributes.Bounds).ToArray();
+            // Drag expands selected groups; Alt+arrow translates only selected objects. A group's
+            // bounds can contribute to a nudge only when every real descendant actually moves.
+            var bounds = groups.Where(g => g.Attributes?.Selected == true && (!nudge || AllContentsSelected(g)))
+                .Select(g => g.Attributes.Bounds).ToArray();
             var result = new Dictionary<HopperDraw, int[]>();
             foreach (var owner in owners.Where(o => o.Eligible))
             {
+                if (bounds.Length == 0 && !owner.HasSelection) continue;
                 var indices = new HashSet<int>(owner.SelectedShapeIndices.Where(i => i >= 0 && i < owner.Shapes.Count));
-                for (int i = 0; i < owner.Shapes.Count; i++)
+                for (int i = 0; bounds.Length != 0 && i < owner.Shapes.Count; i++)
                     if (!indices.Contains(i) && owner.Shapes[i].CanTransformGeometry && bounds.Any(b =>
                         AnnotationGeometry.InRectangle(owner.Shapes[i], b, false, owner.LineThickness, owner.DrawOrder != 0))) indices.Add(i);
                 if (indices.Count != 0) result.Add(owner, indices.OrderBy(i => i).ToArray());
             }
             return result;
+        }
+        private static bool AllContentsSelected(GH_Group group)
+        {
+            var contents = group.ObjectsRecursive().Where(o => !(o is GH_Group)).ToArray();
+            return contents.Length != 0 && contents.All(o => o.Attributes?.Selected == true);
         }
         internal void Translate(PointF delta, bool native)
         {

@@ -291,7 +291,7 @@ namespace hopperdraw
             ObserveRhinoEscape(true);
             _hints = new AnnotationHintClock(() => { if(!_canvas.IsDisposed) { UpdateHints(); _canvas.Invalidate(); } });
             _hook = CanvasDrawingShortcut.Register(canvas, () => false, () => {});
-            _hook.Mouse = Message; _hook.Command = Command; _hook.Lost = Lost; _hook.BeforeKey = BeforeNativeKey;
+            _hook.Mouse = Message; _hook.Command = Command; _hook.Lost = Lost; _hook.BeforeKey = BeforeNativeKey; _hook.KeyFailed = ClearNudge;
             canvas.DocumentChanged += DocumentChanged;
             canvas.ViewportChanged += ViewportChanged;
             ObserveTextDocument();
@@ -436,30 +436,44 @@ namespace hopperdraw
         }
         private void BeforeNativeKey(Keys data)
         {
-            SyncNudge();
-            var key = data & Keys.KeyCode;
-            if ((data & Keys.Modifiers) == Keys.Alt && key >= Keys.Left && key <= Keys.Down)
+            try
             {
-                if (_nudge?.Matches(key.ToString()) == true && CanNudge())
-                    _nudge.Prepare(AnnotationMove.MovingSet(Owners,_canvas.Document),_canvas.Document.SelectedObjects());
-                QueueNudge();
+                SyncNudge();
+                var key = data & Keys.KeyCode;
+                if ((data & Keys.Modifiers) == Keys.Alt && key >= Keys.Left && key <= Keys.Down)
+                {
+                    if (_nudge?.Matches(key.ToString()) == true && CanNudge())
+                        _nudge.Prepare(AnnotationMove.MovingSet(Owners,_canvas.Document,true),_canvas.Document.SelectedObjects());
+                    QueueNudge();
+                }
             }
+            catch (Exception ex) { ClearNudge(); System.Diagnostics.Debug.WriteLine("HopperDraw nudge key skipped: " + ex); }
         }
         private void NudgeUndoChanged(object sender, GH_DocUndoEventArgs e)
         {
-            // Align/Distribute (even an accidentally uniform align) and every unrelated record end this session.
-            _nudge = null;
-            if (e.Operation != GH_UndoOperation.RecordAdded || !ReferenceEquals(e.Document,_canvas.Document) ||
-                !AnnotationNudge.IsNudge(e.Record) || e.Record.ActionCount == 0 || !e.Record.Actions.All(a => a is GH_PivotAction) ||
-                _text != null || _canvas.ActiveInteraction != null || _canvas.ActiveWidget != null || _canvas.ActiveObject != null) return;
-            _nudge = new AnnotationNudge(AnnotationMove.MovingSet(Owners,e.Document),e.Document.SelectedObjects(),e.Document,e.Record);
-            QueueNudge(); // Menu commands also enter here, without needing a canvas key message.
+            try
+            {
+                // Align/Distribute (even an accidentally uniform align) and every unrelated record end this session.
+                _nudge = null;
+                if (e.Operation != GH_UndoOperation.RecordAdded || !ReferenceEquals(e.Document,_canvas.Document) ||
+                    !AnnotationNudge.IsNudge(e.Record) || e.Record.ActionCount == 0 || !e.Record.Actions.All(a => a is GH_PivotAction) ||
+                    !CanNudge()) return;
+                _nudge = new AnnotationNudge(AnnotationMove.MovingSet(Owners,e.Document,true),e.Document.SelectedObjects(),e.Document,e.Record);
+                QueueNudge(); // GH raises RecordAdded before translating the selected objects.
+            }
+            catch (Exception ex) { ClearNudge(); System.Diagnostics.Debug.WriteLine("HopperDraw nudge undo skipped: " + ex); }
         }
+        private void ClearNudge() { _nudge = null; _nudgePending = false; }
         private void QueueNudge()
         {
             if (_nudgePending || _canvas.IsDisposed || !_canvas.IsHandleCreated) return;
             _nudgePending = true;
-            _canvas.BeginInvoke(new Action(() => { _nudgePending = false; SyncNudge(); }));
+            _canvas.BeginInvoke(new Action(QueuedNudge));
+        }
+        private void QueuedNudge()
+        {
+            try { _nudgePending = false; if (!_canvas.IsDisposed) SyncNudge(); }
+            catch (Exception ex) { ClearNudge(); System.Diagnostics.Debug.WriteLine("HopperDraw queued nudge skipped: " + ex); }
         }
         private void SyncNudge()
         { if (CanNudge() && _nudge?.Sync(_canvas.Document) == true) _canvas.Invalidate(); }

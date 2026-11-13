@@ -60,7 +60,7 @@ internal static class FillHatchTests
             AnnotationCommands.Duplicate(new[]{owner});
             DrawShape Leaf()=>((DrawShapeGroup)((DrawShapeGroup)owner.Shapes[1]).Children[0]).Children[0];
             Program.Check(frame.SameStyle(Leaf()) && Leaf().PersistentId!=frame.PersistentId,"duplicate lost style or ID");
-            var move=new AnnotationMove(new[]{owner},new IGH_DocumentObject[0],null); move.Translate(new PointF(30,50),false);
+            var move=new AnnotationMove(new[]{owner}.Where(item => item.HasSelection).ToDictionary(item => item, item => item.SelectedShapeIndices.ToArray()),new IGH_DocumentObject[0],null); move.Translate(new PointF(30,50),false);
             Program.Check(frame.SameStyle(Leaf()),"move lost styles"); move.Revert(false); Program.Check(frame.SameStyle(Leaf()),"cancel lost styles");
             var undo=new ShapeEditUndoAction(owner,new IGH_DocumentObject[0]); Leaf().FillColor=Color.Red; undo.Swap(null,owner);
             Program.Check(frame.SameStyle(Leaf()),"undo lost styles"); undo.Swap(null,owner); Program.Check(Leaf().FillColor==Color.Red,"redo lost styles");

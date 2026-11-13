@@ -36,7 +36,7 @@ namespace hopperdraw
             if (!new HashSet<IGH_DocumentObject>(selected).SetEquals(_selected)) return;
             // Groups have a constant (0,0) pivot. Their selected descendants carry the real translation.
             _pivots = _selected.Where(o => !(o is GH_Group) && o.Attributes != null).ToDictionary(o => o, o => o.Attributes.Pivot);
-            _move = new AnnotationMove(moving, Enumerable.Empty<IGH_DocumentObject>(), null);
+            _move = new AnnotationMove(moving, Enumerable.Empty<IGH_DocumentObject>(), null, _actions);
             _delta = PointF.Empty;
         }
         internal bool Matches(string direction) => _record.Name == "Nudge " + direction;
@@ -53,13 +53,15 @@ namespace hopperdraw
                 var p = pair.Key.Attributes.Pivot;
                 var d = new PointF(p.X - pair.Value.X, p.Y - pair.Value.Y);
                 if (float.IsNaN(d.X) || float.IsInfinity(d.X) || float.IsNaN(d.Y) || float.IsInfinity(d.Y)) return false;
-                if (!first && d != delta) return false;
-                delta = d; first = false;
+                if (!first && !Near(d, delta)) return false;
+                if (first) delta = d; // One representative delta for every annotation owner.
+                first = false;
             }
-            return delta != PointF.Empty;
+            return !Near(delta, PointF.Empty);
         }
+        private static bool Near(PointF a, PointF b) => Math.Abs(a.X-b.X) <= .001f && Math.Abs(a.Y-b.Y) <= .001f;
         internal bool Sync(GH_Document document)
-            => ReferenceEquals(document,_document) && _selected.All(o => ReferenceEquals(document.FindObject(o.InstanceGuid,true),o)) &&
+            => document != null && ReferenceEquals(document,_document) &&
                 Sync(document,document.SelectedObjects(),document.UndoServer.UndoGuids.FirstOrDefault());
         internal bool Sync(GH_Document document, IEnumerable<IGH_DocumentObject> selected, Guid topRecord)
         {
@@ -69,7 +71,7 @@ namespace hopperdraw
             var pivots = new GH_UndoRecord(_record.Name, _record.Actions.Where(a => !_actions.Values.Any(own => ReferenceEquals(own,a))));
             if (!UniformDelta(_document, document, pivots, _selected.Length, _pivots, out var delta) ||
                 _record.ActionCount != _selected.Length + _actions.Count) return false;
-            if (delta == _delta) return false;
+            if (Near(delta, _delta)) return false;
             _move.Translate(delta, false);
             if (!_move.Changed) return false;
             foreach (var pair in _move.Actions)
