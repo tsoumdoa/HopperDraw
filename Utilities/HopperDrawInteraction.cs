@@ -62,7 +62,7 @@ namespace hopperdraw
                 bool shift=(Control.ModifierKeys & Keys.Shift)!=0, control=(Control.ModifierKeys & Keys.Control)!=0;
                 if (_handle < 0) _controller.Select(_owner,_shape,shift,control);
                 if (_handle >= 0 || _owner.SelectedShapeIndices.Contains(_shape) && !(control && !shift))
-                    _move=new AnnotationMove(_handle>=0 ? new[]{_owner} : _controller.Owners,
+                    _move=new AnnotationMove(_handle>=0 ? new System.Collections.Generic.Dictionary<HopperDraw,int[]> { [_owner]=_owner.SelectedShapeIndices.ToArray() } : AnnotationMove.MovingSet(_controller.Owners,sender.Document),
                         _handle>=0 ? Enumerable.Empty<Grasshopper.Kernel.IGH_DocumentObject>() : CanvasAnnotationController.NativeSelection(sender.Document),sender.Document);
             }
             sender.Invalidate(); return GH_ObjectResponse.Handled;

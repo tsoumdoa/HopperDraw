@@ -84,7 +84,7 @@ internal static class ReviewRegressionTests
             group.Children.Add(text);
             owner.Shapes.Add(group);
             owner.SelectedShapeIndices.Add(0);
-            var move = new AnnotationMove(new[] { owner }, new IGH_DocumentObject[0], null);
+            var move = new AnnotationMove(new[] { owner }.Where(item => item.HasSelection).ToDictionary(item => item, item => item.SelectedShapeIndices.ToArray()), new IGH_DocumentObject[0], null);
             move.Translate(new PointF(30, 0), false);
             Program.Check(!move.Changed && ReferenceEquals(owner.Shapes[0], group), "move accepted invalid box edge");
             AnnotationCommands.Duplicate(new[] { owner });

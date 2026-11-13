@@ -79,7 +79,7 @@ internal static class CanvasMenuTests
         Program.Test("multi-owner annotation-only undo snapshots swap independently with stable IDs",()=>
         {
             HopperDraw a=Owner(), b=Owner(); var aid=a.Shapes[0].PersistentId; var bid=b.Shapes[0].PersistentId;
-            var move=new AnnotationMove(new[]{a,b},new IGH_DocumentObject[0],null);
+            var move=new AnnotationMove(new[]{a,b}.Where(item => item.HasSelection).ToDictionary(item => item, item => item.SelectedShapeIndices.ToArray()),new IGH_DocumentObject[0],null);
             move.Translate(new PointF(40,20),false);
             foreach(var action in move.Actions) action.Value.Swap(null,action.Key);
             Program.Check(a.Shapes[0].GetPoints()[0]==PointF.Empty && b.Shapes[0].GetPoints()[0]==PointF.Empty,"Undo did not restore both owners");
