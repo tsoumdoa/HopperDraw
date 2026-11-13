@@ -53,6 +53,7 @@ namespace hopperdraw
             internal Action<int, MouseEventArgs, bool> Mouse;
             internal Func<Keys, bool> Command;
             internal Action Lost;
+            internal Action<Keys> BeforeKey;
 
 
             internal Registration(CanvasDrawingShortcut hook, Func<bool> canActivate, Action activate)
@@ -203,6 +204,7 @@ namespace hopperdraw
         public bool PreFilterMessage(ref Message m)
         {
             if (m.HWnd != Handle) return false;
+            if (m.Msg == KeyDownMessage || m.Msg == SystemKeyDownMessage) BeforeKey((Keys)m.WParam.ToInt32());
             if (ReleaseCharacter(m)) return true; // Before dialog/mnemonic preprocessing, too.
             if (m.Msg == KeyDownMessage && RouteCommand((Keys)m.WParam.ToInt32(), (m.LParam.ToInt64() & (1L << 30)) != 0))
             {
@@ -213,6 +215,8 @@ namespace hopperdraw
             if (m.Msg == KeyUpMessage && ReleaseCommand((Keys)m.WParam.ToInt32())) return true;
             return false;
         }
+        private void BeforeKey(Keys key)
+        { foreach (var owner in _owners.ToArray()) owner.BeforeKey?.Invoke(key | Control.ModifierKeys); }
         private void RouteMouse(int message, IntPtr location, bool after)
         {
             if (message < 0x200 || message > 0x215) return;
@@ -225,6 +229,7 @@ namespace hopperdraw
         }
         protected override void WndProc(ref Message message)
         {
+            if (message.Msg == KeyDownMessage || message.Msg == SystemKeyDownMessage) BeforeKey((Keys)message.WParam.ToInt32());
             RouteMouse(message.Msg, message.LParam, false);
             if (message.Msg == KillFocusMessage || message.Msg == 0x215 || message.Msg == 0x1f)
             {

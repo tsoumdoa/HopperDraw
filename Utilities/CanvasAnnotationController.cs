@@ -30,11 +30,14 @@ namespace hopperdraw
         private PlacementEpoch OwnerPlacement(HopperDraw owner) => _ownerTextEpoch.GetValue(owner, _ => new PlacementEpoch());
         private int OwnerTextEpoch(HopperDraw owner) => OwnerPlacement(owner).Value;
         private GH_Document _textDocument;
+        private AnnotationNudge _nudge;
+        private bool _nudgePending;
         private void ObserveTextDocument()
         {
-            if (_textDocument != null) _textDocument.UndoStateChanged -= TextUndoChanged;
+            if (_textDocument != null) { _textDocument.UndoStateChanged -= TextUndoChanged; _textDocument.UndoStateChanged -= NudgeUndoChanged; }
             _textDocument = _canvas.Document;
-            if (_textDocument != null) _textDocument.UndoStateChanged += TextUndoChanged;
+            if (_textDocument != null) { _textDocument.UndoStateChanged += TextUndoChanged; _textDocument.UndoStateChanged += NudgeUndoChanged; }
+            _nudge = null;
         }
         internal void PlaceTextAfterRelease(HopperDraw owner, TextShape shape)
         {
@@ -288,7 +291,7 @@ namespace hopperdraw
             ObserveRhinoEscape(true);
             _hints = new AnnotationHintClock(() => { if(!_canvas.IsDisposed) { UpdateHints(); _canvas.Invalidate(); } });
             _hook = CanvasDrawingShortcut.Register(canvas, () => false, () => {});
-            _hook.Mouse = Message; _hook.Command = Command; _hook.Lost = Lost;
+            _hook.Mouse = Message; _hook.Command = Command; _hook.Lost = Lost; _hook.BeforeKey = BeforeNativeKey;
             canvas.DocumentChanged += DocumentChanged;
             canvas.ViewportChanged += ViewportChanged;
             ObserveTextDocument();
@@ -303,7 +306,7 @@ namespace hopperdraw
         {
             AbortText(owner); Lost(); _registered.Remove(owner);
             if (_registered.Count != 0) return;
-            if (_textDocument != null) _textDocument.UndoStateChanged -= TextUndoChanged;
+            if (_textDocument != null) { _textDocument.UndoStateChanged -= TextUndoChanged; _textDocument.UndoStateChanged -= NudgeUndoChanged; }
             _textDocument = null;
             _hook.Dispose(); Controllers.Remove(_canvas);
             _canvas.Disposed -= Disposed;
@@ -362,6 +365,7 @@ namespace hopperdraw
             if (!after && (message == 0x201 || message == 0x203 || message == 0x204 || message == 0x20a)) EndText(true, message == 0x201 || message == 0x203);
             if (!after && (message == 0x201 || message == 0x203 || message == 0x204))
             {
+                SyncNudge();
                 _prePress = null;
                 if (!Eligible(e.Location)) return;
                 _pressed = DateTime.UtcNow;
@@ -386,13 +390,14 @@ namespace hopperdraw
                 _window = _canvas.ActiveInteraction as GH_WindowSelectInteraction;
                 if (_window != null) { _windowRect=Rectangle.Empty; _windowCrossing=false; }
                 var drag = _canvas.ActiveInteraction as GH_DragInteraction;
-                if (drag != null && Owners.Any(o=>o.HasSelection))
+                var moving = drag == null ? null : AnnotationMove.MovingSet(Owners,_canvas.Document);
+                if (moving?.Count > 0)
                 {
                     var natives = NativeSelection(_canvas.Document).ToArray();
                     _anchor = natives.FirstOrDefault();
                     if (_anchor == null) return;
                     _native = drag; _anchorPoint = _anchor.Attributes.Pivot; _document = _canvas.Document;
-                    _follow = new AnnotationMove(Owners,Enumerable.Empty<IGH_DocumentObject>(),_document);
+                    _follow = new AnnotationMove(moving,Enumerable.Empty<IGH_DocumentObject>(),_document);
                     if (!_follow.Allowed) { EndFollow(true); return; }
                     _seen.Clear(); _document.UndoStateChanged += UndoChanged;
                 }
@@ -424,10 +429,42 @@ namespace hopperdraw
         }
         private void NativeKey(object sender, KeyEventArgs e)
         {
+            SyncNudge();
             SyncFollow();
             if (_native != null && !ReferenceEquals(_canvas.ActiveInteraction,_native)) EndFollow(true);
             if (_window != null && !ReferenceEquals(_canvas.ActiveInteraction,_window)) _window = null;
         }
+        private void BeforeNativeKey(Keys data)
+        {
+            SyncNudge();
+            var key = data & Keys.KeyCode;
+            if ((data & Keys.Modifiers) == Keys.Alt && key >= Keys.Left && key <= Keys.Down)
+            {
+                if (_nudge?.Matches(key.ToString()) == true && CanNudge())
+                    _nudge.Prepare(AnnotationMove.MovingSet(Owners,_canvas.Document),_canvas.Document.SelectedObjects());
+                QueueNudge();
+            }
+        }
+        private void NudgeUndoChanged(object sender, GH_DocUndoEventArgs e)
+        {
+            // Align/Distribute (even an accidentally uniform align) and every unrelated record end this session.
+            _nudge = null;
+            if (e.Operation != GH_UndoOperation.RecordAdded || !ReferenceEquals(e.Document,_canvas.Document) ||
+                !AnnotationNudge.IsNudge(e.Record) || e.Record.ActionCount == 0 || !e.Record.Actions.All(a => a is GH_PivotAction) ||
+                _text != null || _canvas.ActiveInteraction != null || _canvas.ActiveWidget != null || _canvas.ActiveObject != null) return;
+            _nudge = new AnnotationNudge(AnnotationMove.MovingSet(Owners,e.Document),e.Document.SelectedObjects(),e.Document,e.Record);
+            QueueNudge(); // Menu commands also enter here, without needing a canvas key message.
+        }
+        private void QueueNudge()
+        {
+            if (_nudgePending || _canvas.IsDisposed || !_canvas.IsHandleCreated) return;
+            _nudgePending = true;
+            _canvas.BeginInvoke(new Action(() => { _nudgePending = false; SyncNudge(); }));
+        }
+        private void SyncNudge()
+        { if (CanNudge() && _nudge?.Sync(_canvas.Document) == true) _canvas.Invalidate(); }
+        private bool CanNudge() => _canvas.Document != null && _text == null && _canvas.ActiveInteraction == null &&
+            _canvas.ActiveWidget == null && _canvas.ActiveObject == null;
         private void SyncFollow()
         {
             if (_follow == null || _anchor == null || !ReferenceEquals(_canvas.Document,_document)) return;
