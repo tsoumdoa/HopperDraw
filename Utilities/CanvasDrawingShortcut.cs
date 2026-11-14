@@ -188,9 +188,14 @@ namespace hopperdraw
             if (_canvas.IsHandleCreated)
                 SendMessage(_canvas.Handle, KeyObservedMessage, new IntPtr((int)key), new IntPtr(message));
         }
+        // Only keys that are followed by a character message: a count left behind by a key without one
+        // (Delete, arrows) would swallow a later character from the same scan code.
+        internal static bool TypesCharacter(Keys key) => key >= Keys.A && key <= Keys.Z || key >= Keys.D0 && key <= Keys.D9 ||
+            key >= Keys.OemSemicolon && key <= Keys.Oemtilde || key >= Keys.OemOpenBrackets && key <= Keys.OemQuotes || key == Keys.OemBackslash ||
+            key == Keys.Back || key == Keys.Enter || key == Keys.Escape || key == Keys.Space;
         private void OwnCommandCharacter(Keys key, IntPtr flags)
         {
-            if (!(key >= Keys.A && key <= Keys.Z) && key != Keys.Back && key != Keys.Enter && key != Keys.Escape && key != Keys.Space) return;
+            if (!TypesCharacter(key)) return;
             int scan = (int)(flags.ToInt64() & 0xff0000);
             int count = Math.Max(1, (int)(flags.ToInt64() & 0xffff));
             _ownedCharacters.TryGetValue(scan, out int pending);
@@ -198,7 +203,8 @@ namespace hopperdraw
         }
         private bool ReleaseCharacter(Message message)
         {
-            if (message.Msg != CharacterMessage && message.Msg != SystemCharacterMessage) return false;
+            // 0x103: a dead key (an accent on some layouts) answers with WM_DEADCHAR instead of WM_CHAR.
+            if (message.Msg != CharacterMessage && message.Msg != SystemCharacterMessage && message.Msg != 0x103) return false;
             int scan = (int)(message.LParam.ToInt64() & 0xff0000);
             if (!_ownedCharacters.TryGetValue(scan, out int pending)) return false;
             int count = Math.Max(1, (int)(message.LParam.ToInt64() & 0xffff));

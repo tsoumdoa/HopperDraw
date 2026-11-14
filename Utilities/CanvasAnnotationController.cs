@@ -55,10 +55,7 @@ namespace hopperdraw
             DrawingOwner?.Draft.Cancel();
             _hook.Reset(); owner.ResetTextKeys();
             var session = new TextEditSession(owner, _canvas.Document, shape, isNew);
-            var layout = shape.Layout;
-            float zoom = (float)_canvas.Viewport.Zoom;
-            var origin = _canvas.Viewport.ProjectPoint(new PointF(layout.Bounds.Left + layout.Padding, layout.Bounds.Top + layout.Padding));
-            var font = TextLayoutService.Font(shape, zoom);
+            var font = TextLayoutService.Font(shape, (float)_canvas.Viewport.Zoom);
             TextEditorControl editor = null;
             try
             {
@@ -67,17 +64,20 @@ namespace hopperdraw
                 // The model stores LF; a Win32 multiline EDIT control only breaks lines on CRLF.
                 editor.Text = EditorText(shape.Text);
                 editor.WordWrap = shape.BoxWidth.HasValue;
-                editor.ForeColor = shape.TextColorOverride ?? owner.BorderColor;
-                editor.Location = new Point((int)Math.Ceiling(origin.X), (int)Math.Ceiling(origin.Y));
-                editor.Size = new Size(Math.Max(80, (int)Math.Min(10000, (layout.Bounds.Width - 2 * layout.Padding) * zoom + 12)),
-                    Math.Max(48, (int)Math.Min(10000, (layout.Bounds.Height - 2 * layout.Padding) * zoom + 12)));
                 _editor = editor;
                 _text = session;
+                if (!isNew) ShapeRenderer.EditingText.Add(session.TargetId);
                 editor.Commit = () => EndText(true, true);
+                editor.Dismiss = DismissFlyout;
+                editor.Format = FormatKey;
+                editor.Updating = EditorUpdating;
                 editor.LostFocus += EditorLostFocus;
                 editor.TextChanged += EditorTextChanged;
+                LayoutEditor();
                 _canvas.Controls.Add(editor);
-                editor.BringToFront(); editor.Focus(); editor.SelectAll();
+                // The handle now exists: line count and wrapping are the control's own.
+                LayoutEditor();
+                editor.BringToFront(); _bar.Raise(); editor.Focus(); editor.SelectAll();
                 _canvas.BeginInvoke(new Action(() => { if (ReferenceEquals(_editor, editor) && !editor.IsDisposed && !editor.ContainsFocus) editor.Focus(); }));
                 Application.AddMessageFilter(this);
                 FeedbackChanged(); _canvas.Invalidate();
@@ -89,16 +89,230 @@ namespace hopperdraw
                 throw;
             }
         }
-        private void EditorTextChanged(object sender, EventArgs e)
+        private static Color Over(Color top, Color under)
+        {
+            float a = top.A / 255f;
+            return Color.FromArgb((int)Math.Round(top.R * a + under.R * (1 - a)), (int)Math.Round(top.G * a + under.G * (1 - a)), (int)Math.Round(top.B * a + under.B * (1 - a)));
+        }
+        // The skin is only loaded inside Grasshopper; its default background stands in elsewhere.
+        internal static Color CanvasBack()
+        {
+            var skin = GH_Skin.canvas_back;
+            return skin.A == 0 ? Color.FromArgb(212, 208, 200) : Color.FromArgb(255, skin);
+        }
+        // A native text box cannot be transparent, so it takes the colour the canvas shows behind the text:
+        // the canvas background, under the text box's own fill when it has one.
+        internal static Color EditorBack(TextShape draft, Color canvas)
+        {
+            var back = Color.FromArgb(255, canvas);
+            if (!draft.FillColor.HasValue || !(draft.FillOpacity > 0)) return back;
+            var layer = draft.Hatch == HatchPattern.None ? draft.FillColor : draft.HatchBackground;
+            return layer.HasValue ? Over(HatchRenderer.Ink(layer.Value, draft.FillOpacity), back) : back;
+        }
+        // Places the editor exactly over the text it stands in for: the content box of the draft's layout, grown
+        // to whatever the control itself needs so that nothing scrolls. Runs on every text and style change.
+        private void LayoutEditor()
+        {
+            if (_text == null || _editor == null) return;
+            var draft = _text.Draft; var layout = draft.Layout;
+            float zoom = (float)_canvas.Viewport.Zoom, em = layout.Em * zoom;
+            var origin = _canvas.Viewport.ProjectPoint(new PointF(layout.Bounds.Left + layout.Padding, layout.Bounds.Top + layout.Padding));
+            var back = EditorBack(draft, CanvasBack());
+            if (_editor.BackColor != back) _editor.BackColor = back;
+            var ink = Over(draft.TextColorOverride ?? _text.Owner.BorderColor, back);
+            if (_editor.ForeColor != ink) _editor.ForeColor = ink;
+            int Clamp(float value, int min) => float.IsNaN(value) ? min : (int)Math.Max(min, Math.Min(10000, Math.Ceiling(value)));
+            int x = (int)Math.Round(origin.X), y = (int)Math.Round(origin.Y);
+            float width = (layout.Bounds.Width - 2 * layout.Padding) * zoom;
+            // Unwrapped text needs room for the caret after the last character, or the control scrolls sideways.
+            if (!draft.BoxWidth.HasValue) width = Math.Max(width, _editor.ContentSize.Width) + Math.Max(4, .3f * em);
+            _editor.SetBounds(x, y, Clamp(width, 4), _editor.Height);
+            // Wrapping follows the width just set.
+            _editor.Height = Clamp(Math.Max((layout.Bounds.Height - 2 * layout.Padding) * zoom, _editor.ContentSize.Height), 4);
+            _editor.ResetScroll();
+        }
+        // Device-pixel frame of the text being edited: its layout box, grown to enclose the editor.
+        private RectangleF EditorFrame()
+        {
+            var layout = _text.Draft.Layout; float zoom = (float)_canvas.Viewport.Zoom;
+            var corner = _canvas.Viewport.ProjectPoint(layout.Bounds.Location);
+            var box = new RectangleF(corner.X, corner.Y, layout.Bounds.Width * zoom, layout.Bounds.Height * zoom);
+            return RectangleF.Union(box, RectangleF.Inflate(_editor.Bounds, 1, 1));
+        }
+        private readonly FrameShape _frameSample = new FrameShape();
+        // The editor hides the stored text, so the canvas paints the edited text's box (fill and border, live as
+        // the style changes) and a thin editing frame around it.
+        internal void PaintEditorFrame(Graphics g)
+        {
+            if (_text == null || _editor == null || g == null) return;
+            var state = g.Save();
+            try
+            {
+                g.ResetTransform(); g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+                g.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.None;
+                var draft = _text.Draft; var frame = EditorFrame();
+                float zoom = (float)_canvas.Viewport.Zoom, s = Math.Max(1, g.DpiX / 96f), stroke = 0;
+                var sample = _frameSample;
+                sample.TopLeft = new Rhino.Geometry.Point3d(frame.Left, frame.Top, 0); sample.TopRight = new Rhino.Geometry.Point3d(frame.Right, frame.Top, 0);
+                sample.BottomRight = new Rhino.Geometry.Point3d(frame.Right, frame.Bottom, 0); sample.BottomLeft = new Rhino.Geometry.Point3d(frame.Left, frame.Bottom, 0);
+                draft.CopyStyleTo(sample); sample.HatchScale = draft.HatchScale * zoom;
+                using (var path = AnnotationGeometry.Boundary(sample))
+                {
+                    HatchRenderer.Paint(g, sample, path);
+                    if (draft.StrokeVisible)
+                    {
+                        stroke = StyleValidation.EffectiveWidth(_text.Owner.LineThickness, draft.ThicknessMultiplier) * zoom;
+                        using (var pen = new Pen(draft.OverrideColor ?? _text.Owner.BorderColor, stroke) { DashStyle = StyleValidation.SafeDash(draft.LineType) })
+                            if (path.PointCount > 0) g.DrawPath(pen, path);
+                    }
+                }
+                // Whole-pixel line on whole pixels (pixel centres are integers with the offset mode set above): a
+                // hairline frame must not smear across two rows.
+                float outset = stroke / 2 + 3 * s, line = (float)Math.Max(1, Math.Round(1.25f * s)), half = line % 2 == 1 ? 0 : .5f;
+                var around = RectangleF.Inflate(frame, outset, outset);
+                around = new RectangleF((float)Math.Floor(around.X) + half, (float)Math.Floor(around.Y) + half, (float)Math.Ceiling(around.Width), (float)Math.Ceiling(around.Height));
+                using (var pen = new Pen(Color.FromArgb(0, 120, 215), line))
+                using (var outline = StyleSurface.Rounded(around, 3 * s))
+                    g.DrawPath(pen, outline);
+            }
+            catch (Exception ex) { System.Diagnostics.Debug.WriteLine("HopperDraw editor frame skipped: " + ex.Message); }
+            finally { g.Restore(state); }
+        }
+        private void SyncEditor()
         {
             if (_text == null || _editor == null) return;
             _text.Buffer = _editor.Text; _text.Draft.Text = _editor.Text;
-            var b = _text.Draft.Layout;
-            float zoom = (float)_canvas.Viewport.Zoom;
-            _editor.Size = new Size(Math.Max(80, (int)Math.Min(10000, (b.Bounds.Width - 2*b.Padding)*zoom+12)),
-                Math.Max(48, (int)Math.Min(10000, (b.Bounds.Height - 2*b.Padding)*zoom+12)));
+            LayoutEditor();
         }
-        private void EditorLostFocus(object sender, EventArgs e) => EndText(true, true);
+        // Before the new text is drawn: grow first so a new line or character never shows scrolled.
+        private void EditorUpdating() { SyncEditor(); }
+        private void EditorTextChanged(object sender, EventArgs e)
+        {
+            SyncEditor();
+            // Typing dismisses an open style flyout; the frame follows the text.
+            _bar.CloseFlyout(); _canvas.Invalidate();
+        }
+        // The style bar or a format key restyled the draft: the editor shows it immediately.
+        private void TextStyleChanged()
+        {
+            if (_text == null || _editor == null) return;
+            var old = _editor.Font;
+            _editor.Font = TextLayoutService.Font(_text.Draft, (float)_canvas.Viewport.Zoom);
+            old.Dispose();
+            LayoutEditor(); _canvas.Invalidate();
+        }
+        private StyleTarget TextTarget()
+        {
+            var drawing = DrawingOwner;
+            bool pen = _text.IsNew && ReferenceEquals(drawing, _text.Owner) && drawing.DrawMode == 5;
+            return new TextEditTarget(_text, pen ? drawing.TextPen : null, TextStyleChanged);
+        }
+        private bool FormatKey(Keys data)
+        {
+            if (_text == null || !StyleKeys.Match(data, true, out var key)) return false;
+            // Always consumed while typing: an unused chord must not reach the text box as a control character.
+            string result = TextTarget().Run(key);
+            if (result != null) Notice(result);
+            SyncBar(); return true;
+        }
+        // The key rows of the canvas, for the pen while drawing and for selected annotations. Keys with nothing
+        // to act on (a position past the end of its row, fill on a line) are left to Grasshopper.
+        private bool RunStyleKey(Keys data)
+        {
+            if (!StyleKeys.Match(data, false, out var key)) return false;
+            string result = BarState()?.Target.Run(key);
+            if (result == null) return false;
+            Notice(result); SyncBar(); _canvas.Invalidate();
+            return true;
+        }
+        // D is on the line-type row and is also the first half of D D. While drawing D D has nothing left to
+        // do and D acts at once. With annotations selected outside drawing mode, the press is left to the
+        // gesture and D acts once the double-press window has passed without a second D, provided nothing
+        // else has happened in between: no other key, no mouse button, the same selection.
+        private readonly DelayedAction _deferredKey = new DelayedAction();
+        private void DeferStyleKey(Keys data)
+        {
+            if (BarState() == null) return;
+            int signature = BarSignature();
+            _deferredKey.Arm(SystemInformation.DoubleClickTime + 30, () =>
+            {
+                if (_canvas.IsDisposed || !_canvas.Focused || _text != null || DrawingOwner != null || Control.MouseButtons != MouseButtons.None ||
+                    Control.ModifierKeys != Keys.None || CanvasDrawingShortcut.MenuActive || _canvas.ActiveInteraction != null || BarSignature() != signature) return;
+                RunStyleKey(data);
+            });
+        }
+        // Escape closes an open flyout first. The same press also arrives through the host's Escape route.
+        private bool DismissFlyout()
+        {
+            if (!_bar.CloseFlyout()) return false;
+            FreshEscape(); return true;
+        }
+        private void EditorLostFocus(object sender, EventArgs e) { if (!_styleModal) EndText(true, true); }
+        private readonly StyleBar _bar;
+        private bool _barPending, _styleModal;
+        private int _barSignature;
+        internal StyleBar Bar => _bar;
+        private StyleBarState BarState()
+        {
+            var drawing = DrawingOwner;
+            StyleTarget target = null;
+            if (_text != null) target = TextTarget();
+            else if (drawing != null) target = new PenTarget(drawing);
+            else if (Owners.Any(o => o.HasSelection)) target = new SelectionTarget(Owners);
+            if (target == null || target.Shapes.Length == 0) return null;
+            return new StyleBarState
+            {
+                Target = target, Tool = drawing?.DrawMode ?? -1, SetTool = drawing == null ? (Action<int>)null : drawing.SetTool,
+                ToolsLocked = drawing != null && drawing.Params.Input[2].SourceCount > 0, Typing = _text != null
+            };
+        }
+        // Everything that decides which bar is shown. Style values are not included: every style change goes
+        // through FeedbackChanged or the bar itself.
+        private int BarSignature()
+        {
+            unchecked
+            {
+                var drawing = DrawingOwner;
+                int hash = _text == null ? 17 : RuntimeHelpers.GetHashCode(_text);
+                hash = hash * 31 + (drawing == null ? 0 : RuntimeHelpers.GetHashCode(drawing));
+                hash = hash * 31 + (drawing?.DrawMode ?? -1);
+                hash = hash * 31 + (drawing != null && drawing.Params.Input[2].SourceCount > 0 ? 1 : 0);
+                hash = hash * 31 + _canvas.ClientSize.Width; hash = hash * 31 + _canvas.ClientSize.Height; hash = hash * 31 + _canvas.DeviceDpi;
+                if (_text == null && drawing == null)
+                    foreach (var owner in Owners)
+                    {
+                        hash = hash * 31 + RuntimeHelpers.GetHashCode(owner);
+                        foreach (int index in owner.SelectedShapeIndices) hash = hash * 31 + index;
+                    }
+                return hash;
+            }
+        }
+        private void QueueBar()
+        {
+            if (_barPending || _canvas.IsDisposed || !_canvas.IsHandleCreated) return;
+            _barPending = true;
+            _canvas.BeginInvoke(new Action(() => { _barPending = false; SyncBar(); }));
+        }
+        internal void SyncBar()
+        {
+            if (_canvas.IsDisposed || _bar.IsDisposed) return;
+            try
+            {
+                // Recorded first: a bar that fails must not be retried on every paint.
+                _barSignature = BarSignature();
+                _bar.Backdrop = CanvasBack();
+                _bar.Sync();
+            }
+            catch (Exception ex) { System.Diagnostics.Debug.WriteLine("HopperDraw style bar skipped: " + ex); }
+        }
+        private void CanvasResized(object sender, EventArgs e) => QueueBar();
+        // The custom colour dialog takes focus and clicks; neither may end the text being styled.
+        private void StyleModal(bool open)
+        {
+            _styleModal = open;
+            if (open || _canvas.IsDisposed) return;
+            if (_editor != null && !_editor.IsDisposed) _editor.Focus(); else RestoreCanvasFocus();
+        }
         private void TextUndoChanged(object sender, GH_DocUndoEventArgs e)
         { if (e.Operation == GH_UndoOperation.Undo || e.Operation == GH_UndoOperation.Redo) { _textEpoch++; EndText(false); } }
         internal void AbortText(HopperDraw owner)
@@ -118,6 +332,7 @@ namespace hopperdraw
             try
             {
                 Application.RemoveMessageFilter(this);
+                ShapeRenderer.EditingText.Remove(session.TargetId); _bar.CloseFlyout();
                 try
                 {
                     session.Buffer = editor.Text;
@@ -129,7 +344,7 @@ namespace hopperdraw
                     editor.LostFocus -= EditorLostFocus; editor.TextChanged -= EditorTextChanged;
                     // Esc / Ctrl+Enter / a canvas click end the edit while the editor still has focus. Removing a
                     // focused child lets Windows move focus to an arbitrary sibling (live Rhino: not the canvas), so
-                    // drawing-mode keys (Escape, tool letters) stopped working and a click would place new text.
+                    // drawing-mode keys (Escape, tool keys) stopped working and a click would place new text.
                     bool hadFocus = editor.ContainsFocus;
                     // Remove immediately; defer disposal until after this message/filter has returned.
                     _canvas.Controls.Remove(editor);
@@ -150,6 +365,8 @@ namespace hopperdraw
             // Cheap identity checks on every message; the document scan (owner still present) only on presses/wheel,
             // the only messages that can commit. Owner removal is also handled by CancelOwner/DocumentChanged.
             if (!_text.Owner.Eligible || !ReferenceEquals(_text.Document,_canvas.Document)) { EndText(false); return false; }
+            // Styling is part of the edit: presses on the style bar, its flyout or its colour dialog never end it.
+            if (_styleModal || _bar.Owns(m.HWnd)) return false;
             bool press = m.Msg == 0x201 || m.Msg == 0x204 || m.Msg == 0x207 || m.Msg == 0x20b, wheel = m.Msg == 0x20a;
             if (!press && !wheel) return false;
             if (!Owners.Contains(_text.Owner)) EndText(false);
@@ -177,7 +394,7 @@ namespace hopperdraw
         // Explicit state changes (tool, mode, DPI, editor) refresh hints and the stationary-pointer cursor.
         internal void FeedbackChanged()
         {
-            UpdateHints();
+            UpdateHints(); QueueBar();
             if (_cursorRefreshPending || _canvas.IsDisposed || !_canvas.IsHandleCreated) return;
             _cursorRefreshPending = true;
             _canvas.BeginInvoke(new Action(() =>
@@ -272,6 +489,7 @@ namespace hopperdraw
                 try
                 {
                     if (_canvas.IsDisposed || CanvasDrawingShortcut.MenuActive) return;
+                    if (_bar.FlyoutOpen) { if (FreshEscape()) _bar.CloseFlyout(); return; }
                     if (_text != null)
                     {
                         // Only the editor this canvas owns, and only while it has focus.
@@ -279,7 +497,7 @@ namespace hopperdraw
                         return;
                     }
                     if (!CanvasOwnsKeyboard() || unchecked((uint)(Environment.TickCount - _textEndedTick)) < 250) return;
-                    if (!_canvas.Focused) _canvas.Focus(); // later keys (tool letters) route through the canvas again
+                    if (!_canvas.Focused) _canvas.Focus(); // later keys (tool keys) route through the canvas again
                     if (Command(Keys.Escape)) _canvas.Invalidate();
                 }
                 catch (Exception ex) { System.Diagnostics.Debug.WriteLine("HopperDraw Escape skipped: " + ex); }
@@ -301,6 +519,9 @@ namespace hopperdraw
             canvas.KeyDown += NativeKey; canvas.KeyUp += NativeKey;
             canvas.CanvasPrePaintGroups += SyncPaint;
             canvas.CanvasPostPaintOverlay += PaintHud;
+            _bar = new StyleBar { Source = BarState, Modal = StyleModal, PointerPressed = _deferredKey.Cancel };
+            _bar.Attach(canvas);
+            canvas.Resize += CanvasResized;
         }
         internal void Remove(HopperDraw owner)
         {
@@ -313,7 +534,9 @@ namespace hopperdraw
             _canvas.ViewportChanged -= ViewportChanged; _canvas.DocumentChanged -= DocumentChanged; _canvas.MouseMove -= Hover;
             _canvas.KeyDown -= NativeKey; _canvas.KeyUp -= NativeKey;
             _canvas.CanvasPrePaintGroups -= SyncPaint; _canvas.CanvasPostPaintOverlay -= PaintHud;
-            _canvas.DpiChangedAfterParent -= DpiChanged;
+            _canvas.DpiChangedAfterParent -= DpiChanged; _canvas.Resize -= CanvasResized;
+            _bar.Dispose(); // also leaves the canvas' child controls
+            _deferredKey.Dispose();
             ObserveRhinoEscape(false);
             ResetCursor(); _cursors.Dispose(); _hints.Dispose();
         }
@@ -362,6 +585,11 @@ namespace hopperdraw
         }
         private void RouteMessage(int message, MouseEventArgs e, bool after)
         {
+            // Cancel on the press itself: a quick click or wheel can leave the selection and focus unchanged.
+            if (!after && (message == 0x201 || message == 0x203 || message == 0x204 || message == 0x206 ||
+                message == 0x207 || message == 0x209 || message == 0x20b || message == 0x20d || message == 0x20a || message == 0x20e))
+                _deferredKey.Cancel();
+            if (!after && (message == 0x201 || message == 0x203 || message == 0x204 || message == 0x207 || message == 0x20a)) _bar.CloseFlyout();
             if (!after && (message == 0x201 || message == 0x203 || message == 0x204 || message == 0x20a)) EndText(true, message == 0x201 || message == 0x203);
             if (!after && (message == 0x201 || message == 0x203 || message == 0x204))
             {
@@ -511,6 +739,9 @@ namespace hopperdraw
         // between clicks; an unrelated native drag is left to GH.
         private void Lost()
         {
+            // Not for the bar's own colour dialog, whose choice is applied when it closes.
+            if (!_styleModal) _bar?.CloseFlyout();
+            _deferredKey.Cancel();
             if (_releasing) return;
             bool changed = false;
             if (_canvas.ActiveInteraction is HopperDrawInteraction interaction) { interaction.Cancel(); _canvas.ActiveInteraction = null; changed = true; }
@@ -540,6 +771,10 @@ namespace hopperdraw
         private bool Command(Keys data)
         {
             Keys key = data & Keys.KeyCode, mods = data & Keys.Modifiers;
+            // Any other key ends the wait of a deferred D; a second D re-arms it below or enters drawing mode.
+            _deferredKey.Cancel();
+            // An open style flyout is the innermost Escape layer, ahead of the text, the draft and drawing mode.
+            if (key == Keys.Escape && _bar.FlyoutOpen) { if (FreshEscape()) _bar.CloseFlyout(); return true; }
             if (_text != null)
             {
                 if (key != Keys.Escape && !(key == Keys.Enter && mods == Keys.Control)) return false;
@@ -554,6 +789,14 @@ namespace hopperdraw
                 (_canvas.ActiveInteraction == null || _canvas.ActiveInteraction is HopperDrawInteraction) &&
                 ToolShortcut.Route(data, toolOwner.DrawMode, toolOwner.Params.Input[2].SourceCount > 0,
                     toolOwner.SetTool, () => Notice("Disconnect M to switch tools"))) return true;
+            // Style keys under the same conditions as the tool keys, for the pen or the selection. A held
+            // mouse button (a drag, a freehand stroke) keeps its keys.
+            if (Control.MouseButtons == MouseButtons.None && _canvas.Focused && !CanvasDrawingShortcut.MenuActive &&
+                (_canvas.ActiveInteraction == null || _canvas.ActiveInteraction is HopperDrawInteraction))
+            {
+                if (toolOwner == null && data == Keys.D) DeferStyleKey(data);
+                else if (RunStyleKey(data)) return true;
+            }
             if (_canvas.ActiveInteraction is HopperDrawInteraction active)
             { if (key == Keys.Escape) { active.Cancel(true); _canvas.ActiveInteraction = null; return true; } return false; }
             if (_canvas.ActiveInteraction != null) return false;
@@ -636,6 +879,14 @@ namespace hopperdraw
             if (!_refreshingCursor && (drawing != null || previous.Any(pair=>pair.Value != (pair.Key.HoveredShapeIndex,pair.Key.HoveredPointIndex)))) _canvas.Invalidate();
         }
         private static bool ContainsTextAt(DrawShape shape,PointF p) => shape is TextShape text && AnnotationGeometry.Hit(text,p,0,0) || shape is DrawShapeGroup group && group.Children.Any(c=>ContainsTextAt(c,p));
-        private void PaintHud(GH_Canvas canvas) { UpdateHints(); AnnotationFeedback.Hud(canvas,DrawingOwner,_hints,_text!=null); }
+        private void PaintHud(GH_Canvas canvas)
+        {
+            UpdateHints();
+            // Selection changes and resizes reach the bar from here; it is never synchronised inside a paint.
+            if (BarSignature() != _barSignature) QueueBar();
+            PaintEditorFrame(canvas.Graphics);
+            float clearance = _bar.Visible ? canvas.ClientSize.Height - _bar.Top : 8 * canvas.DeviceDpi / 96f;
+            AnnotationFeedback.Hint(canvas,DrawingOwner,_hints,_text!=null,clearance);
+        }
     }
 }

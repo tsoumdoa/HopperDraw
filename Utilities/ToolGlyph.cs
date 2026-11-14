@@ -4,7 +4,7 @@ using System.Drawing.Drawing2D;
 
 namespace hopperdraw
 {
-    // One normalized monoline path source for menu, cursor and HUD.
+    // One normalized monoline path source for menu, cursor and style bar.
     internal static class ToolGlyph
     {
         internal static GraphicsPath Path(int tool)

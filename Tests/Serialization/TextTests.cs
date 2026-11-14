@@ -322,10 +322,10 @@ internal static class TextTests
                 AnnotationMenuBuilder.Selection(menu.Items, new[] { owner }); var textMenu = Find(menu.Items, "Text");
                 Find(Find(textMenu.DropDownItems, "Style").DropDownItems, "Title").PerformClick();
                 Find(Find(textMenu.DropDownItems, "Color").DropDownItems, "Blue").PerformClick();
-                Program.Check(text.StylePreset == TextStylePreset.Title && text.Bold && text.TextColorOverride == Color.Blue &&
+                Program.Check(text.StylePreset == TextStylePreset.Title && text.Bold && text.TextColorOverride == AnnotationMenuBuilder.Colors[5] &&
                      text.OverrideColor == null && line.OverrideColor == null, "text menu affected geometry/border");
                 Find(Find(Find(menu.Items, "Stroke").DropDownItems, "Color").DropDownItems, "Red").PerformClick();
-                Program.Check(text.TextColorOverride == Color.Blue && text.OverrideColor == Color.Red, "stroke menu changed glyph colour");
+                Program.Check(text.TextColorOverride == AnnotationMenuBuilder.Colors[5] && text.OverrideColor == AnnotationMenuBuilder.Colors[2], "stroke menu changed glyph colour");
             }
             text.SetPreset(TextStylePreset.Body);
             text.SizeMultiplier = 3;
@@ -333,10 +333,10 @@ internal static class TextTests
             text.FillColor = Color.Yellow;
             text.SetPreset(TextStylePreset.Subtitle);
             Program.Check(!text.Bold && !text.Italic && text.SizeMultiplier == 1 && text.FillColor == Color.Yellow &&
-                 text.TextColorOverride == Color.Blue, "preset reset box/colour or kept typography");
+                 text.TextColorOverride == AnnotationMenuBuilder.Colors[5], "preset reset box/colour or kept typography");
             owner.TextPen.TextColorOverride = Color.Green;
             owner.PenFrom(text);
-            Program.Check(owner.TextPen.TextColorOverride == Color.Blue && owner.PenStyle.StrokeVisible, "text pen contaminated geometry pen");
+            Program.Check(owner.TextPen.TextColorOverride == AnnotationMenuBuilder.Colors[5] && owner.PenStyle.StrokeVisible, "text pen contaminated geometry pen");
         });
         Program.Test("mixed text menu values are unchecked and text transaction spans owners once", () =>
         {

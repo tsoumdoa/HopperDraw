@@ -254,6 +254,7 @@ internal static class Program
         MenuCursorHudTests.Run();
         FillHatchTests.Run();
         TextTests.Run();
+        StyleBarTests.Run();
         return Finish();
     }
     private static int Finish()

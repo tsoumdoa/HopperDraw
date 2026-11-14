@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.Drawing;
+using System.Linq;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
 using hopperdraw;
@@ -474,23 +476,23 @@ internal static class Program
                             }
                             finally { a.Command = null; }
                         }, a);
-                        Run("DDT immediately switches tool and consumes repeat, key-up and delayed characters", () =>
+                        Run("DDN immediately switches tool and consumes repeat, key-up and delayed characters", () =>
                         {
                             int mode = 0, changes = 0;
                             a.Command = key => _activatedA > 0 && ToolShortcut.Route(key, mode, false, m => { mode = m; changes++; }, () => { });
                             try
                             {
                                 Down(canvas, Keys.D); Up(canvas, Keys.D); Down(canvas, Keys.D); Up(canvas, Keys.D);
-                                Down(canvas, Keys.T); Down(canvas, Keys.T, true); Up(canvas, Keys.T); Application.DoEvents();
-                                Check(_activatedA == 1 && mode == 5 && changes == 1 && _forwarded == 0 && _characters == 0, "DDT leaked or repeated");
-                                Tap(canvas, Keys.T); Check(changes == 1 && _characters == 0, "reselection changed or leaked");
+                                Down(canvas, Keys.N); Down(canvas, Keys.N, true); Up(canvas, Keys.N); Application.DoEvents();
+                                Check(_activatedA == 1 && mode == 5 && changes == 1 && _forwarded == 0 && _characters == 0, "DDN leaked or repeated");
+                                Tap(canvas, Keys.N); Check(changes == 1 && _characters == 0, "reselection changed or leaked");
                                 _activatedA = 0;
-                                Tap(canvas, Keys.T);
+                                Tap(canvas, Keys.N);
                                 Check(_forwarded == 1 && _characters == 1, "letter outside mode swallowed or stale character credit");
                             }
                             finally { a.Command = null; }
                         }, a);
-                        Run("tool letters notify peers with independent scan credits", () =>
+                        Run("tool keys notify peers with independent scan credits", () =>
                         {
                             int mode = 0;
                             using (var peer = new ObservingPeer(canvas))
@@ -498,18 +500,106 @@ internal static class Program
                                 a.Command = key => ToolShortcut.Route(key, mode, false, m => mode = m, () => { });
                                 try
                                 {
-                                    foreach (var key in new[] { Keys.T, Keys.L, Keys.P, Keys.R, Keys.C, Keys.F })
+                                    foreach (var key in new[] { Keys.N, Keys.Z, Keys.X, Keys.C, Keys.V, Keys.B })
                                     { Down(canvas, key); Up(canvas, key); }
                                     Application.DoEvents();
-                                    Check(mode == 4 && _forwarded == 0 && _characters == 0 && peer.Seen.Contains(Keys.T) && peer.Seen.Contains(Keys.F),
+                                    Check(mode == 4 && _forwarded == 0 && _characters == 0 && peer.Seen.Contains(Keys.N) && peer.Seen.Contains(Keys.B),
                                         "tool routing/peer failure");
                                     a.Command = null;
-                                    Tap(canvas, Keys.L);
+                                    Tap(canvas, Keys.Z);
                                     Check(_characters == 1, "character credits outlived commands");
                                 }
                                 finally { a.Command = null; }
                             }
                         }, a);
+                        Run("style keys: rows by position on the canvas, a few Ctrl chords while typing; consumed keys leave no character and a consumed D is not D D", () =>
+                        {
+                            StyleKey hit;
+                            Check(StyleKeys.Match(Keys.D4, false, out hit) && hit.Row == StyleKeyRow.Number && hit.Index == 4 && !hit.Fill, "canvas digit");
+                            Check(StyleKeys.Match(Keys.Shift | Keys.D0, false, out hit) && hit.Row == StyleKeyRow.Number && hit.Index == 0 && hit.Fill, "canvas Shift+digit");
+                            Check(StyleKeys.Match(Keys.Control | Keys.D4, true, out hit) && hit.Row == StyleKeyRow.Number && hit.Index == 4 && !hit.Fill, "typing Ctrl+digit");
+                            Check(StyleKeys.Match(Keys.Control | Keys.Shift | Keys.D6, true, out hit) && hit.Row == StyleKeyRow.Number && hit.Index == 6 && hit.Fill, "typing Ctrl+Shift+digit");
+                            Check(!StyleKeys.Match(Keys.D4, true, out hit) && !StyleKeys.Match(Keys.Control | Keys.D4, false, out hit), "a plain digit while typing or a Ctrl digit on the canvas matched");
+                            Check(!StyleKeys.Match(Keys.D7, false, out hit) && !StyleKeys.Match(Keys.D9, false, out hit) && !StyleKeys.Match(Keys.Shift | Keys.D8, false, out hit) &&
+                                !StyleKeys.Match(Keys.Control | Keys.D7, true, out hit), "a digit past the six colours matched");
+                            // AltGr is Ctrl+Alt and types characters on many layouts; Alt alone belongs to menus.
+                            Check(!StyleKeys.Match(Keys.Control | Keys.Alt | Keys.D2, true, out hit) && !StyleKeys.Match(Keys.Alt | Keys.D2, false, out hit) && !StyleKeys.Match(Keys.Alt | Keys.Q, false, out hit) &&
+                                !StyleKeys.Match(Keys.Control | Keys.Alt | Keys.B, true, out hit), "AltGr or Alt matched a style key");
+                            var upper = new[] { Keys.Q, Keys.W, Keys.E, Keys.R, Keys.T, Keys.Y, Keys.U };
+                            var home = new[] { Keys.A, Keys.S, Keys.D, Keys.F, Keys.G, Keys.H, Keys.J, Keys.K, Keys.L, Keys.OemSemicolon, Keys.OemQuotes };
+                            for (int i = 0; i < upper.Length; i++)
+                                Check(StyleKeys.Match(upper[i], false, out hit) && hit.Row == StyleKeyRow.Upper && hit.Index == i && !hit.Fill &&
+                                    StyleKeys.Match(Keys.Shift | upper[i], false, out hit) && hit.Row == StyleKeyRow.Upper && hit.Index == i && hit.Fill, "Q row position " + i);
+                            for (int i = 0; i < home.Length; i++)
+                                Check(StyleKeys.Match(home[i], false, out hit) && hit.Row == StyleKeyRow.Home && hit.Index == i && !hit.Fill &&
+                                    StyleKeys.Match(Keys.Shift | home[i], false, out hit) && hit.Row == StyleKeyRow.Home && hit.Index == i && hit.Fill, "A row position " + i);
+                            Check(StyleKeys.Span(StyleKeys.Upper, 5) == "Q–T" && StyleKeys.Caps(StyleKeys.Home, 3) == "A S D" && StyleKeys.Span(StyleKeys.Home, 11) == "A–'" &&
+                                StyleKeys.Label("4", true, true) == "Ctrl+Shift+4" && StyleKeys.Label("Q", false, true) == "Shift+Q" && StyleKeys.Label("3", false) == "3", "key names");
+                            // Never the tool row below, the rest of the keyboard, or with Ctrl (undo, copy, paste, GH's own).
+                            Check(string.Concat(DrawingTool.All.Select(t => t.Key)) == "ZXCVBN", "tools are not the bottom row in button order");
+                            foreach (var free in new[] { Keys.Z, Keys.X, Keys.C, Keys.V, Keys.B, Keys.N, Keys.M, Keys.I, Keys.O, Keys.P, Keys.OemOpenBrackets, Keys.Oemcomma, Keys.OemPeriod, Keys.OemQuestion,
+                                Keys.Delete, Keys.Back, Keys.Enter, Keys.Escape, Keys.Space })
+                                Check(!StyleKeys.Match(free, false, out hit) && !StyleKeys.Match(Keys.Shift | free, false, out hit), "style key shadows " + free);
+                            foreach (var chord in upper.Concat(home).Concat(new[] { Keys.D3 }))
+                                Check(!StyleKeys.Match(Keys.Control | chord, false, out hit), "style row shadows Ctrl+" + chord + " on the canvas");
+                            // Typing: Ctrl+B, Ctrl+I, Ctrl+, and Ctrl+. besides the digits; never what the text box needs for editing.
+                            Check(StyleKeys.Match(Keys.Control | Keys.B, true, out hit) && hit.Row == StyleKeyRow.Bold && StyleKeys.Match(Keys.Control | Keys.I, true, out hit) && hit.Row == StyleKeyRow.Italic &&
+                                !StyleKeys.Match(Keys.Control | Keys.Shift | Keys.B, true, out hit), "bold or italic chord");
+                            Check(StyleKeys.Match(Keys.Control | Keys.Oemcomma, true, out hit) && hit.Row == StyleKeyRow.Smaller &&
+                                StyleKeys.Match(Keys.Control | Keys.Shift | Keys.OemPeriod, true, out hit) && hit.Row == StyleKeyRow.Larger, "size chords");
+                            foreach (var edit in upper.Concat(home).Concat(new[] { Keys.C, Keys.X, Keys.V, Keys.Z, Keys.Back, Keys.Delete, Keys.Enter, Keys.Insert, Keys.Left, Keys.Home }))
+                                Check(!StyleKeys.Match(Keys.Control | edit, true, out hit), "style chord shadows Ctrl+" + edit);
+                            Check(CanvasDrawingShortcut.TypesCharacter(Keys.D3) && upper.Concat(home).All(CanvasDrawingShortcut.TypesCharacter) &&
+                                !CanvasDrawingShortcut.TypesCharacter(Keys.Delete) && !CanvasDrawingShortcut.TypesCharacter(Keys.Left), "character ownership");
+                            int colour = -1, fill = -1, thickness = -1, lineType = -1, presses = 0; bool takeD = true;
+                            a.Command = data =>
+                            {
+                                if (!StyleKeys.Match(data, false, out var key) || !takeD && data == Keys.D) return false;
+                                presses++;
+                                if (key.Row == StyleKeyRow.Number) { if (key.Fill) fill = key.Index; else colour = key.Index; }
+                                else if (key.Row == StyleKeyRow.Upper) thickness = key.Index; else lineType = key.Index;
+                                return true;
+                            };
+                            var state = new byte[256]; GetKeyboardState(state);
+                            try
+                            {
+                                Tap(canvas, Keys.D3); Tap(canvas, Keys.E); Tap(canvas, Keys.S);
+                                Down(canvas, Keys.R); Down(canvas, Keys.R, true); Up(canvas, Keys.R); Application.DoEvents();
+                                Check(colour == 3 && thickness == 3 && lineType == 1 && presses == 4 && _forwarded == 0 && _characters == 0,
+                                    "style keys not routed once each or leaked: " + colour + "/" + thickness + "/" + lineType + "/" + presses + "/" + _forwarded + "/" + _characters);
+                                // While drawing the controller takes D as the third line type: it is then not half of D D.
+                                Tap(canvas, Keys.D); Tap(canvas, Keys.D);
+                                Check(lineType == 2 && presses == 6 && _activatedA == 0 && _forwarded == 0 && _characters == 0, "a D consumed as a line type still counted towards D D or leaked");
+                                // With a selection outside drawing mode the controller leaves D alone: D D still enters drawing mode.
+                                takeD = false; Tap(canvas, Keys.D); Tap(canvas, Keys.D);
+                                Check(_activatedA == 1 && presses == 6 && _forwarded == 0 && _characters == 0, "a declined D no longer starts D D");
+                                takeD = true;
+                                var shifted = (byte[])state.Clone(); shifted[(int)Keys.ShiftKey] = 0x80; SetKeyboardState(shifted);
+                                Tap(canvas, Keys.D6); Tap(canvas, Keys.OemQuotes); SetKeyboardState(state);
+                                Check(fill == 6 && lineType == 10 && _characters == 0, "Shift+digit / Shift+' not routed as fill keys or leaked a character: " + fill + "/" + lineType + "/" + _characters);
+                                a.Command = null;
+                                Tap(canvas, Keys.D3); Tap(canvas, Keys.E);
+                                Check(_characters == 2, "character credits outlived the style keys: " + _characters);
+                            }
+                            finally { SetKeyboardState(state); a.Command = null; }
+                        }, a);
+                        Run("delayed action runs once after its delay, and not at all when cancelled or replaced", () =>
+                        {
+                            Action<int> pump = ms => { var watch = System.Diagnostics.Stopwatch.StartNew(); while (watch.ElapsedMilliseconds < ms) { Application.DoEvents(); System.Threading.Thread.Sleep(5); } };
+                            using (var delayed = new DelayedAction())
+                            {
+                                int first = 0, second = 0;
+                                delayed.Arm(60, () => first++); Check(delayed.Pending && first == 0, "armed action ran at once or is not pending");
+                                pump(15); Check(first == 0, "action ran before its delay");
+                                pump(250); Check(first == 1 && !delayed.Pending, "action did not run once after its delay: " + first);
+                                pump(150); Check(first == 1, "action repeated");
+                                delayed.Arm(60, () => first++); delayed.Cancel(); pump(200); Check(first == 1 && !delayed.Pending, "cancelled action ran");
+                                delayed.Arm(60, () => first++); delayed.Arm(60, () => second++); pump(250); Check(first == 1 && second == 1, "replaced action ran or its replacement did not");
+                                delayed.Arm(40, () => { throw new InvalidOperationException("boom"); }); pump(200); Check(!delayed.Pending, "a failing action stayed pending");
+                                delayed.Arm(5000, () => first++);
+                            }
+                            pump(50); Check(true, "disposed with a pending action");
+                        });
                         Run("inline editor bypasses hostile KeyPreview and menus while letters and editing stay native", () =>
                         {
                             int previews = 0, native = 0, commands = 0;
@@ -659,6 +749,128 @@ internal static class Program
                                     }
                                     finally { SetKeyboardState(state); form.Controls.Remove(editor); canvas.Focus(); }
                                 }
+                        }, a);
+                        Run("inline editor format keys reach the host without typing; Escape dismisses before it commits", () =>
+                        {
+                            using (var editor = new TextEditorControl { Location = new Point(0, 40), Text = "ab" })
+                            {
+                                int commits = 0, dismissed = 0; bool flyout = true; string formats = "";
+                                editor.Commit = () => commits++;
+                                editor.Dismiss = () => { if (!flyout) return false; flyout = false; dismissed++; return true; };
+                                editor.Format = key => { formats += key + ";"; return true; };
+                                form.Controls.Add(editor); editor.BringToFront(); editor.Focus(); editor.SelectionStart = 2;
+                                var state = new byte[256]; GetKeyboardState(state);
+                                try
+                                {
+                                    var control = (byte[])state.Clone(); control[(int)Keys.ControlKey] = 0x80;
+                                    var shifted = (byte[])control.Clone(); shifted[(int)Keys.ShiftKey] = 0x80;
+                                    SetKeyboardState(control); Tap(editor, Keys.B);
+                                    SetKeyboardState(control); Tap(editor, Keys.I);
+                                    SetKeyboardState(shifted); Tap(editor, Keys.OemPeriod);
+                                    SetKeyboardState(shifted); Tap(editor, Keys.Oemcomma);
+                                    string expected = string.Concat(new[] { Keys.Control | Keys.B, Keys.Control | Keys.I,
+                                        Keys.Control | Keys.Shift | Keys.OemPeriod, Keys.Control | Keys.Shift | Keys.Oemcomma }.Select(k => k + ";"));
+                                    Check(formats == expected && editor.Text == "ab", "format keys not routed or typed text: " + formats + " / " + editor.Text);
+                                    // A host that dispatches without the filter still translates: Ctrl+I arrives with a tab character.
+                                    long flags = 1 | ((long)MapVirtualKey((uint)Keys.I, 0) << 16);
+                                    SetKeyboardState(control);
+                                    SendMessage(editor.Handle, 0x100, new IntPtr((int)Keys.I), new IntPtr(flags));
+                                    SendMessage(editor.Handle, 0x102, new IntPtr(9), new IntPtr(flags));
+                                    SendMessage(editor.Handle, 0x101, new IntPtr((int)Keys.I), new IntPtr(flags | (3L << 30)));
+                                    SetKeyboardState(state);
+                                    Check(formats == expected + (Keys.Control | Keys.I) + ";" && editor.Text == "ab", "unfiltered Ctrl+I typed a tab: " + editor.Text.Length);
+                                    Tap(editor, Keys.I);
+                                    Check(editor.Text == "abi", "format key swallowed a later letter: " + editor.Text);
+                                    // Without a host the keys keep their old meaning (no character for Ctrl+B).
+                                    editor.Format = null; SetKeyboardState(control); Tap(editor, Keys.B); SetKeyboardState(state);
+                                    Check(editor.Text == "abi", "unhandled Ctrl+B typed a control character");
+                                    Down(editor, Keys.Escape); Down(editor, Keys.Escape, true); Up(editor, Keys.Escape); Application.DoEvents();
+                                    Check(dismissed == 1 && commits == 0, "Escape committed instead of dismissing: " + dismissed + "/" + commits);
+                                    Tap(editor, Keys.Escape);
+                                    Check(dismissed == 1 && commits == 1 && editor.Text == "abi", "second Escape did not commit once");
+                                }
+                                finally { SetKeyboardState(state); form.Controls.Remove(editor); canvas.Focus(); }
+                            }
+                        }, a);
+                        Run("inline editor offers every Ctrl style chord to the host; Ctrl+I never types a tab and AltGr is left alone", () =>
+                        {
+                            using (var editor = new TextEditorControl { Location = new Point(0, 40), Text = "ab" })
+                            {
+                                var seen = new List<Keys>(); editor.Format = key => { seen.Add(key); return true; };
+                                form.Controls.Add(editor); editor.BringToFront(); editor.Focus(); editor.SelectionStart = 2;
+                                var state = new byte[256]; GetKeyboardState(state);
+                                try
+                                {
+                                    var control = (byte[])state.Clone(); control[(int)Keys.ControlKey] = 0x80;
+                                    var shifted = (byte[])control.Clone(); shifted[(int)Keys.ShiftKey] = 0x80;
+                                    var chords = new[] { Keys.D3, Keys.B, Keys.I, Keys.Oemcomma, Keys.OemPeriod };
+                                    foreach (var key in chords) { SetKeyboardState(control); Tap(editor, key); }
+                                    SetKeyboardState(shifted); Tap(editor, Keys.D0);
+                                    SetKeyboardState(state);
+                                    var expected = chords.Select(k => Keys.Control | k).Concat(new[] { Keys.Control | Keys.Shift | Keys.D0 }).ToArray();
+                                    Check(seen.SequenceEqual(expected) && editor.Text == "ab", "style chords not offered once each or typed text: " + string.Join(",", seen) + " / " + editor.Text);
+                                    SetKeyboardState(control);
+                                    Down(editor, Keys.OemPeriod); Down(editor, Keys.OemPeriod, true); Down(editor, Keys.OemPeriod, true); Up(editor, Keys.OemPeriod);
+                                    Application.DoEvents(); SetKeyboardState(state);
+                                    Check(seen.Count == expected.Length + 1 && editor.Text == "ab", "a held chord repeated or typed: " + seen.Count + " / " + editor.Text);
+                                    seen.RemoveAt(seen.Count - 1);
+                                    // A host that dispatches without the filter still translates: Ctrl+I arrives with a tab.
+                                    long flags = 1 | ((long)MapVirtualKey((uint)Keys.I, 0) << 16);
+                                    SetKeyboardState(control);
+                                    SendMessage(editor.Handle, 0x100, new IntPtr((int)Keys.I), new IntPtr(flags));
+                                    SendMessage(editor.Handle, 0x102, new IntPtr(9), new IntPtr(flags));
+                                    SendMessage(editor.Handle, 0x101, new IntPtr((int)Keys.I), new IntPtr(flags | (3L << 30)));
+                                    SetKeyboardState(state);
+                                    Check(seen.Count == expected.Length + 1 && editor.Text == "ab", "unfiltered Ctrl+I typed a tab: " + editor.Text);
+                                    Tap(editor, Keys.I);
+                                    Check(editor.Text == "abi", "style chord swallowed a later letter: " + editor.Text);
+                                    Tap(editor, Keys.Back);
+                                    Check(editor.Text == "ab", "Backspace no longer deletes: " + editor.Text);
+                                    int offered = seen.Count;
+                                    SetKeyboardState(control); Tap(editor, Keys.A); SetKeyboardState(state);
+                                    Check(editor.SelectionLength == 2, "Ctrl+A no longer selects all");
+                                    editor.Select(editor.TextLength, 0);
+                                    // The canvas rows are plain text here, and are no chords either.
+                                    foreach (var key in new[] { Keys.Q, Keys.S, Keys.D7 }) { SetKeyboardState(control); Tap(editor, key); }
+                                    var altGr = (byte[])control.Clone(); altGr[(int)Keys.Menu] = 0x80;
+                                    SetKeyboardState(altGr); Tap(editor, Keys.D2); SetKeyboardState(state);
+                                    Check(seen.Count == offered && editor.Text.StartsWith("ab"), "an editing key, a key row with Ctrl or AltGr was offered as a style chord: " + editor.Text);
+                                    string before = editor.Text;
+                                    foreach (var key in new[] { Keys.Q, Keys.A, Keys.D, Keys.Z, Keys.D4 }) Tap(editor, key);
+                                    Check(seen.Count == offered && editor.Text == before + "qadz4", "the canvas key rows were not typed as text: " + editor.Text);
+                                }
+                                finally { SetKeyboardState(state); form.Controls.Remove(editor); canvas.Focus(); }
+                            }
+                        }, a);
+                        Run("inline editor is borderless and reports its own content size and scroll", () =>
+                        {
+                            using (var editor = new TextEditorControl { Location = new Point(0, 40), Size = new Size(60, 20), WordWrap = false })
+                            {
+                                int updates = 0; editor.Updating = () => updates++;
+                                form.Controls.Add(editor); editor.BringToFront(); editor.Focus();
+                                try
+                                {
+                                    Check(editor.BorderStyle == BorderStyle.None && editor.ClientSize == editor.Size, "editor still has a border");
+                                    int margins = SendMessage(editor.Handle, 0xD4, IntPtr.Zero, IntPtr.Zero).ToInt32();
+                                    Check(margins == 0, "editor keeps side margins: " + margins);
+                                    int single = editor.ContentSize.Height;
+                                    foreach (char c in "a much longer line than the box\r\rthird") PostMessage(editor.Handle, 0x102, new IntPtr(c), new IntPtr(1));
+                                    Application.DoEvents();
+                                    var content = editor.ContentSize;
+                                    Check(updates > 0, "no pre-display update notification");
+                                    Check(content.Height == 3 * single && content.Width > 60, "content size wrong: " + content + " line " + single);
+                                    Check((short)(SendMessage(editor.Handle, 0xD6, IntPtr.Zero, IntPtr.Zero).ToInt64() & 0xffff) < 0 ||
+                                        SendMessage(editor.Handle, 0xCE, IntPtr.Zero, IntPtr.Zero).ToInt32() > 0, "small box did not scroll (test premise)");
+                                    editor.Size = new Size(content.Width + 8, content.Height); editor.ResetScroll();
+                                    long first = SendMessage(editor.Handle, 0xD6, IntPtr.Zero, IntPtr.Zero).ToInt64();
+                                    Check((short)(first & 0xffff) >= 0 && (short)((first >> 16) & 0xffff) >= 0 &&
+                                        SendMessage(editor.Handle, 0xCE, IntPtr.Zero, IntPtr.Zero).ToInt32() == 0, "grown box stayed scrolled");
+                                    editor.Font = new Font("Segoe UI", 20, FontStyle.Bold, GraphicsUnit.Pixel);
+                                    Check(SendMessage(editor.Handle, 0xD4, IntPtr.Zero, IntPtr.Zero).ToInt32() == 0, "font change restored side margins");
+                                    Check(editor.ContentSize.Height > content.Height, "content size ignores the font");
+                                }
+                                finally { var font = editor.Font; form.Controls.Remove(editor); canvas.Focus(); editor.Dispose(); font.Dispose(); }
+                            }
                         }, a);
                         Run("right-drag transport preserves the threshold-crossing move for pan handoff", () =>
                         {

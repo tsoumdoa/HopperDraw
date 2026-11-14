@@ -21,18 +21,21 @@ internal static class TextInputTests
             check(request.Anchor==new Point3d(20,40,0) && request.Width==80 && draft.TakePlacement()==null,"drag not normalized/consumed once");
             draft.Down(5,p,Point.Empty,1,false,1);draft.Cancel();draft.Up(5,p,Point.Empty,false,new Size(4,4));check(draft.TakePlacement()==null,"cancelled text placed");
         });
-        test("DD then tool letters use immediate commands without suffix state",()=>
+        test("DD then tool keys use immediate commands without suffix state",()=>
         {
             var dd=new DrawingKeyGesture();bool drawing=false;int mode=0,changes=0,notices=0;
             drawing=dd.KeyDown(Keys.D,true,100,500);dd.KeyUp(Keys.D);drawing=dd.KeyDown(Keys.D,true,150,500);dd.KeyUp(Keys.D);
-            check(drawing && ToolShortcut.Route(Keys.T,mode,false,m=>{mode=m;changes++;},()=>notices++),"DDT not recognized");
-            check(mode==5 && changes==1,"DDT not Text");
-            foreach(var pair in new[]{Tuple.Create(Keys.L,0),Tuple.Create(Keys.P,1),Tuple.Create(Keys.R,2),Tuple.Create(Keys.C,3),Tuple.Create(Keys.F,4)})
-            {check(ToolShortcut.Route(pair.Item1,mode,false,m=>{mode=m;changes++;},()=>notices++),"letter not recognized");check(mode==pair.Item2,"wrong tool");}
-            int before=changes;ToolShortcut.Route(Keys.F,mode,false,m=>changes++,()=>notices++);check(changes==before,"reselection changed draft");
-            check(!ToolShortcut.Route(Keys.Control|Keys.T,mode,false,m=>changes++,()=>notices++) && !ToolShortcut.Route(Keys.Shift|Keys.T,mode,false,m=>changes++,()=>notices++),"modified tool accepted");
+            check(drawing && ToolShortcut.Route(Keys.N,mode,false,m=>{mode=m;changes++;},()=>notices++),"DDN not recognized");
+            check(mode==5 && changes==1,"DDN not Text");
+            // The bottom row, left to right, in the order of the tool buttons.
+            foreach(var pair in new[]{Tuple.Create(Keys.Z,0),Tuple.Create(Keys.X,1),Tuple.Create(Keys.C,2),Tuple.Create(Keys.V,3),Tuple.Create(Keys.B,4)})
+            {check(ToolShortcut.Route(pair.Item1,mode,false,m=>{mode=m;changes++;},()=>notices++),"key not recognized");check(mode==pair.Item2,"wrong tool");}
+            int before=changes;ToolShortcut.Route(Keys.B,mode,false,m=>changes++,()=>notices++);check(changes==before,"reselection changed draft");
+            foreach(var old in new[]{Keys.T,Keys.L,Keys.P,Keys.R,Keys.F}) check(!ToolShortcut.Route(old,mode,false,m=>changes++,()=>notices++) && changes==before,"a style-row letter still switches tools");
+            check(!ToolShortcut.Route(Keys.Control|Keys.Z,mode,false,m=>changes++,()=>notices++) && !ToolShortcut.Route(Keys.Control|Keys.C,mode,false,m=>changes++,()=>notices++) &&
+                !ToolShortcut.Route(Keys.Control|Keys.V,mode,false,m=>changes++,()=>notices++) && !ToolShortcut.Route(Keys.Shift|Keys.N,mode,false,m=>changes++,()=>notices++),"undo, copy, paste or a modified key taken as a tool");
             var draft=new AnnotationDraft();draft.Down(1,new Point3d(10,10,0),Point.Empty,1,false,1);
-            ToolShortcut.Route(Keys.T,mode,true,m=>{changes++;draft.Cancel();},()=>notices++);
+            ToolShortcut.Route(Keys.N,mode,true,m=>{changes++;draft.Cancel();},()=>notices++);
             check(changes==before && notices==1 && draft.Active,"wired M changed/cancelled draft or missed notice");
         });
         test("text pen stays separate and external tool changes cancel only the gesture",()=>
