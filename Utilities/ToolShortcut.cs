@@ -6,8 +6,9 @@ namespace hopperdraw
 {
     internal static class ToolShortcut
     {
-        // Activation is entirely DD's job. Once drawing, a fresh letter is an ordinary
-        // controller command, without a suffix timer or additional gesture state.
+        // Activation is entirely DD's job. Once drawing, a fresh key of the bottom row (DrawingTool.Key,
+        // in the order of the tool buttons) is an ordinary controller command, without a suffix timer
+        // or additional gesture state.
         internal static bool Route(Keys data, int current, bool wired, Action<int> change, Action notice)
         {
             if ((data & Keys.Modifiers) != Keys.None) return false;

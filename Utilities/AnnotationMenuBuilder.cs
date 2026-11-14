@@ -9,11 +9,17 @@ namespace hopperdraw
 {
     internal static class AnnotationMenuBuilder
     {
-        private static readonly List<Color> Recent = new List<Color>();
-        private static readonly string[] DashNames = { "Solid", "Dash", "Dot", "Dash-dot", "Dash-dot-dot" };
-        private static readonly Color[] Colors ={Color.Black,Color.FromArgb(70,70,70),Color.White,Color.Red,
-            Color.Orange,Color.Yellow,Color.Green,Color.Teal,Color.Blue,Color.Purple,Color.HotPink};
-        private static readonly string[] ColorNames = { "Black", "Dark grey", "White", "Red", "Orange", "Yellow", "Green", "Teal", "Blue", "Purple", "Pink" };
+        // The palette, its names and the session's recent colours are shared with the style bar.
+        internal static readonly List<Color> Recent = new List<Color>();
+        internal static readonly string[] DashNames = { "Solid", "Dash", "Dot", "Dash-dot", "Dash-dot-dot" };
+        // Six inks for strokes and text, and the six soft fills that go with them, in the order of the number
+        // keys 1-6: two neutrals, then four hues. Everything else is a Custom colour.
+        internal static readonly Color[] Colors = { Color.FromArgb(30, 30, 30), Color.FromArgb(134, 142, 150), Color.FromArgb(224, 49, 49),
+            Color.FromArgb(230, 119, 0), Color.FromArgb(47, 158, 68), Color.FromArgb(25, 113, 194) };
+        internal static readonly string[] ColorNames = { "Ink", "Grey", "Red", "Amber", "Green", "Blue" };
+        internal static readonly Color[] FillColors = { Color.FromArgb(255, 255, 255), Color.FromArgb(233, 236, 239), Color.FromArgb(255, 201, 201),
+            Color.FromArgb(255, 236, 153), Color.FromArgb(178, 242, 187), Color.FromArgb(165, 216, 255) };
+        internal static readonly string[] FillNames = { "White", "Soft grey", "Soft red", "Soft amber", "Soft green", "Soft blue" };
         private static ToolStripMenuItem Item(ToolStripItemCollection items, string text, Action action, bool enabled = true, bool check = false, Image image = null)
         {
             var item = new ToolStripMenuItem(text, image, (s, e) => action?.Invoke()) { Name = text, Enabled = enabled, Checked = check }; items.Add(item); return item;
@@ -55,7 +61,7 @@ namespace hopperdraw
         }
         // Only the finite palette (named swatches, light grey, black stroke previews) is cached for the session.
         // Arbitrary custom/recent colours get a per-menu bitmap that Release disposes, so the cache stays bounded.
-        private static bool Palette(Color color) => color.ToArgb() == Color.LightGray.ToArgb() || Colors.Any(c => c.ToArgb() == color.ToArgb());
+        private static bool Palette(Color color) => color.ToArgb() == Color.LightGray.ToArgb() || Colors.Concat(FillColors).Any(c => c.ToArgb() == color.ToArgb());
         private static Bitmap Preview(Color color, float width, DashStyle dash, bool swatch = false) => !Palette(color) ? CreatePreview(color, width, dash, swatch) :
             Cached("p:" + color.ToArgb() + ":" + width.ToString(System.Globalization.CultureInfo.InvariantCulture) + ":" + (int)dash + ":" + swatch,
                 () => CreatePreview(color, width, dash, swatch));
@@ -94,20 +100,22 @@ namespace hopperdraw
                 Item(line.DropDownItems, DashNames[i], () => setDash(value), true, dash == value, Preview(Color.Black, 2, value));
             }
         }
-        private static void Remember(Color? color)
+        internal static void Remember(Color? color)
         {
             if (!color.HasValue) return;
             Recent.RemoveAll(recent => recent.ToArgb() == color.Value.ToArgb());
             Recent.Insert(0, color.Value);
             if (Recent.Count > 5) Recent.RemoveAt(5);
         }
-        private static void Palette(ToolStripItemCollection items, Color? color, bool uniform, Action<Color?> choose, bool none)
+        // fill: the soft fills first, then the inks (a hatch is drawn in the fill colour and wants a strong one).
+        private static void Palette(ToolStripItemCollection items, Color? color, bool uniform, Action<Color?> choose, bool none, bool fill = false)
         {
             if (none) Item(items, "None", () => choose(null), true, uniform && !color.HasValue);
-            for (int i = 0; i < Colors.Length; i++)
+            var colors = fill ? FillColors.Concat(Colors).ToArray() : Colors; var names = fill ? FillNames.Concat(ColorNames).ToArray() : ColorNames;
+            for (int i = 0; i < colors.Length; i++)
             {
-                var c = Colors[i];
-                Item(items, ColorNames[i], () => choose(c), true, uniform && color?.ToArgb() == c.ToArgb(), Preview(c, 1, DashStyle.Solid, true));
+                var c = colors[i];
+                Item(items, names[i], () => choose(c), true, uniform && color?.ToArgb() == c.ToArgb(), Preview(c, 1, DashStyle.Solid, true));
             }
             var recent = Sub(items, "Recent colors"); recent.Enabled = Recent.Count > 0;
             int recentIndex = 0;
@@ -127,7 +135,7 @@ namespace hopperdraw
             {
                 Remember(c);
                 apply("Change fill color", l => l.FillColor = c);
-            }, true);
+            }, true, true);
             var opacity = Sub(fill.DropDownItems, "Opacity");
             foreach (double value in new[] { .1, .25, .5, .75, 1 }) Item(opacity.DropDownItems, (value * 100).ToString("0") + "%",
                 () => apply("Change fill opacity", l => l.FillOpacity = value), true, Same(l => l.FillOpacity) && eligible[0].FillOpacity == value);
@@ -162,7 +170,7 @@ namespace hopperdraw
                 true, Same(l => l.HatchBackground?.ToArgb()) && eligible[0].HatchBackground?.ToArgb() == Color.LightGray.ToArgb(),
                 Preview(Color.LightGray, 1, DashStyle.Solid, true));
             Palette(background.DropDownItems, eligible.FirstOrDefault()?.HatchBackground, Same(l => l.HatchBackground?.ToArgb()),
-                c => apply("Change hatch background", l => l.HatchBackground = c), true);
+                c => apply("Change hatch background", l => l.HatchBackground = c), true, true);
         }
         private static void TextMenu(ToolStripItemCollection items, TextShape[] texts, Action<string, Action<TextShape>> apply, Action edit = null)
         {

@@ -37,8 +37,8 @@ namespace hopperdraw
             {"Curve","&Curve"},{"Freehand","&Freehand"},{"Smoothing","S&moothing"},
             {"Color","&Color"},{"Thickness","&Thickness"},{"Line type","&Line type"},{"None","&None"},
             {"Opacity","Op&acity"},{"Hatch","&Hatch"},{"Hatch scale","Hatch &scale"},{"Hatch background","Hatch bac&kground"},
-            {"Black","&Black"},{"Dark grey","&Dark grey"},{"White","&White"},{"Red","&Red"},{"Orange","&Orange"},
-            {"Yellow","&Yellow"},{"Green","&Green"},{"Teal","&Teal"},{"Blue","B&lue"},{"Purple","&Purple"},{"Pink","P&ink"},
+            {"Ink","&Ink"},{"Grey","Gre&y"},{"Red","&Red"},{"Amber","&Amber"},{"Green","&Green"},{"Blue","&Blue"},
+            {"White","&White"},{"Soft grey","Soft gre&y"},{"Soft red","Soft &red"},{"Soft amber","Soft &amber"},{"Soft green","Soft &green"},{"Soft blue","Soft &blue"},
             {"Recent colors","R&ecent colors"},{"Custom…","&Custom…"},{"Use component color","&Use component color"},
             {"Solid","&Solid"},{"Dash","&Dash"},{"Dot","D&ot"},{"Dash-dot","Dash-dot (&A)"},{"Dash-dot-dot","Dash-dot-dot (&T)"},
             {"Diagonal","&Diagonal"},{"CrossHatch","&CrossHatch"},{"Concrete","C&oncrete"},{"Earth","&Earth"},
@@ -86,6 +86,8 @@ namespace hopperdraw
                 if(item.HasDropDownItems) { Configure(item.DropDown); Apply(item.DropDownItems); }
             if(items.Count>0 && items[0].Owner is ContextMenuStrip context) Configure(context);
         }
-        private static bool IsColor(string name) => new[]{"Black","Dark grey","White","Red","Orange","Yellow","Green","Teal","Blue","Purple","Pink","Recent colors","Custom…","Light grey"}.Contains(name);
+        private static bool IsColor(string name) => AnnotationPalette.Contains(name);
+        private static readonly HashSet<string> AnnotationPalette = new HashSet<string>
+            {"Ink","Grey","Red","Amber","Green","Blue","White","Soft grey","Soft red","Soft amber","Soft green","Soft blue","Recent colors","Custom…","Light grey"};
     }
 }

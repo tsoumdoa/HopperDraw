@@ -156,12 +156,12 @@ internal static class FillHatchTests
         });
         Program.Test("fill menu eligibility checks mixed leaves and full-style pen copying",()=>
         {
-            var frame=Frame(); frame.FillColor=Color.Red; frame.StrokeVisible=false; frame.Hatch=HatchPattern.Brick; frame.HatchBackground=Color.White;
+            var frame=Frame(); frame.FillColor=AnnotationMenuBuilder.Colors[2]; frame.StrokeVisible=false; frame.Hatch=HatchPattern.Brick; frame.HatchBackground=Color.White;
             var line=new LineShape(new Point3d(0,0,0),new Point3d(50,0,0)); var owner=Owner(frame); owner.Shapes.Add(line); owner.SelectedShapeIndices.Add(1);
             using(var menu=new ContextMenuStrip())
             {
                 AnnotationMenuBuilder.Selection(menu.Items,new[]{owner}); var fill=Find(menu.Items,"Fill");
-                Program.Check(fill.Enabled && Find(fill.DropDownItems,"Red").Checked,"eligible subset checks wrong");
+                Program.Check(fill.Enabled && Find(fill.DropDownItems,"Red").Checked && !Find(fill.DropDownItems,"Soft red").Checked,"eligible subset checks wrong");
                 Program.Check(!Find(menu.Items,"Use selection style for drawing").Enabled,"mixed full style enabled");
                 Find(Find(fill.DropDownItems,"Opacity").DropDownItems,"25%").PerformClick();
                 Program.Check(frame.FillOpacity==.25 && line.FillOpacity==1,"ineligible leaf changed");
@@ -177,12 +177,12 @@ internal static class FillHatchTests
         Program.Test("open and closed fill menus compute checks only over eligible leaves",()=>
         {
             var vertices=new[]{new Point3d(20,20,0),new Point3d(100,20,0),new Point3d(70,100,0)}.ToList();
-            var open=new PolylineShape(vertices); var closed=new CurveShape(vertices,true) { FillColor=Color.Blue,FillOpacity=.5,Hatch=HatchPattern.Grid };
+            var open=new PolylineShape(vertices); var closed=new CurveShape(vertices,true) { FillColor=AnnotationMenuBuilder.FillColors[5],FillOpacity=.5,Hatch=HatchPattern.Grid };
             var owner=Owner(open); owner.Shapes.Add(closed); owner.SelectedShapeIndices.Add(1);
             using(var menu=new ContextMenuStrip())
             {
                 AnnotationMenuBuilder.Selection(menu.Items,new[]{owner}); var fill=Find(menu.Items,"Fill");
-                Program.Check(Find(fill.DropDownItems,"Blue").Checked && Find(Find(fill.DropDownItems,"Opacity").DropDownItems,"50%").Checked,"open leaf affected eligible checks");
+                Program.Check(Find(fill.DropDownItems,"Soft blue").Checked && !Find(fill.DropDownItems,"Blue").Checked && Find(Find(fill.DropDownItems,"Opacity").DropDownItems,"50%").Checked,"open leaf affected eligible checks");
                 Find(fill.DropDownItems,"None").PerformClick(); Program.Check(closed.FillColor==null && open.FillColor==null && closed.Hatch==HatchPattern.Grid,"None changed dormant hatch");
             }
             var other=Frame(); other.FillColor=Color.Red; owner.Shapes.Add(other); owner.SelectedShapeIndices.Add(2);

@@ -20,7 +20,7 @@ internal static class CanvasMenuTests
     {
         Program.Test("selection menu checks uniform styles and exposes explicit line types",()=>
         {
-            var o=Owner(); o.Shapes[0].OverrideColor=Color.Red; o.Shapes[0].ThicknessMultiplier=2; o.Shapes[0].LineType=DashStyle.Dot;
+            var o=Owner(); o.Shapes[0].OverrideColor=AnnotationMenuBuilder.Colors[2]; o.Shapes[0].ThicknessMultiplier=2; o.Shapes[0].LineType=DashStyle.Dot;
             using(var menu=new ContextMenuStrip())
             {
                 AnnotationMenuBuilder.Selection(menu.Items,new[]{o});

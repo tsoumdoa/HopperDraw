@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Drawing;
 
 namespace hopperdraw
@@ -12,12 +13,17 @@ namespace hopperdraw
             return true;
         }
 
+        // Stored texts that are open in the inline editor: the editor and its frame stand in for them, so the
+        // old text and its selection outline must not show through around a restyled or shorter edit.
+        internal static readonly HashSet<Guid> EditingText = new HashSet<Guid>();
+        private static bool Editing(DrawShape shape) => EditingText.Count > 0 && shape is TextShape && EditingText.Contains(shape.PersistentId);
+
         // Final shared boundary for persisted and preview paint. Mutable model styles are untrusted.
         internal static void Render(Graphics graphics, DrawShape shape, Color baseColor, float baseWidth)
         {
             try
             {
-                if (shape is OpaqueShape) return;
+                if (shape is OpaqueShape || Editing(shape)) return;
                 if (shape is DrawShapeGroup group)
                 {
                     foreach (var child in group.Children) Render(graphics, child, baseColor, baseWidth);
@@ -49,7 +55,7 @@ namespace hopperdraw
             if (shape is DrawShapeGroup group) { foreach(var child in group.Children) Ghost(g,child,basis,scale); return; }
             try
             {
-                if (shape is OpaqueShape || shape.HasPaint(basis) || !ValidPoints(shape.GetPoints())) return;
+                if (shape is OpaqueShape || Editing(shape) || shape.HasPaint(basis) || !ValidPoints(shape.GetPoints())) return;
                 using(var path=AnnotationGeometry.Boundary(shape))
                 using(var pen=new Pen(Color.FromArgb(150,100,100,100),scale) { DashStyle=System.Drawing.Drawing2D.DashStyle.Dash })
                     if(path.PointCount>0) g.DrawPath(pen,path);
@@ -78,6 +84,7 @@ namespace hopperdraw
         {
             try
             {
+                if (Editing(shape)) return;
                 var points = shape.EditHandles;
                 if (!ValidPoints(points)) return;
                 float size = 8 * scale;

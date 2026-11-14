@@ -13,6 +13,8 @@ namespace hopperdraw
         internal readonly Guid TargetId;
         internal readonly TextShape Draft;
         internal string Buffer;
+        // Set when the style bar or a format key restyled Draft; an existing text then takes Draft's style on commit.
+        internal bool StyleEdited;
         internal bool Ended { get; private set; }
         internal bool IsNew { get; }
         internal TextEditSession(HopperDraw owner, object document, TextShape shape, bool isNew)
@@ -47,12 +49,22 @@ namespace hopperdraw
             string text = TextShape.NormalizeNewlines(Buffer);
             if (text.Length > TextLayoutService.MaxTextLength) text = text.Substring(0, TextLayoutService.MaxTextLength);
             bool blank = string.IsNullOrWhiteSpace(text);
-            if (IsNew && blank || !IsNew && text == target.Text) return false;
+            bool restyled = !IsNew && StyleEdited && !(Draft.SameStyle(target) && Draft.SameTextStyle(target));
+            if (IsNew && blank || !IsNew && text == target.Text && !restyled) return false;
             string name = IsNew ? "Create text" : blank ? "Delete text" : "Edit text";
             if (!(record ?? (n => AnnotationCommands.Record(new[] { Owner }, n)))(name)) return false;
             if (IsNew) { Draft.Text = text; Owner.Shapes.Add(Draft); }
             else if (blank) { Remove(Owner.Shapes, TargetId); Owner.ClearSelection(); }
-            else target.Text = text;
+            else
+            {
+                target.Text = text;
+                if (restyled)
+                {
+                    // Style only: the anchor and width belong to the live shape, which may have moved since.
+                    Draft.CopyStyleTo(target); Draft.CopyTextStyleTo(target);
+                    if (target.BoxWidth.HasValue) target.BoxWidth = target.ClampBoxWidth(target.BoxWidth.Value);
+                }
+            }
             Owner.Changed(); return true;
         }
     }

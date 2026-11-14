@@ -8,12 +8,12 @@ namespace hopperdraw
         internal readonly string Name, Hint; internal readonly int Index; internal readonly char Key;
         private DrawingTool(string name, int index, string hint, char key) { Name=name; Index=index; Hint=hint; Key=key; }
         internal static readonly DrawingTool[] All = {
-            new DrawingTool("Line",0,"Click or drag · Shift snaps · Double-click exits",'L'),
-            new DrawingTool("Polyline",1,"Click to add · Double-click finishes and exits · Enter finishes",'P'),
-            new DrawingTool("Frame",2,"Click or drag · Shift squares · Double-click exits",'R'),
-            new DrawingTool("Curve",3,"Click to add · Double-click finishes and exits · Enter finishes",'C'),
-            new DrawingTool("Freehand",4,"Hold and draw · release finishes · Double-click exits",'F'),
-            new DrawingTool("Text",5,"Click for point text · drag for box text · Double-click exits",'T') };
+            new DrawingTool("Line",0,"Click or drag · Shift snaps · Double-click exits",'Z'),
+            new DrawingTool("Polyline",1,"Click to add · Double-click finishes and exits · Enter finishes",'X'),
+            new DrawingTool("Frame",2,"Click or drag · Shift squares · Double-click exits",'C'),
+            new DrawingTool("Curve",3,"Click to add · Double-click finishes and exits · Enter finishes",'V'),
+            new DrawingTool("Freehand",4,"Hold and draw · release finishes · Double-click exits",'B'),
+            new DrawingTool("Text",5,"Click for point text · drag for box text · Double-click exits",'N') };
         internal static int Maximum => All.Length-1;
         internal static DrawingTool Get(int index) => All[System.Math.Max(0,System.Math.Min(Maximum,index))];
         internal static string Description => "Drawing mode: " + string.Join(", ",All.Select(t=>t.Index+"="+t.Name));

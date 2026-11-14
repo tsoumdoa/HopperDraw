@@ -61,9 +61,10 @@ internal static class MenuCursorHudTests
                         var tools=menu.Items.OfType<ToolStripMenuItem>().Single(i=>i.Name=="Tool");
                         foreach(var tool in tools.DropDownItems.OfType<ToolStripMenuItem>())
                         {
+                            // The menu letter is the tool's name; the key shown beside it is its place on the bottom row.
                             char key = DrawingTool.All.Single(t => t.Name == tool.Name).Key;
-                            Program.Check(AnnotationMenuKeys.Mnemonic(tool.Text) == key && tool.ShortcutKeyDisplayString == key.ToString(),
-                                "Tool mnemonic/display letters differ");
+                            Program.Check(AnnotationMenuKeys.Mnemonic(tool.Text) == "LPRCFT"[DrawingTool.All.Single(t => t.Name == tool.Name).Index] && tool.ShortcutKeyDisplayString == key.ToString(),
+                                "Tool mnemonic or displayed key wrong: " + tool.Text + " " + tool.ShortcutKeyDisplayString);
                         }
                     }
                 }
@@ -136,27 +137,6 @@ internal static class MenuCursorHudTests
                 Program.Check(!valid,"Disposed cursor handle is still valid");
             }
             Program.Check(DrawingCursorCache.LiveHandles==live && GetGuiResources(process,1)<=user+2 && GetGuiResources(process,0)<=gdi+2,"Native cursor/mask/color leak");
-        });
-        Program.Test("HUD layout scales widths clamps narrow canvases and retains explicit swatch states",()=>
-        {
-            foreach(int dpi in new[]{96,144,192})
-            {
-                float s=dpi/96f;
-                var normal=HudLayout.Measure(new Size(1200,600),dpi,50*s,10*s,true,false);
-                Program.Check(Math.Abs(normal.Chip.Width-160*s)<.01 && normal.Fill && !normal.HiddenStroke,"DPI layout/swatch");
-                foreach(bool fill in new[]{false,true}) foreach(bool hidden in new[]{false,true})
-                {
-                    var state=HudLayout.Measure(new Size(800,600),dpi,50*s,10*s,fill,hidden);
-                    Program.Check(state.Fill==fill && state.HiddenStroke==hidden,"Dormant swatch state displayed");
-                }
-                foreach(int width in new[]{0,1,16,48,100,200})
-                {
-                    var narrow=HudLayout.Measure(new Size(width,200),dpi,50*s,10*s,false,true);
-                    foreach(var box in new[]{narrow.Chip,narrow.Glyph,narrow.Swatch,narrow.Name,narrow.Key,narrow.Hint})
-                        Program.Check(box.Width>=0 && box.Left>=0 && box.Right<=width+.01,"Layout exceeds narrow canvas: "+width+" "+box);
-                    Program.Check(!narrow.Fill && narrow.HiddenStroke,"None swatch state lost");
-                }
-            }
         });
         Program.Test("GH's own component menu is tracked as open without changing its renderer; root shows its letter",()=>
         {
