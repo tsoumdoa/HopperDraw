@@ -105,7 +105,7 @@ Canvas-only shape edits and undo do not request a solution; tool input changes a
 
 ## File format and recovery
 
-This release uses annotation **format v1** and version **0.3.1-beta**. Shape GUIDs survive save/load and undo; copies receive fresh IDs. Groups, text and freehand retain their own fields. Pens and smoothing are session-only. No legacy reader is provided: files from 0.1.6 and earlier are unsupported, and files saved by this version must not be re-saved with HopperDraw <=0.1.6.
+This release uses annotation **format v1** and version **0.3.2-beta**. Shape GUIDs survive save/load and undo; copies receive fresh IDs. Groups, text and freehand retain their own fields. Pens and smoothing are session-only. No legacy reader is provided: files from 0.1.6 and earlier are unsupported, and files saved by this version must not be re-saved with HopperDraw <=0.1.6.
 
 Unknown optional data survives edits, duplication, undo and re-save. Invalid/unknown records stay opaque in their original slots and produce persistent warnings; readable neighbours remain usable. Opaque descendants block geometry movement/duplication atomically. Ungroup if necessary, then **Select unreadable annotation records > Delete** to remove them; Delete and Clear all are undoable. An unsupported major format or damaged list retains the entire annotation payload read-only. Open it with a compatible version to resolve it. A missing annotation chunk loads an empty editable component with a one-time pre-v1 notice.
 
