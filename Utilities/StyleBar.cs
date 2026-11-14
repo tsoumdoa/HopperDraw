@@ -172,7 +172,11 @@ namespace hopperdraw
         }
         internal static string Describe(FlyoutCell cell) => cell.Key == null ? cell.Tip : (cell.Tip ?? cell.Text) + " (" + cell.Key + ")";
         protected override void OnMouseLeave(EventArgs e) { _hover = -1; Tip(null); Invalidate(); }
-        protected override void OnMouseDown(MouseEventArgs e) { if (e.Button == MouseButtons.Left) { _pressed = At(e.Location); Invalidate(); } }
+        protected override void OnMouseDown(MouseEventArgs e)
+        {
+            _bar.PointerPressed?.Invoke();
+            if (e.Button == MouseButtons.Left) { _pressed = At(e.Location); Invalidate(); }
+        }
         protected override void OnMouseUp(MouseEventArgs e)
         {
             int pressed = _pressed; _pressed = -1; Invalidate();
@@ -241,6 +245,8 @@ namespace hopperdraw
         internal Func<StyleBarState> Source;
         // Raised around the modal custom-colour dialog so the host can keep an open text edit alive.
         internal Action<bool> Modal;
+        // Every mouse-down on the bar or flyout interrupts a pending keyboard gesture, even on empty space.
+        internal Action PointerPressed;
         // Returns the chosen custom colour, or null when cancelled. Replaceable for tests.
         internal Func<Color, Color?> PickColor;
 
@@ -335,7 +341,11 @@ namespace hopperdraw
             if (!Same(item, _hover) && (item != null || _hover != null)) { _hover = item; Tip(item?.Tip); Invalidate(); }
         }
         protected override void OnMouseLeave(EventArgs e) { _hover = null; Tip(null); Invalidate(); }
-        protected override void OnMouseDown(MouseEventArgs e) { if (e.Button == MouseButtons.Left) { _pressed = At(e.Location); Invalidate(); } }
+        protected override void OnMouseDown(MouseEventArgs e)
+        {
+            PointerPressed?.Invoke();
+            if (e.Button == MouseButtons.Left) { _pressed = At(e.Location); Invalidate(); }
+        }
         protected override void OnMouseUp(MouseEventArgs e)
         {
             var pressed = _pressed; _pressed = null; Invalidate();

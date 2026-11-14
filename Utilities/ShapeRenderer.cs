@@ -66,7 +66,7 @@ namespace hopperdraw
         private static void Outline(Graphics g, DrawShape shape, bool selected, float scale)
         {
             if (shape is DrawShapeGroup group) { foreach(var child in group.Children) Outline(g,child,selected,scale); return; }
-            if (shape is OpaqueShape) return;
+            if (shape is OpaqueShape || Editing(shape)) return;
             using(var boundary=AnnotationGeometry.Boundary(shape))
             {
                 if(boundary.PointCount==0) return;

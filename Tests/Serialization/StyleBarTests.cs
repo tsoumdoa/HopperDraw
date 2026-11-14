@@ -253,6 +253,53 @@ internal static class StyleBarTests
             }
             AnnotationMenuBuilder.Recent.Clear(); AnnotationMenuBuilder.Recent.AddRange(remembered);
         });
+        Program.Test("bar, flyout and canvas mouse presses cancel a pending D before it can overwrite a style choice", () =>
+        {
+            using (var canvas = new GH_Canvas())
+            using (var host = Host(new Size(900, 500)))
+            using (var typing = new TextBox { Location = new Point(10, 10) })
+            {
+                var handle = canvas.Handle; // GH itself is never shown outside Rhino.
+                var shape = Frame(); var owner = Selected(shape);
+                var controller = CanvasAnnotationController.Register(canvas, owner);
+                try
+                {
+                    var bar = controller.Bar; var target = new SelectionTarget(new[] { owner });
+                    host.Controls.Add(typing); bar.Attach(host);
+                    bar.Source = () => new StyleBarState { Target = target };
+                    host.Show(); host.Activate(); typing.Focus(); bar.Sync(); Application.DoEvents();
+                    var delayed = Field<DelayedAction>(controller, "_deferredKey");
+                    // Arm the controller's actual timer directly: its normal eligibility requires a live GH document.
+                    Action arm = () => delayed.Arm(80, () => target.Run(new StyleKey(StyleKeyRow.Home, 2)));
+                    void Pump()
+                    {
+                        var watch = System.Diagnostics.Stopwatch.StartNew();
+                        while (watch.ElapsedMilliseconds < 200) { Application.DoEvents(); System.Threading.Thread.Sleep(5); }
+                    }
+                    Click(bar, Item(bar, StyleBar.Part.Stroke).Bounds);
+                    arm(); Click(bar.Flyout, Cell(bar, "Solid").Bounds);
+                    Program.Check(!delayed.Pending, "choosing Solid left D pending");
+                    Pump();
+                    Program.Check(shape.LineType == DashStyle.Solid && typing.Focused && bar.FlyoutOpen, "pending D overwrote Solid, stole focus or closed the flyout");
+                    foreach (Control surface in new Control[] { bar, bar.Flyout })
+                        foreach (int down in new[] { 0x201, 0x204, 0x207, 0x20b })
+                        {
+                            arm(); SendMessage(surface.Handle, down, new IntPtr(down == 0x20b ? 1 << 16 : 0), IntPtr.Zero);
+                            Program.Check(!delayed.Pending, "mouse-down did not cancel D on " + surface.GetType().Name + ": " + down);
+                            SendMessage(surface.Handle, down + 1, new IntPtr(down == 0x20b ? 1 << 16 : 0), IntPtr.Zero);
+                        }
+                    var route = typeof(CanvasAnnotationController).GetMethod("RouteMessage", Private);
+                    foreach (int message in new[] { 0x201, 0x203, 0x204, 0x206, 0x207, 0x209, 0x20b, 0x20d, 0x20a, 0x20e })
+                    {
+                        arm(); route.Invoke(controller, new object[] { message, new MouseEventArgs(MouseButtons.Left, 1, 0, 0, 0), false });
+                        Program.Check(!delayed.Pending, "canvas pointer input did not cancel D: " + message);
+                    }
+                    arm(); Pump();
+                    Program.Check(!delayed.Pending && shape.LineType == DashStyle.Dot, "an uninterrupted delayed D no longer applies Dot");
+                }
+                finally { controller.Remove(owner); }
+            }
+        });
         Program.Test("key rows act by position on the pen, the selection and the text being typed, and decline what they cannot change", () =>
         {
             var remembered = AnnotationMenuBuilder.Recent.ToArray();
@@ -427,6 +474,12 @@ internal static class StyleBarTests
                         bool ink = false;
                         for (int y = 0; y < 200 && !ink; y++) for (int x = 0; x < 300; x++) if (bitmap.GetPixel(x, y).ToArgb() != Color.White.ToArgb()) { ink = true; break; }
                         Program.Check(!ink, "edited text or its selection outline still painted");
+                        var inner = new DrawShapeGroup(); inner.Children.Add(text);
+                        var outer = new DrawShapeGroup(); outer.Children.Add(inner);
+                        ShapeRenderer.Handles(g, outer, -1, true, 1);
+                        ShapeRenderer.Handles(g, outer, -1, false, 1);
+                        for (int y = 0; y < 200 && !ink; y++) for (int x = 0; x < 300; x++) if (bitmap.GetPixel(x, y).ToArgb() != Color.White.ToArgb()) { ink = true; break; }
+                        Program.Check(!ink, "edited text's selection or hover outline still painted through nested groups");
                         controller.PaintEditorFrame(g);
                         int frame = Enumerable.Range(1, 24).Count(dy => { var c = bitmap.GetPixel(editor.Left + 10, editor.Top - dy); return c.B > 180 && c.R < 100; });
                         Program.Check(frame >= 1 && frame <= 2, "editing frame not painted as one thin line above the editor: " + frame);

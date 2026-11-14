@@ -519,7 +519,7 @@ namespace hopperdraw
             canvas.KeyDown += NativeKey; canvas.KeyUp += NativeKey;
             canvas.CanvasPrePaintGroups += SyncPaint;
             canvas.CanvasPostPaintOverlay += PaintHud;
-            _bar = new StyleBar { Source = BarState, Modal = StyleModal };
+            _bar = new StyleBar { Source = BarState, Modal = StyleModal, PointerPressed = _deferredKey.Cancel };
             _bar.Attach(canvas);
             canvas.Resize += CanvasResized;
         }
@@ -585,6 +585,10 @@ namespace hopperdraw
         }
         private void RouteMessage(int message, MouseEventArgs e, bool after)
         {
+            // Cancel on the press itself: a quick click or wheel can leave the selection and focus unchanged.
+            if (!after && (message == 0x201 || message == 0x203 || message == 0x204 || message == 0x206 ||
+                message == 0x207 || message == 0x209 || message == 0x20b || message == 0x20d || message == 0x20a || message == 0x20e))
+                _deferredKey.Cancel();
             if (!after && (message == 0x201 || message == 0x203 || message == 0x204 || message == 0x207 || message == 0x20a)) _bar.CloseFlyout();
             if (!after && (message == 0x201 || message == 0x203 || message == 0x204 || message == 0x20a)) EndText(true, message == 0x201 || message == 0x203);
             if (!after && (message == 0x201 || message == 0x203 || message == 0x204))
