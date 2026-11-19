@@ -9,7 +9,7 @@ namespace hopperdraw
 {
     public class HopperDrawInfo : GH_AssemblyInfo
     {
-        public override string Name => "hopperdraw";
+        public override string Name => "HopperDraw";
 
         public override Bitmap Icon
         {
@@ -35,7 +35,7 @@ namespace hopperdraw
 
         public override Guid Id => new Guid("3e405a88-6607-40ab-bb81-added3ce85ce");
 
-        public override string AuthorName => "AEC Tooling";
+        public override string AuthorName => "aectooling by tomoS";
 
         public override string AuthorContact => "";
 
