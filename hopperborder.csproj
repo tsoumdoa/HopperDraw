@@ -16,9 +16,9 @@
   
   <PropertyGroup>
     <!-- Specifies information for Assembly and Yak -->
-    <Version>0.3.2-beta</Version>
+    <Version>0.3.3-beta</Version>
     <Title>HopperDraw</Title>
-    <Company>HopperDraw Authors</Company>
+    <Company>AEC Tooling</Company>
     <Description>Canvas drawing plugin for Grasshopper</Description>
   </PropertyGroup>
   
