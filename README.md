@@ -101,11 +101,22 @@ Cursors identify drawing, movable bodies, and handles. Selected strokes have a l
 
 Multiple components retain separate shape lists and selections; all eligible owners participate in editing. Double-D chooses the selected editable HopperDraw, then one with an annotation selection, then the first eligible owner. The drawing owner retains its drawing session. Read-only, inactive, hidden, and locked owners cannot capture input. Plain D remains reserved only while activation is eligible; text controls, native shortcuts, focus changes, and document switches interrupt activation.
 
-Canvas-only shape edits and undo do not request a solution; tool input changes and native deletion may solve normally. Undo history does not survive reopening. Windows is the supported input path; the existing non-Windows fallback remains unverified. Editing yields conservatively in aborted documents and at the cluster icon corner.
+Canvas-only shape edits and undo do not request a solution; tool input changes and native deletion may solve normally. Undo history does not survive reopening. Windows is the supported input path; macOS uses the reduced fallback described in [macOS (preview)](#macos-preview). Editing yields conservatively in aborted documents and at the cluster icon corner.
+
+## macOS (preview)
+
+From 0.3.4-beta, Yak also publishes a **mac** distribution (portable .NET 7 build, loaded by Rhino 8 for Mac on .NET 7 and .NET 8). The Windows distribution is packaged exactly as before. The Mac preview has **not yet been verified in Rhino for Mac**. Please report what works and what doesn't.
+
+On macOS, HopperDraw skips its Windows-only input layer (native keyboard routing, in-place text editor, style bar, custom cursors) and uses the older managed canvas events instead:
+
+- **Works (expected):** loading and saving annotations in .gh/.ghx files (same format v1 as Windows), displaying every shape type including text, freehand and groups, **D twice** to enter drawing mode, **Line, Polyline, Frame and Curve** drawing (Enter or double-click finishes an open polyline/curve, Escape cancels the draft and then exits, Shift snaps lines to 45 degrees), picking, window selection, dragging shapes and handles, and pen/style changes through the component menus.
+- **Not available yet:** the **Freehand** and **Text** tools (choosing them draws nothing), in-place text editing, the bottom style bar, Z/X/C/V/B/N tool keys and style key rows, menu mnemonics without Alt, custom drawing cursors, closing a polyline/curve by clicking its first point, Ctrl+A/Ctrl+D annotation selection, and annotations following GH group drags.
+
+Files move freely between Windows and Mac. Text and freehand drawn on Windows display on Mac and survive re-saving.
 
 ## File format and recovery
 
-This release uses annotation **format v1** and version **0.3.2-beta**. Shape GUIDs survive save/load and undo; copies receive fresh IDs. Groups, text and freehand retain their own fields. Pens and smoothing are session-only. No legacy reader is provided: files from 0.1.6 and earlier are unsupported, and files saved by this version must not be re-saved with HopperDraw <=0.1.6.
+This release uses annotation **format v1** and version **0.3.4-beta**. Shape GUIDs survive save/load and undo; copies receive fresh IDs. Groups, text and freehand retain their own fields. Pens and smoothing are session-only. No legacy reader is provided: files from 0.1.6 and earlier are unsupported, and files saved by this version must not be re-saved with HopperDraw <=0.1.6.
 
 Unknown optional data survives edits, duplication, undo and re-save. Invalid/unknown records stay opaque in their original slots and produce persistent warnings; readable neighbours remain usable. Opaque descendants block geometry movement/duplication atomically. Ungroup if necessary, then **Select unreadable annotation records > Delete** to remove them; Delete and Clear all are undoable. An unsupported major format or damaged list retains the entire annotation payload read-only. Open it with a compatible version to resolve it. A missing annotation chunk loads an empty editable component with a one-time pre-v1 notice.
 
@@ -129,4 +140,6 @@ The installer sets `core.hooksPath` to `.githooks`. Pre-commit verifies the stag
 
 Implementation lives in the component/session files, `Shapes` (models and v1 serialization), and `Utilities` (canvas input, transactions, layout, menus and feedback). Tests compile the real sources; the unsupported fallback event path remains in `HopperDraw.cs`.
 
-Run the [live Rhino checklist](docs/live-test-checklist.md) before release. Headless tests cover archive/model/bitmap/input regressions, not host undo-server dispatch, native selection event ordering, DPI behavior, or actual .gh/.ghx document integration. Build success for all targets is not a claim of live Mac support.
+Run the [live Rhino checklist](docs/live-test-checklist.md) before release. Headless tests cover archive/model/bitmap/input regressions, not host undo-server dispatch, native selection event ordering, DPI behavior, or actual .gh/.ghx document integration. Build success for all targets is not a claim of live Mac support; see [macOS (preview)](#macos-preview).
+
+Package a release with `pwsh -NoProfile -File scripts/pack-yak.ps1`. It runs `verify.ps1 -Full`, then writes `hopperdraw-<version>-rh8_0-win.yak` (net48, net7.0-windows and net8.0-windows builds in the `net48`, `net7.0` and `net8.0` folders) and `hopperdraw-<version>-rh8_0-mac.yak` (portable net7.0 build) to `artifacts/yak`. Push each with `yak push`.
