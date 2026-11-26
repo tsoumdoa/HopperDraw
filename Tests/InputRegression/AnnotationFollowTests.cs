@@ -113,6 +113,27 @@ internal static class AnnotationFollowTests
             a.Attributes.Selected = b.Attributes.Selected = false;
             check(AnnotationMove.MovingSet(new[] { owner },new[] { group },true).Count == 0,"Group alone contributed nudge bounds");
         });
+        test("clouded annotations follow a group by their real vertices, not their scallops", () =>
+        {
+            var a = Native(100,100); var b = Native(500,400);
+            var group = Group(a,b); group.Attributes.Selected = true;
+            var r = group.Attributes.Bounds;
+            foreach (int order in new[] { 0,1 })
+            {
+                var owner = Owner(order);
+                // Corners 10 units inside the group; Medium lobes reach ~18 units outward, past its edge.
+                var frame = new FrameShape(new Point3d(r.Left+10,r.Top+10,0),new Point3d(r.Right-10,r.Top+10,0),
+                    new Point3d(r.Right-10,r.Bottom-10,0),new Point3d(r.Left+10,r.Bottom-10,0)) { CloudSize = 48 };
+                var text = new TextShape { Text = "Rev A", Anchor = new Point3d(r.Left+10,r.Top+40,0), BoxWidth = 120, CloudSize = 48, StrokeVisible = true };
+                owner.Shapes.Add(frame); owner.Shapes.Add(text);
+                check(!AnnotationGeometry.InRectangle(frame,r,false,owner.LineThickness,order != 0),"Precondition: scallops should reach past the group edge");
+                var moving = AnnotationMove.MovingSet(new[] { owner },new[] { group });
+                check(moving.ContainsKey(owner) && moving[owner].SequenceEqual(new[] { 0,1 }),"Clouded annotations left behind by group drag in channel " + order);
+                owner.Shapes.Add(new FrameShape(new Point3d(r.Left-20,r.Top+10,0),new Point3d(r.Left+40,r.Top+10,0),
+                    new Point3d(r.Left+40,r.Top+60,0),new Point3d(r.Left-20,r.Top+60,0)) { CloudSize = 24 });
+                check(AnnotationMove.MovingSet(new[] { owner },new[] { group })[owner].SequenceEqual(new[] { 0,1 }),"Cloud whose real corner is outside the group followed it");
+            }
+        });
         test("group containment includes nested bounds and both channels without changing selection", () =>
         {
             var first = Native(100,100); var last = Native(500,400);

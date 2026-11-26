@@ -20,7 +20,7 @@ namespace hopperdraw
     // position, left to right, exactly as the style bar lays its choices out:
     //   1 2 3 4 5 6 … 0   colour (0: the default)
     //   Q W E R T (Y U)   thickness, or the size of text
-    //   A S D F G …       line type, or the style of text
+    //   A S D F G         line type, or the style of text; H J K L: cloud Off / Small / Medium / Large
     // and the row below (Z X C V B N) picks the tool, which is DrawingTool's business. Shift moves the three
     // rows to the fill: colour, opacity, hatch. What a position means is the target's decision (StyleTarget.Run).
     // Inside the text editor a plain key is text, so only the usual chords exist there: Ctrl+digit for colour

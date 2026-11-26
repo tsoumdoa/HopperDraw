@@ -15,13 +15,18 @@ namespace hopperdraw
         internal static readonly float[] Widths = { .5f, 1f, 2f, 3f, 5f };
         internal static readonly double[] Sizes = { .5, .75, 1, 1.5, 2, 3, 4 };
         internal static readonly double[] Opacities = { .1, .25, .5, .75, 1 };
+        internal static readonly double[] Clouds = { 0, 24, 48, 96 };
+        internal static readonly string[] CloudNames = { "Off", "Small", "Medium", "Large" };
+        // Positions on the A row after the line types.
+        internal static int CloudKey => AnnotationMenuBuilder.DashNames.Length;
 
         internal abstract Color Basis { get; }
         internal abstract DrawShape[] Shapes { get; }
         internal virtual DrawShape[] FillShapes => Shapes.Where(s => s.SupportsFill).ToArray();
+        internal virtual DrawShape[] CloudShapes => Shapes.Where(s => s.SupportsCloud).ToArray();
         internal virtual TextShape[] Texts => Shapes.OfType<TextShape>().ToArray();
         // fill: the change belongs to the fill layer and only reaches shapes that can be filled.
-        internal abstract void Apply(string name, Action<DrawShape> change, bool fill = false);
+        internal abstract void Apply(string name, Action<DrawShape> change, bool fill = false, bool cloud = false);
         internal abstract void ApplyText(string name, Action<TextShape> change);
 
         // True when every shape agrees; value is the first shape's either way (shown as the preview).
@@ -49,6 +54,13 @@ namespace hopperdraw
         internal void StrokeNone() => Apply("Change stroke visibility", s => s.StrokeVisible = false);
         internal void StrokeWidth(float width) => Stroke("Change thickness", s => s.ThicknessMultiplier = width);
         internal void StrokeDash(DashStyle dash) => Stroke("Change line type", s => s.LineType = dash);
+        internal void Cloud(double size)
+        {
+            var eligible = CloudShapes;
+            if (eligible.Length == 0) return;
+            bool reveal = size > 0 && eligible.All(s => !s.StrokeVisible);
+            Apply("Change revision cloud", s => { s.CloudSize = size; if (reveal) s.StrokeVisible = true; }, cloud: true);
+        }
         internal void FillColor(Color? color)
         {
             AnnotationMenuBuilder.Remember(color);
@@ -149,8 +161,11 @@ namespace hopperdraw
                         if (i < Presets.Length) { Preset(Presets[i]); return "Text style: " + Presets[i]; }
                         return i == BoldKey ? Bold() : i == ItalicKey ? Italic() : null;
                     }
-                    if (i >= AnnotationMenuBuilder.DashNames.Length) return null;
-                    StrokeDash((DashStyle)i); return "Line type: " + AnnotationMenuBuilder.DashNames[i];
+                    if (i < AnnotationMenuBuilder.DashNames.Length)
+                    { StrokeDash((DashStyle)i); return "Line type: " + AnnotationMenuBuilder.DashNames[i]; }
+                    int c = i - CloudKey;
+                    if (c >= Clouds.Length || CloudShapes.Length == 0) return null;
+                    Cloud(Clouds[c]); return c == 0 ? "Cloud off" : "Cloud: " + CloudNames[c];
                 case StyleKeyRow.Bold: return Texts.Length == 0 ? null : Bold();
                 case StyleKeyRow.Italic: return Texts.Length == 0 ? null : Italic();
                 case StyleKeyRow.Smaller:
@@ -174,9 +189,11 @@ namespace hopperdraw
         internal override Color Basis => _owner.BorderColor;
         internal override DrawShape[] Shapes => new[] { Text ? _owner.TextPen : Sample() };
         internal override DrawShape[] FillShapes => _owner.DrawMode == 0 ? new DrawShape[0] : Shapes;
+        internal override DrawShape[] CloudShapes => _owner.DrawMode == 0 ? new DrawShape[0] : Shapes;
         internal override TextShape[] Texts => Text ? new[] { _owner.TextPen } : new TextShape[0];
-        internal override void Apply(string name, Action<DrawShape> change, bool fill = false)
+        internal override void Apply(string name, Action<DrawShape> change, bool fill = false, bool cloud = false)
         {
+            if ((fill || cloud) && _owner.DrawMode == 0) return;
             if (Text) { change(_owner.TextPen); _owner.Redraw(); return; }
             var pen = Sample();
             int? color = pen.OverrideColor?.ToArgb(); float width = pen.ThicknessMultiplier; var dash = pen.LineType;
@@ -199,11 +216,12 @@ namespace hopperdraw
         internal override Color Basis => _owners.Length > 0 ? _owners[0].BorderColor : Color.Black;
         // Read once per target: the bar asks many times per paint, and the host builds a new target per refresh.
         internal override DrawShape[] Shapes => _shapes ?? (_shapes = _owners.SelectMany(o => o.SelectionLeaves).ToArray());
-        internal override void Apply(string name, Action<DrawShape> change, bool fill = false)
+        internal override void Apply(string name, Action<DrawShape> change, bool fill = false, bool cloud = false)
         {
             AnnotationCommands.Apply(_owners, name, leaf =>
             {
                 if (fill && !leaf.SupportsFill) return false;
+                if (cloud && !leaf.SupportsCloud) return false;
                 var candidate = new LineShape();
                 leaf.CopyStyleTo(candidate);
                 change(candidate);
@@ -235,7 +253,7 @@ namespace hopperdraw
         internal TextEditTarget(TextEditSession session, TextShape pen, Action changed) { _session = session; _pen = pen; _changed = changed; }
         internal override Color Basis => _session.Owner.BorderColor;
         internal override DrawShape[] Shapes => new DrawShape[] { _session.Draft };
-        internal override void Apply(string name, Action<DrawShape> change, bool fill = false)
+        internal override void Apply(string name, Action<DrawShape> change, bool fill = false, bool cloud = false)
         {
             change(_session.Draft);
             if (_pen != null) change(_pen);

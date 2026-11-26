@@ -107,6 +107,18 @@ namespace hopperdraw
             Recent.Insert(0, color.Value);
             if (Recent.Count > 5) Recent.RemoveAt(5);
         }
+        private static void Cloud(ToolStripItemCollection items, StyleTarget target)
+        {
+            var menu = Sub(items, "Revision cloud");
+            var eligible = target.CloudShapes;
+            menu.Enabled = eligible.Length > 0; menu.ToolTipText = "Applies to closed shapes and text boxes.";
+            bool same = StyleTarget.Uniform(eligible, s => s.CloudSize, out double current);
+            for (int i=0;i<StyleTarget.Clouds.Length;i++)
+            {
+                double value = StyleTarget.Clouds[i];
+                Item(menu.DropDownItems, StyleTarget.CloudNames[i], () => target.Cloud(value), true, same && current == value);
+            }
+        }
         // fill: the soft fills first, then the inks (a hatch is drawn in the fill colour and wants a strong one).
         private static void Palette(ToolStripItemCollection items, Color? color, bool uniform, Action<Color?> choose, bool none, bool fill = false)
         {
@@ -222,6 +234,7 @@ namespace hopperdraw
                 w => AnnotationCommands.Apply(selected, "Change thickness", l => l.ThicknessMultiplier != w, l => l.ThicknessMultiplier = w),
                 d => AnnotationCommands.Apply(selected, "Change line type", l => l.LineType != d, l => l.LineType = d));
             for (int i = first; i < items.Count; i++) items[i].Enabled = leaves.Length > 0;
+            Cloud(stroke.DropDownItems, new SelectionTarget(selected));
             stroke.DropDownItems.Add(new ToolStripSeparator());
             var visibility = leaves.Select(l => l.StrokeVisible).Distinct().ToArray();
             Item(stroke.DropDownItems, "None", () => AnnotationCommands.Apply(selected, "Change stroke visibility",
@@ -306,6 +319,7 @@ namespace hopperdraw
                     }
                     else owner.Pen(owner.PendingColorOverride, owner.CurrentThicknessMultiplier, d);
                 });
+            Cloud(stroke.DropDownItems, new PenTarget(owner));
             stroke.DropDownItems.Add(new ToolStripSeparator());
             Item(stroke.DropDownItems, "None", () => { stylePen.StrokeVisible = !stylePen.StrokeVisible; owner.Redraw(); }, true, !stylePen.StrokeVisible);
             Fill(pen.DropDownItems, new[] { stylePen }, (name, change) =>

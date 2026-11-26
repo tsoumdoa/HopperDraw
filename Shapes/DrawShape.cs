@@ -23,6 +23,8 @@ namespace hopperdraw
         public DashStyle LineType { get; set; } = DashStyle.Solid;
 
         public bool StrokeVisible { get; set; } = true;
+        public double CloudSize { get; set; }
+        public bool SupportsCloud => SupportsFill;
         public Color? FillColor { get; set; }
         public double FillOpacity { get; set; } = 1;
         public HatchPattern Hatch { get; set; }
@@ -60,11 +62,11 @@ namespace hopperdraw
         internal void CopyStyleTo(DrawShape target)
         {
             target.OverrideColor = OverrideColor; target.ThicknessMultiplier = ThicknessMultiplier; target.LineType = LineType;
-            target.StrokeVisible = StrokeVisible; target.FillColor = FillColor; target.FillOpacity = FillOpacity;
+            target.StrokeVisible = StrokeVisible; target.CloudSize = CloudSize; target.FillColor = FillColor; target.FillOpacity = FillOpacity;
             target.Hatch = Hatch; target.HatchScale = HatchScale; target.HatchBackground = HatchBackground;
         }
         internal bool SameStyle(DrawShape other) => OverrideColor?.ToArgb() == other.OverrideColor?.ToArgb() &&
-            ThicknessMultiplier == other.ThicknessMultiplier && LineType == other.LineType && StrokeVisible == other.StrokeVisible &&
+            ThicknessMultiplier == other.ThicknessMultiplier && LineType == other.LineType && StrokeVisible == other.StrokeVisible && CloudSize == other.CloudSize &&
             FillColor?.ToArgb() == other.FillColor?.ToArgb() && FillOpacity == other.FillOpacity && Hatch == other.Hatch &&
             HatchScale == other.HatchScale && HatchBackground?.ToArgb() == other.HatchBackground?.ToArgb();
 

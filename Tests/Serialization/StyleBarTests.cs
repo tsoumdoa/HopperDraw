@@ -310,7 +310,7 @@ internal static class StyleBarTests
             Program.Check(pen.Run(Key(Keys.Q)) == "Thickness 0.5x" && pen.Run(Key(Keys.R)) == "Thickness 3x" && Pen(owner).ThicknessMultiplier == 3 && pen.Run(Key(Keys.T)) == "Thickness 5x" &&
                 pen.Run(Key(Keys.Y)) == null && pen.Run(Key(Keys.U)) == null && Pen(owner).ThicknessMultiplier == 5, "the Q row does not pick the thickness by position");
             Program.Check(pen.Run(Key(Keys.S)) == "Line type: Dash" && pen.Run(Key(Keys.D)) == "Line type: Dot" && Pen(owner).LineType == DashStyle.Dot && pen.Run(Key(Keys.G)) == "Line type: Dash-dot-dot" &&
-                pen.Run(Key(Keys.A)) == "Line type: Solid" && Pen(owner).LineType == DashStyle.Solid && pen.Run(Key(Keys.H)) == null && pen.Run(Key(Keys.L)) == null, "the A row does not pick the line type by position");
+                pen.Run(Key(Keys.A)) == "Line type: Solid" && Pen(owner).LineType == DashStyle.Solid && pen.Run(Key(Keys.H)) == "Cloud off" && pen.Run(Key(Keys.L)) == "Cloud: Large", "the A row does not pick the line type and cloud by position");
             Program.Check(pen.Run(Key(Keys.Shift | Keys.E)) == null, "opacity of a fill that is not there was consumed");
             Program.Check(pen.Run(Key(Keys.Shift | Keys.D4)) == "Fill: Soft amber" && Pen(owner).FillColor?.ToArgb() == Soft(4).ToArgb() && !Pen(owner).OverrideColor.HasValue, "Shift+4 did not fill with the soft amber");
             Program.Check(pen.Run(Key(Keys.Shift | Keys.E)) == "Fill opacity 50%" && Pen(owner).FillOpacity == .5 && pen.Run(Key(Keys.Shift | Keys.T)) == "Fill opacity 100%" && pen.Run(Key(Keys.Shift | Keys.Y)) == null,
@@ -390,8 +390,11 @@ internal static class StyleBarTests
                 StyleBarState state = null; bar.Source = () => state;
                 var frame = Drawing(2);
                 state = new StyleBarState { Target = new PenTarget(frame), Tool = 2 }; bar.Sync();
-                Program.Check(Tip(StyleBar.Part.Stroke) == "Stroke: color 1–6 · thickness Q–T · line type A–G" && Tip(StyleBar.Part.Fill) == "Fill: color Shift+1–6 · opacity Shift+Q–T · hatch Shift+A–'",
+                Program.Check(Tip(StyleBar.Part.Stroke) == "Stroke: color 1–6 · thickness Q–T · line type A–G · cloud H–L" && Tip(StyleBar.Part.Fill) == "Fill: color Shift+1–6 · opacity Shift+Q–T · hatch Shift+A–'",
                     "bar tooltips do not name the keys: " + Tip(StyleBar.Part.Stroke) + " / " + Tip(StyleBar.Part.Fill));
+                state = new StyleBarState { Target = new PenTarget(Drawing(0)), Tool = 0 }; bar.Sync();
+                Program.Check(Tip(StyleBar.Part.Stroke) == "Stroke: color 1–6 · thickness Q–T · line type A–G", "line pen advertises cloud keys: " + Tip(StyleBar.Part.Stroke));
+                state = new StyleBarState { Target = new PenTarget(frame), Tool = 2 }; bar.Sync();
                 Program.Check(Tip(StyleBar.Part.Tool, 0) == "Line (Z)" && Tip(StyleBar.Part.Tool, 2) == "Frame (C)" && Tip(StyleBar.Part.Tool, 5) == "Text (N)", "tool tooltips do not name the bottom row");
                 bar.Activate(Item(bar, StyleBar.Part.Stroke));
                 Program.Check(Cell(bar, "Ink").Key == "1" && Cell(bar, "Blue").Key == "6" && Cell(bar, "Component color").Key == "0" && Cell(bar, "None").Key == null && Heading("Color").Hint == null,

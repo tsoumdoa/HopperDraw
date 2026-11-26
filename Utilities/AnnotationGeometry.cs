@@ -12,7 +12,7 @@ namespace hopperdraw
     {
         // Flattened strokes are cached per leaf and rebuilt only when its control points/closure change, so hover
         // and picking do not rebuild a GraphicsPath for every shape on every mouse move.
-        private sealed class StrokeCache { internal PointF[] Key; internal bool Closed; internal PointF[] Stroke; internal RectangleF Bounds; }
+        private sealed class StrokeCache { internal PointF[] Key; internal bool Closed; internal double CloudSize; internal PointF[] Stroke; internal RectangleF Bounds; }
         private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<DrawShape, StrokeCache> Cache =
             new System.Runtime.CompilerServices.ConditionalWeakTable<DrawShape, StrokeCache>();
         private static bool IsClosed(DrawShape shape) => shape is TextShape || shape is FrameShape || shape is PolylineShape p && p.Closed || shape is CurveShape c && c.Closed;
@@ -20,9 +20,9 @@ namespace hopperdraw
         {
             bool closed = IsClosed(shape);
             var cache = Cache.GetValue(shape, _ => new StrokeCache());
-            if (cache.Key != null && cache.Closed == closed && SamePoints(shape, cache.Key)) return cache;
+            if (cache.Key != null && cache.Closed == closed && cache.CloudSize == shape.CloudSize && SamePoints(shape, cache.Key)) return cache;
             var points = BoundaryPoints(shape);
-            cache.Key = points; cache.Closed = closed;
+            cache.Key = points; cache.Closed = closed; cache.CloudSize = shape.CloudSize;
             cache.Stroke = points.Length < 2 || !ShapeRenderer.ValidPoints(points) ? null : Flatten(shape);
             cache.Bounds = Bounds(cache.Stroke);
             return cache;
@@ -69,8 +69,10 @@ namespace hopperdraw
             var cached = Leaf(shape).Stroke;
             if (cached != null) yield return cached;
         }
-        // Every consumer uses the identical GDI+ cardinal spline and winding rule.
-        internal static GraphicsPath Boundary(DrawShape shape)
+        internal static bool Clouded(DrawShape shape) => shape.SupportsCloud && shape.CloudSize > 0;
+        // Every consumer uses the identical GDI+ cardinal spline and winding rule. cloud=false: the base outline
+        // under a revision cloud (its real vertices/spline), for membership tests that must ignore the scallops.
+        internal static GraphicsPath Boundary(DrawShape shape, bool cloud = true)
         {
             var path = new GraphicsPath(FillMode.Winding);
             var points = BoundaryPoints(shape);
@@ -82,11 +84,16 @@ namespace hopperdraw
             }
             else if (IsClosed(shape) && points.Length > 2) path.AddPolygon(points);
             else path.AddLines(points);
+            if (cloud && Clouded(shape))
+            {
+                var decorated = RevisionCloud.Decorate(path, points, shape.CloudSize, shape is CurveShape);
+                if (decorated != null) { path.Dispose(); return decorated; }
+            }
             return path;
         }
-        private static PointF[] Flatten(DrawShape shape)
+        private static PointF[] Flatten(DrawShape shape, bool cloud = true)
         {
-            using (var path = Boundary(shape))
+            using (var path = Boundary(shape, cloud))
             {
                 path.Flatten(null, .2f);
                 var stroke = path.PathPoints;
@@ -132,15 +139,17 @@ namespace hopperdraw
                 if (GeometryUtilities.DistanceToSegment(point, s[i - 1], s[i]) <= reach) return true;
             return false;
         }
-        internal static bool InRectangle(DrawShape shape, RectangleF rect, bool crossing, float baseWidth = 0, bool interior = true)
+        // cloud=false tests the base outline of clouded shapes (GH group membership: a cloud drawn around components
+        // follows their group even when its scallops reach past the group's edge). Only meaningful for windows.
+        internal static bool InRectangle(DrawShape shape, RectangleF rect, bool crossing, float baseWidth = 0, bool interior = true, bool cloud = true)
         {
             if (shape is DrawShapeGroup group)
             {
                 var children=group.Children.Where(c=>Strokes(c).Any()).ToArray();
-                return children.Length>0 && (crossing ? children.Any(c=>InRectangle(c,rect,true,baseWidth,interior)) : children.All(c=>InRectangle(c,rect,false,baseWidth,interior)));
+                return children.Length>0 && (crossing ? children.Any(c=>InRectangle(c,rect,true,baseWidth,interior,cloud)) : children.All(c=>InRectangle(c,rect,false,baseWidth,interior,cloud)));
             }
             float half=baseWidth<=0 || !shape.StrokeVisible ? 0 : StyleValidation.EffectiveWidth(baseWidth,shape.ThicknessMultiplier)/2;
-            if (shape is TextShape)
+            if (shape is TextShape && !(cloud && Clouded(shape)))
             {
                 var bounds = shape.LayoutBounds; bounds.Inflate(half, half);
                 if (!crossing) return rect.Contains(bounds);
@@ -151,10 +160,15 @@ namespace hopperdraw
             if (!crossing && (rect.Width<2*half || rect.Height<2*half)) return false;
             if (crossing && interior && new[] { new PointF(rect.Left,rect.Top), new PointF(rect.Right,rect.Top), new PointF(rect.Right,rect.Bottom), new PointF(rect.Left,rect.Bottom) }.Any(p => Interior(shape,p))) return true;
             rect.Inflate(crossing?half:-half,crossing?half:-half);
-            var strokes = Strokes(shape).ToArray();
+            var strokes = cloud || !Clouded(shape) ? Strokes(shape).ToArray() : PlainStroke(shape);
             if (strokes.Length == 0) return false;
             if (!crossing) return strokes.All(s => s.All(p => Inside(rect, p)));
             return strokes.Any(s => s.Any(p => Inside(rect, p)) || Enumerable.Range(1, s.Length - 1).Any(i => Intersects(rect, s[i - 1], s[i])));
+        }
+        private static PointF[][] PlainStroke(DrawShape shape)
+        {
+            var points = BoundaryPoints(shape);
+            return points.Length < 2 || !ShapeRenderer.ValidPoints(points) ? new PointF[0][] : new[] { Flatten(shape, false) };
         }
         private static bool Inside(RectangleF r, PointF p) => p.X >= r.Left && p.X <= r.Right && p.Y >= r.Top && p.Y <= r.Bottom;
         private static bool Intersects(RectangleF r, PointF a, PointF b)

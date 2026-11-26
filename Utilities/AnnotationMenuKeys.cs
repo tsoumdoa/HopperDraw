@@ -36,6 +36,7 @@ namespace hopperdraw
             {"Duplicate","&Duplicate"},{"Delete","D&elete"},{"Line","&Line"},{"Polyline","&Polyline"},{"Frame","F&rame"},
             {"Curve","&Curve"},{"Freehand","&Freehand"},{"Smoothing","S&moothing"},
             {"Color","&Color"},{"Thickness","&Thickness"},{"Line type","&Line type"},{"None","&None"},
+            {"Revision cloud","&Revision cloud"},{"Off","&Off"},{"Small","&Small"},{"Large","&Large"},
             {"Opacity","Op&acity"},{"Hatch","&Hatch"},{"Hatch scale","Hatch &scale"},{"Hatch background","Hatch bac&kground"},
             {"Ink","&Ink"},{"Grey","Gre&y"},{"Red","&Red"},{"Amber","&Amber"},{"Green","&Green"},{"Blue","&Blue"},
             {"White","&White"},{"Soft grey","Soft gre&y"},{"Soft red","Soft &red"},{"Soft amber","Soft &amber"},{"Soft green","Soft &green"},{"Soft blue","Soft &blue"},
