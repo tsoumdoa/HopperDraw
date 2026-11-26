@@ -392,6 +392,9 @@ internal static class StyleBarTests
                 state = new StyleBarState { Target = new PenTarget(frame), Tool = 2 }; bar.Sync();
                 Program.Check(Tip(StyleBar.Part.Stroke) == "Stroke: color 1–6 · thickness Q–T · line type A–G · cloud H–L" && Tip(StyleBar.Part.Fill) == "Fill: color Shift+1–6 · opacity Shift+Q–T · hatch Shift+A–'",
                     "bar tooltips do not name the keys: " + Tip(StyleBar.Part.Stroke) + " / " + Tip(StyleBar.Part.Fill));
+                state = new StyleBarState { Target = new PenTarget(Drawing(0)), Tool = 0 }; bar.Sync();
+                Program.Check(Tip(StyleBar.Part.Stroke) == "Stroke: color 1–6 · thickness Q–T · line type A–G", "line pen advertises cloud keys: " + Tip(StyleBar.Part.Stroke));
+                state = new StyleBarState { Target = new PenTarget(frame), Tool = 2 }; bar.Sync();
                 Program.Check(Tip(StyleBar.Part.Tool, 0) == "Line (Z)" && Tip(StyleBar.Part.Tool, 2) == "Frame (C)" && Tip(StyleBar.Part.Tool, 5) == "Text (N)", "tool tooltips do not name the bottom row");
                 bar.Activate(Item(bar, StyleBar.Part.Stroke));
                 Program.Check(Cell(bar, "Ink").Key == "1" && Cell(bar, "Blue").Key == "6" && Cell(bar, "Component color").Key == "0" && Cell(bar, "None").Key == null && Heading("Color").Hint == null,

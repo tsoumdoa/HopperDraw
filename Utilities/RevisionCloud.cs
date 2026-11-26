@@ -41,11 +41,11 @@ namespace hopperdraw
                 {
                     if (loop.Count > MaxArcs) return null;
                     // Bound doubles before converting to int, even for subnormal requested sizes.
-                    while (lengths.Sum(len => Math.Max(1,Math.Round(len/step))) > MaxArcs) step *= 1.1;
+                    while (lengths.Sum(len => Math.Max(1,Math.Round(len/step,MidpointRounding.AwayFromZero))) > MaxArcs) step *= 1.1;
                     chords = new List<PointF>();
                     for (int i=0;i<loop.Count;i++)
                     {
-                        int count=(int)Math.Max(1,Math.Round(lengths[i]/step));
+                        int count=(int)Math.Max(1,Math.Round(lengths[i]/step,MidpointRounding.AwayFromZero));
                         for (int j=0;j<count;j++) chords.Add(Lerp(loop[i],loop[(i+1)%loop.Count],(double)j/count));
                     }
                 }
@@ -64,7 +64,7 @@ namespace hopperdraw
                     for (int attempt=0;attempt<64;attempt++,step*=1.5)
                     {
                         chords=new List<PointF>();
-                        int count=(int)Math.Max(3,Math.Min(MaxArcs,Math.Round(perimeter/step)));
+                        int count=(int)Math.Max(3,Math.Min(MaxArcs,Math.Round(perimeter/step,MidpointRounding.AwayFromZero)));
                         bool Add(double start,double end,int depth)
                         {
                             var a=At(start); var b=At(end); double deviation=0;

@@ -53,7 +53,7 @@ namespace hopperdraw
                 var indices = new HashSet<int>(owner.SelectedShapeIndices.Where(i => i >= 0 && i < owner.Shapes.Count));
                 for (int i = 0; bounds.Length != 0 && i < owner.Shapes.Count; i++)
                     if (!indices.Contains(i) && owner.Shapes[i].CanTransformGeometry && bounds.Any(b =>
-                        AnnotationGeometry.InRectangle(owner.Shapes[i], b, false, owner.LineThickness, owner.DrawOrder != 0))) indices.Add(i);
+                        AnnotationGeometry.InRectangle(owner.Shapes[i], b, false, owner.LineThickness, owner.DrawOrder != 0, cloud: false))) indices.Add(i);
                 if (indices.Count != 0) result.Add(owner, indices.OrderBy(i => i).ToArray());
             }
             return result;

@@ -17,6 +17,8 @@ namespace hopperdraw
         internal static readonly double[] Opacities = { .1, .25, .5, .75, 1 };
         internal static readonly double[] Clouds = { 0, 24, 48, 96 };
         internal static readonly string[] CloudNames = { "Off", "Small", "Medium", "Large" };
+        // Positions on the A row after the line types.
+        internal static int CloudKey => AnnotationMenuBuilder.DashNames.Length;
 
         internal abstract Color Basis { get; }
         internal abstract DrawShape[] Shapes { get; }
@@ -161,8 +163,9 @@ namespace hopperdraw
                     }
                     if (i < AnnotationMenuBuilder.DashNames.Length)
                     { StrokeDash((DashStyle)i); return "Line type: " + AnnotationMenuBuilder.DashNames[i]; }
-                    if (i > 8 || CloudShapes.Length == 0) return null;
-                    Cloud(Clouds[i-5]); return i == 5 ? "Cloud off" : "Cloud: " + CloudNames[i-5];
+                    int c = i - CloudKey;
+                    if (c >= Clouds.Length || CloudShapes.Length == 0) return null;
+                    Cloud(Clouds[c]); return c == 0 ? "Cloud off" : "Cloud: " + CloudNames[c];
                 case StyleKeyRow.Bold: return Texts.Length == 0 ? null : Bold();
                 case StyleKeyRow.Italic: return Texts.Length == 0 ? null : Italic();
                 case StyleKeyRow.Smaller:

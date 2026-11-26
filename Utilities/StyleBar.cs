@@ -309,7 +309,8 @@ namespace hopperdraw
                 }
                 // The key rows belong to the text when only text is targeted, otherwise to the stroke.
                 Add(Part.Stroke, 40, allText ? "Box border" : "Stroke: color " + StyleKeys.Digits +
-                    " · thickness " + StyleKeys.Span(Upper, StyleTarget.Widths.Length) + " · line type " + StyleKeys.Span(Home, AnnotationMenuBuilder.DashNames.Length) + " · cloud H–L");
+                    " · thickness " + StyleKeys.Span(Upper, StyleTarget.Widths.Length) + " · line type " + StyleKeys.Span(Home, AnnotationMenuBuilder.DashNames.Length) +
+                    (target.CloudShapes.Length > 0 ? " · cloud " + StyleKeys.Cap(Home[StyleTarget.CloudKey]) + "–" + StyleKeys.Cap(Home[StyleTarget.CloudKey + StyleTarget.Clouds.Length - 1]) : ""));
                 bool fill = target.FillShapes.Length > 0;
                 Add(Part.Fill, Button, !fill ? "Fill applies to closed shapes and text boxes" : "Fill: color " + Keyed(StyleKeys.Digits, true) +
                     (typing ? "" : " · opacity " + Keyed(StyleKeys.Span(Upper, StyleTarget.Opacities.Length), true) + " · hatch " + Keyed(StyleKeys.Span(Home, StyleTarget.Hatches.Length), true)), -1, fill);
@@ -498,7 +499,7 @@ namespace hopperdraw
             for (int i = 0; i < StyleTarget.Clouds.Length; i++)
             {
                 int index = i; double v = StyleTarget.Clouds[i];
-                var cell = RowCell(layout, layout.Share(4), 36, Home, i+5, keyed);
+                var cell = RowCell(layout, layout.Share(4), 36, Home, StyleTarget.CloudKey + i, keyed && clouds.Length > 0);
                 string label = new[] { "Off", "S", "M", "L" }[i];
                 cell.Tip = clouds.Length == 0 ? "Cloud applies to closed shapes and text boxes" : "Cloud: " + StyleTarget.CloudNames[i];
                 cell.Checked = sameCloud && cloud == v; cell.Keep = true;

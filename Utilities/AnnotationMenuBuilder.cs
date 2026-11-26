@@ -319,9 +319,9 @@ namespace hopperdraw
                     }
                     else owner.Pen(owner.PendingColorOverride, owner.CurrentThicknessMultiplier, d);
                 });
+            Cloud(stroke.DropDownItems, new PenTarget(owner));
             stroke.DropDownItems.Add(new ToolStripSeparator());
             Item(stroke.DropDownItems, "None", () => { stylePen.StrokeVisible = !stylePen.StrokeVisible; owner.Redraw(); }, true, !stylePen.StrokeVisible);
-            Cloud(stroke.DropDownItems, new PenTarget(owner));
             Fill(pen.DropDownItems, new[] { stylePen }, (name, change) =>
             {
                 change(stylePen);
