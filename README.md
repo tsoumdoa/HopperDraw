@@ -27,7 +27,7 @@ Text presets use clean sans Segoe UI (system message font family fallback), in *
 The bar at the bottom centre of the canvas appears while drawing, while typing text, and while annotations are selected. It styles whatever is current: the pen for the next shape (also in the middle of a polyline, curve or frame draft, which redraws in the new style), the text being typed, or the selection (one undo per change). Clicking it never takes keyboard focus, so a draft or a text edit continues.
 
 - **Tools** (while drawing): Line, Polyline, Frame, Curve, Freehand, Text. Disabled while M is wired.
-- **Stroke**: colour (six inks, component colour, None, recent, Custom…), thickness 0.5–5x and line type. The flyout stays open so colour, thickness and line type can be set in one visit.
+- **Stroke**: colour (six inks, component colour, None, recent, Custom…), thickness 0.5–5x, line type and revision cloud (closed shapes and text boxes). The flyout stays open so colour, thickness, line type and cloud can be set in one visit.
 - **Fill** (closed shapes and text boxes): colour (six soft fills, None, the six inks, recent, Custom…), opacity, hatch. Choosing a hatch on an unfilled shape gives it ink lines.
 - **Text** (Text tool, text being typed, selected text): Title/Subtitle/Body, size down/up or the size list, **B**, **I**, glyph colour.
 
@@ -44,7 +44,7 @@ The keyboard is laid out like the bar: each row of keys is one property, and a k
 | **1 2 3 4 5 6** | Stroke colour: Ink, Grey, Red, Amber, Green, Blue | Text colour | Fill colour: White and the five soft fills |
 | **0** | Component colour | Component colour | No fill |
 | **Q W E R T** (**Y U**) | Thickness 0.5, 1, 2, 3, 5x | Size 0.5, 0.75, 1, 1.5, 2, 3, 4x | Opacity 10, 25, 50, 75, 100% |
-| **A S D F G** (**H J K L ; '**) | Line type: Solid, Dash, Dot, Dash-dot, Dash-dot-dot | **A** Title, **S** Subtitle, **D** Body, **F** bold, **G** italic | Hatch: **A** solid, then the ten patterns in flyout order |
+| **A S D F G** (**H J K L ; '**) | Line type: Solid, Dash, Dot, Dash-dot, Dash-dot-dot; then **H J K L** revision cloud Off, Small, Medium, Large | **A** Title, **S** Subtitle, **D** Body, **F** bold, **G** italic | Hatch: **A** solid, then the ten patterns in flyout order |
 | **Z X C V B N** | Tool, while drawing: Line, Polyline, Frame, Curve, Freehand, Text | | |
 
 While a text is being typed, plain keys are text, so only the usual chords remain: **Ctrl+1**–**6** text colour (**Ctrl+0** component colour), **Ctrl+Shift+1**–**6** box fill (**Ctrl+Shift+0** none), **Ctrl+B**, **Ctrl+I**, and **Ctrl+,** / **Ctrl+.** for a smaller / larger size.
@@ -83,6 +83,8 @@ Grasshopper's **Alt+arrow** nudges in Rhino 8 also move selected annotations. Un
 
 **Right-click a shape** for **Stroke > Color / Thickness / Line type / None**. None hides the stroke; toggle it again to restore it. Thickness presets remain 0.5x/1x/2x/3x/5x. Color includes named swatches, five session recent colors, Custom…, and Use component color.
 
+**Revision cloud** (**Stroke > Revision cloud**: Off / Small / Medium / Large) turns the outline of a frame, closed polyline/curve (including freehand) or text box into outward 150° scallops 24 / 48 / 96 canvas units long. It is a stroke style, not a separate shape: handles stay on the real vertices and editing them re-flows the scallops. Straight edges are subdivided per edge so every corner is a cusp; curves are sampled along their perimeter. Stroke, dash, fill, hatch clipping, picking and window/crossing selection follow the scallops, while GH group follow uses the real vertices. Choosing a size for shapes whose border is hidden (text boxes by default) shows the border. Not available for lines or open polylines.
+
 **Fill** applies to text boxes, frames and closed polylines/curves (including freehand). Choose None, a color, Opacity (10/25/50/75/100%), Hatch, Hatch scale (0.5x/1x/2x/4x), and Hatch background. With Hatch=None the color is a solid fill; otherwise it is hatch ink over the optional background. Color alpha is multiplied by opacity. Fill=None turns off the entire fill layer while retaining dormant hatch settings. Background is ignored for solid fill. Patterns are Diagonal (ANSI31), CrossHatch, Concrete, Earth, Insulation, Brick, Grid, Dots, Horizontal and Vertical. Patterns use canvas units and canvas-origin phase, independent of zoom, with a 0.75-unit ink width; only visible bounds are generated and extreme primitive counts use a solid-ink fallback. Fill never inherits component color.
 
 Style commands visit selected leaves across owners in one undo transaction, preserve nested group styles, and skip unchanged values. Mixed selections fill only eligible closed/text leaves; checks reflect that subset. **Use selection style for drawing** copies the complete uniform stroke/fill/hatch tuple and is disabled if any field is mixed. Selection styling otherwise leaves the pen alone. **Drawing > Pen** has Stroke, Fill and Smoothing; pen fill is disabled for Line and applies on completion when a shape is closed or is text. A completed shape with no effective paint is discarded with a brief notice and no undo record.
@@ -116,7 +118,7 @@ Files move freely between Windows and Mac. Text and freehand drawn on Windows di
 
 ## File format and recovery
 
-This release uses annotation **format v1** and version **0.3.4-beta**. Shape GUIDs survive save/load and undo; copies receive fresh IDs. Groups, text and freehand retain their own fields. Pens and smoothing are session-only. No legacy reader is provided: files from 0.1.6 and earlier are unsupported, and files saved by this version must not be re-saved with HopperDraw <=0.1.6.
+This release uses annotation **format v1** and version **0.3.5-beta**. Shape GUIDs survive save/load and undo; copies receive fresh IDs. Groups, text and freehand retain their own fields. Pens and smoothing are session-only. No legacy reader is provided: files from 0.1.6 and earlier are unsupported, and files saved by this version must not be re-saved with HopperDraw <=0.1.6.
 
 Unknown optional data survives edits, duplication, undo and re-save. Invalid/unknown records stay opaque in their original slots and produce persistent warnings; readable neighbours remain usable. Opaque descendants block geometry movement/duplication atomically. Ungroup if necessary, then **Select unreadable annotation records > Delete** to remove them; Delete and Clear all are undoable. An unsupported major format or damaged list retains the entire annotation payload read-only. Open it with a compatible version to resolve it. A missing annotation chunk loads an empty editable component with a one-time pre-v1 notice.
 

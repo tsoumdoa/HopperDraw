@@ -4,7 +4,7 @@
 
 The full live matrix below remains outstanding. On 2026-11-13, the drawing interaction cleanup exception was reproduced in Rhino 8 on .NET 10.0.15; the user confirmed that the installed cleanup fix and double-click exit resolved the reported lockup. Install one HopperDraw build and start a new unsaved Grasshopper definition with HopperDraw, a slider and a panel. Keep untouched copies before damaging archives.
 
-Record once: Rhino 8 build, .NET runtime, OS, plugin commit, Windows scaling, monitor transition, canvas size, and pass/fail plus observations for each scenario. Confirm version **0.3.4-beta**, format **v1**, all seven input slots, and component/assembly GUIDs. Apply the zoom/DPI matrix to drawing, text, picking, handles, navigation, cursor and style-bar checks: **25%, 100%, 400% zoom × 100%, 150%, 200% Windows scaling**. Restart Rhino after scaling if needed; also test mixed-DPI monitor moves and small/large editor zoom.
+Record once: Rhino 8 build, .NET runtime, OS, plugin commit, Windows scaling, monitor transition, canvas size, and pass/fail plus observations for each scenario. Confirm version **0.3.5-beta**, format **v1**, all seven input slots, and component/assembly GUIDs. Apply the zoom/DPI matrix to drawing, text, picking, handles, navigation, cursor and style-bar checks: **25%, 100%, 400% zoom × 100%, 150%, 200% Windows scaling**. Restart Rhino after scaling if needed; also test mixed-DPI monitor moves and small/large editor zoom.
 
 Headless verification covers real archive/model code, bitmap paint/clipping, snapshot swaps, draft decisions, recursive menu checks, native cursor resources, and a real WinForms keyboard/mouse loop. It does not establish live GH undo dispatch, interaction ordering, actual .gh/.ghx document integration, installed-font fallback/IME, or DPI/OS appearance. The pan transport fixture does not instantiate GH pan/zoom. Unknown payload storage remains proportional to the payload; parser budgets bound interpretation, not GH archive loading.
 
@@ -134,7 +134,7 @@ Key routing on the real canvas and inside Rhino's message loop is host-only, as 
 
 Run on Rhino 8 for Mac with the **mac** Yak distribution installed through the Package Manager (Include pre-releases), on .NET 7 (Rhino 8.0-8.19, if available) and .NET 8 (8.20+). Record Rhino build, macOS version, Apple silicon/Intel and plugin commit.
 
-- Load: Grasshopper starts without a load error; **Hopper Draw** appears under Params > Util with its icon; the component shows version 0.3.4-beta and all seven inputs.
+- Load: Grasshopper starts without a load error; **Hopper Draw** appears under Params > Util with its icon; the component shows version 0.3.5-beta and all seven inputs.
 - Open a .gh saved on Windows containing every shape type, text, freehand, groups, hatches and fills: everything displays in place without warnings. Re-save on Mac and reopen on Windows: nothing is lost or changed.
 - Press D twice on a focused canvas: the footer shows ON. Draw Line (press-drag-release and click-click), Polyline and Curve (click per vertex; Enter or double-click finishes open), Frame; Shift snaps lines; Escape cancels the draft and then exits. No GH search popup or window selection appears while drawing.
 - Choose Freehand and Text: they create nothing and nothing throws. Note how confusing this is for the release notes.
