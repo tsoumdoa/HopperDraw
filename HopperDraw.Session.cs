@@ -55,6 +55,7 @@ namespace hopperdraw
             PenStyle.CopyStyleTo(shape);
             shape.OverrideColor = PendingColorOverride; shape.ThicknessMultiplier = CurrentThicknessMultiplier; shape.LineType = CurrentLineType;
             if (!shape.SupportsFill) { shape.FillColor = null; shape.HatchBackground = null; }
+            if (!shape.SupportsCloud) shape.CloudSize = 0;
         }
         internal void PenFrom(DrawShape shape)
         {

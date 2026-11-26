@@ -573,6 +573,11 @@ internal static class Program
                                 // With a selection outside drawing mode the controller leaves D alone: D D still enters drawing mode.
                                 takeD = false; Tap(canvas, Keys.D); Tap(canvas, Keys.D);
                                 Check(_activatedA == 1 && presses == 6 && _forwarded == 0 && _characters == 0, "a declined D no longer starts D D");
+                                a.Reset();
+                                Tap(canvas, Keys.D); Tap(canvas, Keys.H); Tap(canvas, Keys.D);
+                                Check(_activatedA == 1 && presses == 7 && lineType == 5 && _characters == 0, "D H D entered drawing mode or lost the cloud Off key");
+                                Tap(canvas, Keys.D);
+                                Check(_activatedA == 2 && presses == 7, "D after D H D did not complete a fresh D D gesture");
                                 takeD = true;
                                 var shifted = (byte[])state.Clone(); shifted[(int)Keys.ShiftKey] = 0x80; SetKeyboardState(shifted);
                                 Tap(canvas, Keys.D6); Tap(canvas, Keys.OemQuotes); SetKeyboardState(state);

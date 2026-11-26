@@ -155,7 +155,7 @@ namespace hopperdraw
                 var sample = _frameSample;
                 sample.TopLeft = new Rhino.Geometry.Point3d(frame.Left, frame.Top, 0); sample.TopRight = new Rhino.Geometry.Point3d(frame.Right, frame.Top, 0);
                 sample.BottomRight = new Rhino.Geometry.Point3d(frame.Right, frame.Bottom, 0); sample.BottomLeft = new Rhino.Geometry.Point3d(frame.Left, frame.Bottom, 0);
-                draft.CopyStyleTo(sample); sample.HatchScale = draft.HatchScale * zoom;
+                draft.CopyStyleTo(sample); sample.HatchScale = draft.HatchScale * zoom; sample.CloudSize = draft.CloudSize * zoom;
                 using (var path = AnnotationGeometry.Boundary(sample))
                 {
                     HatchRenderer.Paint(g, sample, path);

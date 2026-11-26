@@ -309,7 +309,7 @@ namespace hopperdraw
                 }
                 // The key rows belong to the text when only text is targeted, otherwise to the stroke.
                 Add(Part.Stroke, 40, allText ? "Box border" : "Stroke: color " + StyleKeys.Digits +
-                    " · thickness " + StyleKeys.Span(Upper, StyleTarget.Widths.Length) + " · line type " + StyleKeys.Span(Home, AnnotationMenuBuilder.DashNames.Length));
+                    " · thickness " + StyleKeys.Span(Upper, StyleTarget.Widths.Length) + " · line type " + StyleKeys.Span(Home, AnnotationMenuBuilder.DashNames.Length) + " · cloud H–L");
                 bool fill = target.FillShapes.Length > 0;
                 Add(Part.Fill, Button, !fill ? "Fill applies to closed shapes and text boxes" : "Fill: color " + Keyed(StyleKeys.Digits, true) +
                     (typing ? "" : " · opacity " + Keyed(StyleKeys.Span(Upper, StyleTarget.Opacities.Length), true) + " · hatch " + Keyed(StyleKeys.Span(Home, StyleTarget.Hatches.Length), true)), -1, fill);
@@ -492,6 +492,29 @@ namespace hopperdraw
                 cell.Click = () => target.StrokeDash(v);
                 cell.Draw = (g, r) => LineSample(g, r, Ink, 2 * s, v, s);
             }
+            var clouds = target.CloudShapes;
+            layout.Heading("Cloud");
+            bool sameCloud = StyleTarget.Uniform(clouds, x => x.CloudSize, out double cloud);
+            for (int i = 0; i < StyleTarget.Clouds.Length; i++)
+            {
+                int index = i; double v = StyleTarget.Clouds[i];
+                var cell = RowCell(layout, layout.Share(4), 36, Home, i+5, keyed);
+                string label = new[] { "Off", "S", "M", "L" }[i];
+                cell.Tip = clouds.Length == 0 ? "Cloud applies to closed shapes and text boxes" : "Cloud: " + StyleTarget.CloudNames[i];
+                cell.Checked = sameCloud && cloud == v; cell.Keep = true;
+                cell.Click = clouds.Length == 0 ? (Action)null : () => target.Cloud(v);
+                cell.Draw = (g, r) =>
+                {
+                    // Fixed device-sized samples: canvas units would overwhelm these tiny cells.
+                    var sample = new FrameShape(new Rhino.Geometry.Point3d(r.Left+10*s,r.Top+6*s,0),
+                        new Rhino.Geometry.Point3d(r.Right-10*s,r.Top+6*s,0), new Rhino.Geometry.Point3d(r.Right-10*s,r.Top+17*s,0),
+                        new Rhino.Geometry.Point3d(r.Left+10*s,r.Top+17*s,0)) { CloudSize = index == 0 ? 0 : (5+index*3)*s };
+                    ShapeRenderer.Render(g, sample, Ink, s);
+                    using (var brush = new SolidBrush(clouds.Length > 0 ? Ink : Muted))
+                    using (var format = new StringFormat { Alignment = StringAlignment.Center })
+                        g.DrawString(label, UiFont(FontStyle.Regular, 10), brush, new RectangleF(r.Left,r.Top+23*s,r.Width,13*s), format);
+                };
+            }
         }
         private void BuildFill(FlyoutLayout layout, StyleTarget target)
         {
@@ -607,7 +630,7 @@ namespace hopperdraw
         {
             Sample.TopLeft = new Rhino.Geometry.Point3d(box.Left, box.Top, 0); Sample.TopRight = new Rhino.Geometry.Point3d(box.Right, box.Top, 0);
             Sample.BottomRight = new Rhino.Geometry.Point3d(box.Right, box.Bottom, 0); Sample.BottomLeft = new Rhino.Geometry.Point3d(box.Left, box.Bottom, 0);
-            style.CopyStyleTo(Sample); Sample.StrokeVisible = false; Sample.HatchScale = hatchScale;
+            style.CopyStyleTo(Sample); Sample.StrokeVisible = false; Sample.HatchScale = hatchScale; Sample.CloudSize = 0;
             using (var path = AnnotationGeometry.Boundary(Sample)) HatchRenderer.Paint(g, Sample, path);
         }
         private static void HatchSample(Graphics g, RectangleF r, HatchPattern pattern, float s)

@@ -12,7 +12,7 @@ namespace hopperdraw
     {
         // Flattened strokes are cached per leaf and rebuilt only when its control points/closure change, so hover
         // and picking do not rebuild a GraphicsPath for every shape on every mouse move.
-        private sealed class StrokeCache { internal PointF[] Key; internal bool Closed; internal PointF[] Stroke; internal RectangleF Bounds; }
+        private sealed class StrokeCache { internal PointF[] Key; internal bool Closed; internal double CloudSize; internal PointF[] Stroke; internal RectangleF Bounds; }
         private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<DrawShape, StrokeCache> Cache =
             new System.Runtime.CompilerServices.ConditionalWeakTable<DrawShape, StrokeCache>();
         private static bool IsClosed(DrawShape shape) => shape is TextShape || shape is FrameShape || shape is PolylineShape p && p.Closed || shape is CurveShape c && c.Closed;
@@ -20,9 +20,9 @@ namespace hopperdraw
         {
             bool closed = IsClosed(shape);
             var cache = Cache.GetValue(shape, _ => new StrokeCache());
-            if (cache.Key != null && cache.Closed == closed && SamePoints(shape, cache.Key)) return cache;
+            if (cache.Key != null && cache.Closed == closed && cache.CloudSize == shape.CloudSize && SamePoints(shape, cache.Key)) return cache;
             var points = BoundaryPoints(shape);
-            cache.Key = points; cache.Closed = closed;
+            cache.Key = points; cache.Closed = closed; cache.CloudSize = shape.CloudSize;
             cache.Stroke = points.Length < 2 || !ShapeRenderer.ValidPoints(points) ? null : Flatten(shape);
             cache.Bounds = Bounds(cache.Stroke);
             return cache;
@@ -82,6 +82,11 @@ namespace hopperdraw
             }
             else if (IsClosed(shape) && points.Length > 2) path.AddPolygon(points);
             else path.AddLines(points);
+            if (shape.SupportsCloud && shape.CloudSize > 0)
+            {
+                var cloud = RevisionCloud.Decorate(path, points, shape.CloudSize, shape is CurveShape);
+                if (cloud != null) { path.Dispose(); return cloud; }
+            }
             return path;
         }
         private static PointF[] Flatten(DrawShape shape)
@@ -140,7 +145,7 @@ namespace hopperdraw
                 return children.Length>0 && (crossing ? children.Any(c=>InRectangle(c,rect,true,baseWidth,interior)) : children.All(c=>InRectangle(c,rect,false,baseWidth,interior)));
             }
             float half=baseWidth<=0 || !shape.StrokeVisible ? 0 : StyleValidation.EffectiveWidth(baseWidth,shape.ThicknessMultiplier)/2;
-            if (shape is TextShape)
+            if (shape is TextShape && !(shape.SupportsCloud && shape.CloudSize > 0))
             {
                 var bounds = shape.LayoutBounds; bounds.Inflate(half, half);
                 if (!crossing) return rect.Contains(bounds);

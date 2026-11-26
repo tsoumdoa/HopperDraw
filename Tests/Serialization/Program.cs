@@ -44,7 +44,7 @@ internal static class Program
     {
         if (shape is OpaqueShape o) return o.Payload.Serialize_Xml();
         return shape.GetType().Name + shape.PersistentId + ":" + shape.ThicknessMultiplier + ":" + shape.LineType + ":" + shape.OverrideColor?.ToArgb() +
-            ":" + shape.StrokeVisible + ":" + shape.FillColor?.ToArgb() + ":" + shape.FillOpacity + ":" + shape.Hatch + ":" + shape.HatchScale + ":" + shape.HatchBackground?.ToArgb() +
+            ":" + shape.StrokeVisible + ":" + shape.CloudSize + ":" + shape.FillColor?.ToArgb() + ":" + shape.FillOpacity + ":" + shape.Hatch + ":" + shape.HatchScale + ":" + shape.HatchBackground?.ToArgb() +
             (shape is DrawShapeGroup g ? string.Join(";", g.Children.Select(Fingerprint)) : string.Join(";", shape.GetPoints().Select(p => p.ToString()))) +
             (shape is TextShape t ? t.Text+":"+t.BoxWidth+":"+t.StylePreset+":"+t.SizeMultiplier+":"+t.Bold+":"+t.Italic+":"+t.TextColorOverride?.ToArgb() : "") +
             (shape is CurveShape c ? c.Closed.ToString() : shape is PolylineShape l ? l.Closed.ToString() : "");
@@ -76,6 +76,7 @@ internal static class Program
         result.FillOpacity=new[]{.1,.25,.5,.75,1}[random.Next(5)];
         result.Hatch=(HatchPattern)random.Next(11); result.HatchScale=new[]{.5,1,2,4}[random.Next(4)];
         result.HatchBackground=random.Next(2)==0 ? (Color?)null : Color.FromArgb(random.Next());
+        result.CloudSize=StyleTarget.Clouds[random.Next(4)];
         return result;
     }
     private static GH_IWriter FirstRecord(GH_LooseChunk root) => (GH_IWriter)root.FindChunk("HopperDraw").FindChunk("Shapes").FindChunk("Shape", 0);
@@ -253,6 +254,7 @@ internal static class Program
         CanvasMenuTests.Run();
         MenuCursorHudTests.Run();
         FillHatchTests.Run();
+        RevisionCloudTests.Run();
         TextTests.Run();
         StyleBarTests.Run();
         return Finish();
