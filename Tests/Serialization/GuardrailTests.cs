@@ -49,7 +49,7 @@ internal static class GuardrailTests
                 Program.Check(copy.Shapes[0].PersistentId != copy.Shapes[1].PersistentId, "extension copied known ID on duplicate");
             }
         });
-        Program.Test("snapshot undo swaps each mutation without losing IDs or selection state", () =>
+        Program.Test("nested style undo/redo preserves IDs and clears selection", () =>
         {
             var c = new HopperDraw();
             var inner = new DrawShapeGroup();

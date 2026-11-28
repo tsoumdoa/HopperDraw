@@ -37,33 +37,33 @@ Scope: `ux/canvas-interaction`, based on main `80fed18`, implemented only in the
 | A1 pre-WinForms HWND input; retain double-D | Done. Shared hook and real message-loop regressions. |
 | A2 per-canvas controller, per-owner shapes/selection | Done. Controller registry with lifecycle cleanup. |
 | A3 claimed GH interaction, no replacement, native tests, active clicks, auto-pan, double-click ordering | Done with conservative icon guard deviation below. Actual GH dispatch remains live-only. |
-| A4 handles > native > Overlay > Groups; owner/shape ordering; actual strokes | Done. Stable picking and path helpers, pure geometry/picking tests. |
-| B unselected replace / selected mixed preserve | Done. All modifier/selection combinations tested. |
+| A4 handles > native > Overlay > Groups; owner/shape ordering; actual strokes | Done. Stable picking and path helpers. |
+| B unselected replace / selected mixed preserve | Done. |
 | B Shift add, Ctrl remove, Shift+Ctrl toggle; handles edit alone | Done. Selection helper and snapshot geometry edit. |
 | B native pre-press replacement | Done. Hook reads the native top-level selection before GH changes it. Live-only. |
-| B actual native window/crossing session, release modifiers, empty click, no Escape/replacement completion | Done. Tracks the actual interaction and its last integer-rounded rectangle, including synthetic auto-pan moves; stroke helpers tested. Session behavior live-only. |
+| B actual native window/crossing session, release modifiers, empty click, no Escape/replacement completion | Done. Tracks the actual interaction and its last integer-rounded rectangle, including synthetic auto-pan moves. Session behavior live-only. |
 | B Ctrl+A / Ctrl+D, idle Escape | Done (revised after review). Ctrl+A/Ctrl+D extend GH's Select All/Deselect All to annotations and then fall through to GH's own command (no menu lookups). Ctrl+Shift+A is GH Grow Selection and is not intercepted. Escape yields to GH's preview-boundary clearing. |
 | B opaque all-or-nothing geometry block | Done across every selected annotation owner and annotation-led native pivots. Native-led GH movement remains native; annotations do not partially transform. |
-| C annotation-led mixed movement, expanded groups, H/V, absolute snapshots | Done. Snapshot/no-op/revert tests; native layout/group expansion live-only. |
+| C annotation-led mixed movement, expanded groups, H/V, absolute snapshots | Done. Native layout/group expansion live-only. |
 | C one native-pivot + per-owner annotation record; true Escape/focus/capture/document cancellation | Done. Commit-on-release and rollback; native undo dispatch live-only. |
 | C native follow, group anchor, Alt toggle/copy, key/move/release/auto-pan sync | Done. Uses a non-group anchor. Auto-pan sync is guarded translation before Groups paint, not a timer. Live-only. |
 | C verified RecordAdded attachment; safe no-record fallback | Done. Checks document, active interaction identity, release dispatch, creation time, unseen record GUID, Drag name, pivot-action count/types; adds prepared annotation-only actions once. Missing record reverts annotations. No MergeRecords. Live-only. |
 | D focused commands before menus; mixed Delete/Backspace | Done. Native removal snapshot plus surviving-owner shape actions; owners removed natively retain shapes in their native snapshot. Host removal/undo remains live-only. |
-| D layered physical Escape; Enter / drafting Backspace | Done. Pure layer/draft tests and real-loop repeat suppression. |
-| E right-press deferred selection, contextual release, native pan/Ctrl zoom handoff | Done; host handoff/menu suppression live-only. Transport is exercised in the message loop. |
+| D layered physical Escape; Enter / drafting Backspace | Done. Real-loop Escape guardrail. |
+| E right-press deferred selection, contextual release, native pan/Ctrl zoom handoff | Done; host handoff/menu suppression live-only.   |
 | E exact GH_CanvasMenuStrip class | Partially: impossible through the pinned public API (internal type). Uses its public ContextMenuStrip base with the same standard WinForms appearance. No reflection/private API dependency. |
-| E all selection style menus, swatches/recent/custom/default, current/mixed states, previews | Done. Menu construction/action tests, no-op boundary tests. Custom OS dialog is live-only. |
+| E all selection style menus, swatches/recent/custom/default, current/mixed states, previews | Done. Custom OS dialog is live-only. |
 | E uniform-style-to-pen; owner-local stable arrange; group/ungroup; duplicate/delete | Done. Cross-owner grouping disabled with explanation; shared transactions across owners. |
-| E drawing-mode Tool/Pen/Reset/Exit; wired M disable, persistent API undo | Done. Tool menu API/state tested detached; GH undo/expiration live-only. |
+| E drawing-mode Tool/Pen/Reset/Exit; wired M disable, persistent API undo | Done. GH undo/expiration live-only. |
 | E component Drawing/Selection/housekeeping; remove Cycle line type menu | Done. Shared builders. |
-| E session sticky pen independent of selection styling | Done. Completion/cancellation/exit/style regression test. |
-| F line/frame drag and click-click | Done. Screen-threshold draft tests. |
-| F polyline/curve open double-click/Enter; close-on-start >=3 distinct; Backspace/ring | Done. Draft transitions tested; ring/real host sequence live-only. |
-| F Shift 45-degree drawing/vertex edits; square/aspect frames; H/V whole move | Done. Pure snapping/edit tests; live visual checks listed. |
+| E session sticky pen independent of selection styling | Done. |
+| F line/frame drag and click-click | Done. |
+| F polyline/curve open double-click/Enter; close-on-start >=3 distinct; Backspace/ring | Done. Ring/real host sequence live-only. |
+| F Shift 45-degree drawing/vertex edits; square/aspect frames; H/V whole move | Done. Live visual checks listed. |
 | F no GH window/deselect/search during drawing | Done via deliberate active interactions and validator; real GH ordering live-only. |
 | G cursors and clean reset | Done; actual GH cursor/DPI behavior live-only. |
 | G screen-space DPI HUD | Done; live appearance/placement remains unverified. |
-| G selected halo/dashed outline, subtle hover, unchanged stored color | Done. Existing bitmap tests pass; live visibility checks listed. |
+| G selected halo/dashed outline, subtle hover, unchanged stored color | Done. Bitmap render guardrail; live visibility checks listed. |
 | G annotation double-click blocks search without geometry edits | Done. Validator and active double-click handling. Live GH check required. |
 | H reduced automated guardrails | Nine Serialization cases and five ShortcutRouting cases; broader canvas UX behavior is covered by the live checklist. |
 | H README and comprehensive Canvas UX live section | Done. No live verification is claimed. |

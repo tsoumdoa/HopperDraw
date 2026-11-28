@@ -3,6 +3,8 @@
     <OutputType>Exe</OutputType>
     <TargetFramework>net48</TargetFramework>
     <UseWindowsForms>true</UseWindowsForms>
+    <!-- Callbacks the plugin assigns are unused by the remaining routing tests. -->
+    <NoWarn>CS0649</NoWarn>
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../../Enums/*.cs" Link="Enums/%(Filename)%(Extension)" />
