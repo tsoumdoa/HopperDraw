@@ -22,12 +22,9 @@ Scope: `ux/canvas-interaction`, based on main `80fed18`, implemented only in the
 | `Utilities/DelayedAction.cs` | One cancellable UI-thread timer. The controller uses it for D with a selection outside drawing mode: the press is left to the D D gesture and the style change runs after the double-press window unless a key, a mouse button, focus loss or a different selection intervened. |
 | `Utilities/GeometryUtilities.cs` | Aspect constraint also handles axis-aligned frame edits. |
 | `Utilities/ShapeRenderer.cs` | Actual-stroke selection halo/dashed green outline and subtle hover; stored style remains unchanged. |
-| `Tests/InputRegression/CanvasUxTests.cs` | Pure selection, draft, move/rollback, opaque, geometry, picking, snapping and pen regressions. |
-| `Tests/InputRegression/Program.cs` | Existing tests retained; intentional Escape semantics and native double-click information updated. |
-| `Tests/Serialization/CanvasMenuTests.cs` | Menu construction/checks/mixed/enablement, wired tool API, no-op boundary, multi-owner snapshot swaps, stable arrangement. |
-| `Tests/Serialization/Program.cs` | Invokes the new menu/model suite. |
-| `Tests/InputRegression/InputRegression.csproj`, `Tests/Serialization/Serialization.csproj` | Compile the transient component partial alongside the real plugin sources. |
-| `Tests/ShortcutRouting/Program.cs` | Real WinForms loop: hook-before-down, down/double-click/up order, pre-menu Delete/Ctrl+A, physical Escape repeats, right-drag message transport and actual capture loss. |
+| `Tests/Serialization/Program.cs`, `Tests/Serialization/GuardrailTests.cs` | Nine GH-backed guardrails for archive preservation, nested snapshot undo, bitmap rendering and real interaction teardown. |
+| `Tests/Serialization/Serialization.csproj` | Compiles the transient component partial alongside the real plugin sources and GH assemblies. |
+| `Tests/ShortcutRouting/Program.cs` | Five real WinForms keyboard guardrails: native Escape, queued double-D, pre-menu Delete/Ctrl+A, inline editing and final-owner cleanup. |
 | `README.md` | Rewritten drawing/editing/menu behavior, transactions and integration limitations. |
 | `docs/live-test-checklist.md` | Corrected obsolete behaviors and added twelve Canvas UX live groups, including every host-only requirement. |
 
@@ -68,9 +65,7 @@ Scope: `ux/canvas-interaction`, based on main `80fed18`, implemented only in the
 | G screen-space DPI HUD | Done; live appearance/placement remains unverified. |
 | G selected halo/dashed outline, subtle hover, unchanged stored color | Done. Existing bitmap tests pass; live visibility checks listed. |
 | G annotation double-click blocks search without geometry edits | Done. Validator and active double-click handling. Live GH check required. |
-| H InputRegression extension | Done: 12 new test cases plus the existing 14. |
-| H Serialization extension | Done: 6 new menu/model cases plus all existing cases. |
-| H ShortcutRouting extension | Done: 5 new real-loop cases; GH pan/undo remain explicitly live-only. |
+| H reduced automated guardrails | Nine Serialization cases and five ShortcutRouting cases; broader canvas UX behavior is covered by the live checklist. |
 | H README and comprehensive Canvas UX live section | Done. No live verification is claimed. |
 | Deferred arrowheads/cross-owner grouping/clipboard/text/fills/tool keys/Mac/mixed Alt-copy | Deferred as specified; no format additions or release bump. |
 
@@ -80,7 +75,7 @@ Scope: `ux/canvas-interaction`, based on main `80fed18`, implemented only in the
 - Public pinned GH APIs expose native relevant-object and widget hit tests, but not abort/cluster icon hit tests. The controller yields in aborted/processing documents and reserves the top-left 100 DPI-scaled pixels inside cluster documents. This conservative area is broader than the icon. MRU panels require no loaded document, so they cannot coexist with eligible owners. Ctrl+Alt yields through the Alt/info guard.
 - Native auto-pan sync uses `CanvasPrePaintGroups`, before either annotation channel, for translation only when the native anchor delta changes. Other follow sync runs after mouse/key handling and before commit. No timers or blind undo merging were added.
 - The existing fallback event path is retained for unsupported non-Windows builds; the new UX contract targets Windows. Four-target compilation does not establish Mac support.
-- Existing Escape expectations changed intentionally: cancel an unfinished shape before exiting mode, and respect an Escape consumed by another handler. Direct fallback double-click tests now supply native click counts and use an empty point when testing search outside drawings. Existing archive/model/hook tests otherwise retain their assertions.
-- Full verification builds all four TFMs and runs all three executable test projects plus the seven hook snapshot cases. Tests use real plugin sources/reference assemblies, without constructing a headless GH_Document. Live undo server dispatch, GH group/Alt/auto-pan movement, native deletion/wires, contextual pan/zoom, dialogs, focus/lifecycle, search suppression, cursors, HUD and DPI must still be checked in Rhino using the Canvas UX section.
+- Escape cancels an unfinished shape before exiting mode and respects an Escape consumed by another handler. The reduced native keyboard suite retains the layered cancellation guardrail.
+- Full verification builds all four TFMs and runs both executable test projects. Tests use real plugin sources/reference assemblies, without constructing a headless GH_Document. Live undo server dispatch, GH group/Alt/auto-pan movement, native deletion/wires, contextual pan/zoom, dialogs, focus/lifecycle, search suppression, cursors, HUD and DPI must still be checked in Rhino using the Canvas UX section.
 
-Final automated counts: InputRegression 26, Serialization/model 47, ShortcutRouting 26, hook snapshots 7 (106 cases total); all pass. The final Full verifier line is recorded in the implementation handoff.
+Current automated guardrails: Serialization/model 9 and ShortcutRouting 5 (14 cases total). Quick verification builds the Windows Debug target and runs both projects.

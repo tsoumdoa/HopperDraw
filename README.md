@@ -136,9 +136,9 @@ pwsh -NoProfile -File scripts/verify.ps1 -Quick
 pwsh -NoProfile -File scripts/verify.ps1 -Full
 ```
 
-Quick builds `net8.0-windows` Debug and runs every project under `Tests` by exit code, plus the hook snapshot script suite. Full builds Release for `net8.0-windows`, `net7.0-windows`, `net7.0`, and `net48`, then runs all tests. Both check that `yak/manifest.yml` matches the project version. Test projects are included in `hopperborder.slnx`; tests use the real plugin sources and GH assemblies without constructing a headless GH_Document.
+Quick builds `net8.0-windows` Debug and runs two test projects: Serialization (9 archive/model/bitmap/interaction guardrails using GH assemblies) and ShortcutRouting (5 native WinForms keyboard guardrails). Full builds Release for all four target frameworks, then runs both projects. Both check the manifest version. Tests compile real plugin sources and are included in `hopperborder.slnx`.
 
-The installer sets `core.hooksPath` to `.githooks`. Pre-commit verifies the staged snapshot with Quick; pre-push runs Full on each distinct outgoing commit tip. Working-tree changes cannot hide snapshot failures. The hooks use the shared NuGet cache and leave the index/worktree intact. `Tests/Hooks/snapshot-tests.ps1` checks isolation, different/multiple/duplicate pushed refs and deletions in disposable repositories. There is no hosted CI.
+The installer sets `core.hooksPath` to `.githooks`. Pre-commit verifies the staged snapshot with Quick; pre-push runs Full on each distinct outgoing commit tip. Working-tree changes cannot hide snapshot failures. The hooks use the shared NuGet cache and leave the index/worktree intact. There is no hosted CI.
 
 Implementation lives in the component/session files, `Shapes` (models and v1 serialization), and `Utilities` (canvas input, transactions, layout, menus and feedback). Tests compile the real sources; the unsupported fallback event path remains in `HopperDraw.cs`.
 

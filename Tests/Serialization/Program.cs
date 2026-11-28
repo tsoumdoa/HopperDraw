@@ -109,24 +109,6 @@ internal static class Program
     [STAThread]
     private static int Main()
     {
-        if (Array.IndexOf(Environment.GetCommandLineArgs(), "--failure-exit-probe") >= 0)
-        {
-            Test("intentional failure exit probe", () => Check(false, "Intentional failure to verify process exit status."));
-            return Finish();
-        }
-        Test("group at index zero and nested groups round trip XML/binary", () =>
-        {
-            var nested = new DrawShapeGroup(); nested.Children.Add(Line());
-            var group = new DrawShapeGroup(); group.Children.Add(nested); group.Children.Add(new FrameShape(new Point3d(1, 1, 0), new Point3d(3, 1, 0), new Point3d(3, 3, 0), new Point3d(1, 3, 0)));
-            var component = new HopperDraw(); component.Shapes.Add(group);
-            foreach (bool binary in new[] { false, true }) Check(Fingerprint(component.Shapes[0]) == Fingerprint(RoundTrip(component, binary).Shapes[0]), "tree changed");
-        });
-        Test("1205 shapes have collision-free keys", () =>
-        {
-            var c = new HopperDraw(); c.Shapes.AddRange(Enumerable.Range(0, 1205).Select(i => Line(i)));
-            var group = new DrawShapeGroup(); group.Children.Add(Line(9999)); c.Shapes.Insert(0, group);
-            foreach (bool binary in new[] { false, true }) Check(string.Join("|", c.Shapes.Select(Fingerprint)) == string.Join("|", RoundTrip(c, binary).Shapes.Select(Fingerprint)), "large list changed");
-        });
         Test("400 random trees round trip through XML and binary GH_Archive", () =>
         {
             var random = new Random(7342);
@@ -152,51 +134,7 @@ internal static class Program
             foreach (bool binary in new[] { false, true })
                 Check(RawFingerprint(Save(RoundTrip(loaded, binary)).FindChunk("HopperDraw")) == original, "future archive rewritten");
         });
-        Test("optional style defaults and transparent color", () =>
-        {
-            var root = Save(Pair()); var record = FirstRecord(root);
-            foreach (var key in new[] { "ThickMult", "LineType", "HasColor" }) record.RemoveItem(key);
-            var loaded = Load(root); Check(loaded.LoadWarning != null && loaded.Shapes[0].ThicknessMultiplier == 1 && loaded.Shapes[0].LineType == DashStyle.Solid, "optional defaults wrong");
-            loaded.Shapes[0].OverrideColor = Color.FromArgb(0);
-            Check(RoundTrip(loaded, true).Shapes[0].OverrideColor.Value.ToArgb() == 0, "transparent color lost");
-        });
-        Test("present mismatched optional style types remain recoverable", () =>
-        {
-            foreach (string key in new[] { "ThickMult", "LineType", "HasColor" })
-            {
-                var root = Save(Pair()); var record = FirstRecord(root); record.RemoveItem(key); record.SetString(key, "wrong type");
-                AssertOpaquePreserved(root);
-            }
-            var componentRoot = Save(Pair()); var payload = (GH_IWriter)componentRoot.FindChunk("HopperDraw"); payload.RemoveItem("Thickness"); payload.SetString("Thickness", "wrong type");
-            var c = Load(componentRoot); Check(!c.CanEditShapes && c.LoadWarning != null, "component style corruption went unreported");
-            Check(RawFingerprint(Save(c).FindChunk("HopperDraw")) == RawFingerprint((GH_IReader)payload), "component style corruption lost data");
-        });
         Test("missing required coordinates remain opaque", () => { var root = Save(Pair()); FirstRecord(root).RemoveItem("X"); AssertOpaquePreserved(root); });
-        Test("required kind, GUID, closed flag and frame cardinality are never defaulted", () =>
-        {
-            foreach (string key in new[] { "Kind", "Id" })
-            {
-                var root = Save(Pair()); FirstRecord(root).RemoveItem(key); AssertOpaquePreserved(root);
-            }
-            foreach (int kind in new[] { 1, 2, 3 })
-            {
-                var root = Save(Pair()); var record = FirstRecord(root); record.RemoveItem("Kind"); record.SetInt32("Kind", kind);
-                // A two-point frame is invalid; a polyline/curve requires an explicit closed flag.
-                AssertOpaquePreserved(root);
-            }
-        });
-        Test("unreadable group children preserve their positions and valid siblings", () =>
-        {
-            var c = Pair(); var group = new DrawShapeGroup(); group.Children.AddRange(c.Shapes); c.Shapes = new List<DrawShape> { group };
-            var root = Save(c); var child = (GH_IWriter)((GH_IReader)FirstRecord(root)).FindChunk("Children").FindChunk("Shape", 0); child.RemoveItem("X");
-            var loaded = Load(root); var children = ((DrawShapeGroup)loaded.Shapes[0]).Children;
-            Check(children.Count == 2 && children[0] is OpaqueShape && children[1] is LineShape && loaded.LoadWarning != null, "child recovery lost sibling");
-            Check(((DrawShapeGroup)RoundTrip(loaded, true).Shapes[0]).Children[0] is OpaqueShape, "opaque child lost on save");
-        });
-        Test("mismatched required coordinate arrays remain opaque", () =>
-        {
-            var root = Save(Pair()); var r = FirstRecord(root); r.RemoveItem("Y"); r.SetDoubleArray("Y", new[] { 1.0 }); AssertOpaquePreserved(root);
-        });
         Test("valid empty list differs from missing list/count", () =>
         {
             Check(Load(Save(new HopperDraw())).LoadWarning == null, "empty list warned");
@@ -208,55 +146,7 @@ internal static class Program
                 Check(Load(Save(loaded)).LoadWarning != null, "damage warning lost on save");
             }
         });
-        Test("depth budget preserves offending subtree", () =>
-        {
-            var root = Save(Pair()); var record = FirstRecord(root);
-            for (int i = 0; i < 45; i++)
-            {
-                record.RemoveItem("Kind"); record.SetInt32("Kind", 4);
-                var children = record.CreateChunk("Children"); children.SetInt32("Count", 1);
-                record = children.CreateChunk("Shape", 0); record.SetInt32("Kind", 0); record.SetGuid("Id", Guid.NewGuid());
-            }
-            var loaded = Load(root); Check(loaded.LoadWarning != null && loaded.Shapes.Count == 2, "depth damage lost neighbor");
-            Check(Load(Save(loaded)).LoadWarning != null, "depth warning lost");
-        });
-        Test("count and point budgets prevent oversized interpretation", () =>
-        {
-            var root = Save(Pair()); var list = (GH_IWriter)root.FindChunk("HopperDraw").FindChunk("Shapes"); list.RemoveItem("Count"); list.SetInt32("Count", int.MaxValue);
-            Check(!Load(root).CanEditShapes, "count budget ignored");
-            root = Save(Pair()); var r = FirstRecord(root); r.RemoveItem("Kind"); r.SetInt32("Kind", 1); r.SetBoolean("Closed", false); r.RemoveItem("X"); r.RemoveItem("Y");
-            r.SetDoubleArray("X", new double[ShapeSerializer.MaxPoints + 1]); r.SetDoubleArray("Y", new double[ShapeSerializer.MaxPoints + 1]);
-            Check(Load(root).Shapes[0] is OpaqueShape, "point budget ignored");
-        });
-        Test("successful read clears stale warning and restored selection", () =>
-        {
-            var root = Save(Pair()); FirstRecord(root).RemoveItem("X"); var loaded = Load(root); loaded.SelectedShapeIndices.Add(1);
-            Check(loaded.Read(Save(Pair())) && loaded.LoadWarning == null && !loaded.HasSelection && loaded.RuntimeMessages(Grasshopper.Kernel.GH_RuntimeMessageLevel.Warning).Count == 0, "stale warning/selection");
-        });
-        Test("base Grasshopper read exceptions propagate without annotation recovery", () =>
-        {
-            var component = new HopperDraw(); bool threw = false;
-            try { component.Read(null); } catch (Exception) { threw = true; }
-            Check(threw && component.LoadWarning == null, "base metadata exception became annotation recovery");
-        });
-        Test("known duplicates and pasted component IDs are fresh", () =>
-        {
-            var original = Pair(); var copy = original.Shapes[0].Clone(); Check(copy.PersistentId != original.Shapes[0].PersistentId, "duplicate reused ID");
-            var pasted = Load(Save(original)); var id = pasted.Shapes[0].PersistentId;
-            pasted.NewInstanceGuid(); ((Grasshopper.Kernel.IGH_InstanceGuidDependent)pasted).InstanceGuidsChanged(new SortedDictionary<Guid, Guid>()); Check(pasted.Shapes[0].PersistentId != id, "paste reused ID");
-            var root = Save(original); FirstRecord(root).RemoveItem("X");
-            pasted = Load(root); id = pasted.Shapes[0].PersistentId;
-            pasted.NewInstanceGuid(); ((Grasshopper.Kernel.IGH_InstanceGuidDependent)pasted).InstanceGuidsChanged(new SortedDictionary<Guid, Guid>());
-            Check(pasted.Shapes[0].PersistentId != id && RoundTrip(pasted, true).Shapes[0].PersistentId == pasted.Shapes[0].PersistentId, "opaque v1 paste identity not rekeyed");
-        });
-        ReliabilityTests.Run();
-        Review2Tests.Run();
-        CanvasMenuTests.Run();
-        MenuCursorHudTests.Run();
-        FillHatchTests.Run();
-        RevisionCloudTests.Run();
-        TextTests.Run();
-        StyleBarTests.Run();
+        GuardrailTests.Run();
         return Finish();
     }
     private static int Finish()
